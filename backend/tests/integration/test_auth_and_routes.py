@@ -28,6 +28,13 @@ def test_auth_guard_blocks_without_token(client):
     assert response.status_code == 401
 
 
+def test_version_endpoint_is_public_and_reports_env(client):
+    response = client.get("/version")
+    assert response.status_code == 200
+    payload = response.json()
+    assert "version" in payload and "env" in payload and "python_version" in payload
+
+
 def test_advisor_with_authorized_client(authorized_client):
     response = authorized_client.post("/api/simulate/advisor", json={"model_type": "pyramid"})
     assert response.status_code == 200
