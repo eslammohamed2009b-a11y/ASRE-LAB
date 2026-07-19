@@ -113,6 +113,73 @@ Status values per item:
 Project is `FINAL GO` only if all six gates above are `GO`.
 If any gate remains `NO-GO`, the project remains in pre-production status.
 
+## Latest Snapshot (2026-07-19, licensing + CI validation + durable persistence session)
+
+> This section supersedes the "Current Snapshot" below for gates 3 and 5
+> only (durable persistence/ownership work done this session). Gates 1, 2,
+> 6 are unchanged from the prior snapshot, kept further down for
+> traceability.
+
+- **3) Full persistence/replayability: `NO-GO` (upgraded from a hard
+  blocker to code-complete-but-externally-unverified)**
+  - Done: `app/core/repository.py` — a `PersistenceRepository` interface
+    with a `SupabaseRepository` production adapter and a
+    `LocalSQLiteRepository` deterministic adapter backed by a real on-disk
+    SQLite file. New `database/schema.sql` migration adds a `design_files`
+    table (id, design_model_id, experiment_id, user_id, file_format,
+    storage_path, file_size_bytes, checksum, created_at) with RLS.
+    Restart-durability and multi-instance state sharing are proven with
+    real unit tests (a fresh repository object reads data written by a
+    prior, discarded one, over the same file).
+  - Missing: no live Supabase project is connected in this environment
+    (confirmed via repeated secret scans — no `.env`, only placeholders in
+    `.env.example`). `tests/external/test_supabase_repository_live.py`
+    exists and is correctly marked `@pytest.mark.external` +
+    `skipif(no credentials)` — it is **skipped, not passing** in this
+    session. This remains `NO-GO` until it is actually executed against a
+    real project.
+- **5) JWT auth and ownership isolation: `NO-GO` (materially strengthened)**
+  - Done: the in-process `ownership_store.py` (disclosed non-durable dict)
+    was **removed** and replaced by the durable repository above.
+    `export_stl` now validates `design_id` as a real UUID before any
+    lookup (malformed ids fail closed with 404, same as unknown/foreign
+    ids — no format oracle), recomputes the served path from the
+    validated id and checks it resolves inside the known export
+    directory (path-traversal defense), and sets an explicit
+    `model/stl` media type. New integration tests cover: user A can
+    download their own file, user B cannot (404), unknown id (404),
+    malformed/non-uuid id (404), a path-traversal-shaped id (404), and
+    ownership surviving a fresh repository object (restart simulation).
+  - Missing: still no direct enumeration/brute-force-rate-limit test; RLS
+    policies exist in `design_files`/`experiments` migrations but are
+    defense-in-depth only (the backend uses a single shared Supabase
+    client without per-request auth binding, documented explicitly in
+    `app/core/repository.py`) — the real enforcement is the application-
+    layer ownership check, which is what is tested.
+- **Remote CI status**: `.github/workflows/deploy.yml`'s `test-backend`
+  job was updated to also run `pytest -m benchmark` and `pytest -m e2e`
+  (previously only `unit`+`integration`), so it now exercises the same
+  31-test suite validated locally. `gh auth login` was completed this
+  session (device flow), and the workflow was triggered via
+  `gh workflow run` — the resulting run
+  (https://github.com/eslammohamed2009b-a11y/ASRE-LAB/actions/runs/29708262236)
+  ended with `status: completed`, `conclusion: startup_failure`, and zero
+  jobs were ever scheduled (`.../jobs` returns `total_count: 0`).
+  `repos/.../actions/permissions` confirms Actions are enabled
+  (`allowed_actions: all`) for the repository, so this is not a
+  disabled-Actions or workflow-syntax problem — it is consistent with a
+  GitHub-side hold on hosted-runner provisioning for a brand-new account
+  (a documented GitHub behavior). **This is reported as `BLOCKED`, not
+  passing** — no CI run has been observed to actually execute the test
+  suite remotely yet.
+- **Licensing**: `GO`. Root `LICENSE` (proprietary, source-available, all
+  rights reserved), `README.md` proprietary notice + Repository Status
+  section, `frontend/package.json` set to `"license": "UNLICENSED"`.
+- **Local test suite**: **31 passed**, 0 failed (7 unit, 18 integration, 4
+  e2e, 2 benchmark), plus 1 `external` test correctly skipped/BLOCKED —
+  re-run fresh in this session from `backend/.venv311` (Python 3.11.15,
+  real CadQuery 2.4.0/OCP 7.7.2, no stub).
+
 ## Current Snapshot (2026-07-19, updated after REAL CadQuery kernel validation)
 
 > The evidence below supersedes the prior "Local Test Execution Evidence"

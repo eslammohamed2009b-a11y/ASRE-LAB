@@ -21,6 +21,28 @@
   in [GO_NO_GO_CHECKLIST.md](GO_NO_GO_CHECKLIST.md) — public visibility must
   never be read as an implied claim that every listed feature is complete.
 
+## Honest capability status
+
+Legend: **Validated** = executed locally/remotely with real evidence and
+passing. **Implemented, not externally validated** = code is real (no
+stubs/placeholders) but has not been exercised against live third-party
+infrastructure. **Partial** = some real functionality, known gaps.
+**Unsupported** = explicitly returns an error rather than a fabricated
+result. **Planned** = not yet built.
+
+| Area | Status | Evidence |
+|---|---|---|
+| Module 1 — parametric CAD generation (real CadQuery/OCP kernel) | Validated | 8 integration tests generate real geometry, export real STEP/STL, re-import and verify bounding boxes, and confirm parameter sensitivity — no CAD stub involved. |
+| Module 1 — ownership-isolated file download | Validated | Durable `app/core/repository.py` (Supabase adapter + SQLite-backed local adapter, not an in-process dict); integration tests cover cross-user isolation, unknown ids, malformed ids, and path-traversal attempts. |
+| Local backend test suite | Validated | 31 passed (7 unit, 18 integration, 4 e2e, 2 benchmark) — 0 failed, run from the pinned Python 3.11.15 / real-CadQuery environment. |
+| Remote CI (GitHub Actions) | **Blocked** | Workflow triggers and is accepted by GitHub (`enabled: true`), but the one run attempted so far ended with `conclusion: startup_failure` and zero jobs scheduled before any of our code ran — consistent with a GitHub-side new-account hold on hosted runners, not a defect in the workflow file or code. Not yet observed passing. |
+| Module 2 — thermal solver | Implemented, not externally validated | Real finite-difference steady-state solver (no fabricated values), executed in benchmark tests against analytical/grid-convergence checks locally. Not run against live production infrastructure. |
+| Module 2 — structural / CFD solvers | Unsupported | Explicitly return HTTP 501 rather than a placeholder result. |
+| Persistence — durable ownership (SQLite local adapter) | Validated | Restart-durability and multi-instance-sharing proven with a real on-disk SQLite file (not `:memory:`), by unit tests. |
+| Persistence — Supabase (live) | **Blocked** | No live Supabase credentials exist in this environment (confirmed via repeated secret scans); the adapter code, migration (`design_files` table), and a corresponding test exist and are skipped, not fabricated as passing. |
+| Async job queue (Celery/Redis) | Planned | Config exists; no live worker run, no load test. |
+| Licensing | Validated | Proprietary, source-available [LICENSE](LICENSE); public repo, all rights reserved. |
+
 New standalone project scaffold prepared separately from HydroSentinel.
 
 ## 1) Initialization and GitHub repository
