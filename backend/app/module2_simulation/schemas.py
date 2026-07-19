@@ -15,6 +15,13 @@ class AdvisorRequest(BaseModel):
 
 class AdvisorResponse(BaseModel):
     recommended: list[str]
+    supported: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Subset of `recommended` that has a validated numerical solver today "
+            "(currently only 'thermal'). The rest are advisory/planned only."
+        ),
+    )
 
 
 class SimulationRunRequest(BaseModel):

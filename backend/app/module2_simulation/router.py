@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from celery.result import AsyncResult
 
-from app.module2_simulation.simulation_advisor import recommend_analyses
+from app.module2_simulation.simulation_advisor import recommend_analyses, supported_analyses
 from app.core.auth import get_current_user
 from app.module2_simulation.schemas import (
     AdvisorRequest,
@@ -11,6 +11,7 @@ from app.module2_simulation.schemas import (
     SimulationRunResponse,
 )
 from app.module2_simulation.service import run_simulation_service
+from app.module2_simulation.solver_registry import UnsupportedAnalysisError
 from app.module2_simulation.tasks import run_simulation_task
 
 router = APIRouter(
@@ -27,7 +28,8 @@ router = APIRouter(
     description="Returns suggested simulation analyses based on geometry category.",
 )
 def advisor(payload: AdvisorRequest) -> AdvisorResponse:
-    return AdvisorResponse(recommended=recommend_analyses(payload.model_type))
+    recommended = recommend_analyses(payload.model_type)
+    return AdvisorResponse(recommended=recommended, supported=supported_analyses(recommended))
 
 
 @router.post(
@@ -37,7 +39,10 @@ def advisor(payload: AdvisorRequest) -> AdvisorResponse:
     description="Executes selected analysis immediately and returns field/summary metrics.",
 )
 def run_simulation(payload: SimulationRunRequest) -> SimulationRunResponse:
-    return run_simulation_service(payload)
+    try:
+        return run_simulation_service(payload)
+    except UnsupportedAnalysisError as exc:
+        raise HTTPException(status_code=501, detail=str(exc)) from exc
 
 
 @router.post(

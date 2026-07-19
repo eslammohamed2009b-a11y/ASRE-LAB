@@ -6,6 +6,7 @@ from app.module1_design.nl_parser import parse_design_request
 from app.module1_design.schemas import DesignVariationRequest
 from app.module2_simulation.schemas import AnalysisType, SimulationRunRequest
 from app.module2_simulation.service import run_simulation_service
+from app.module2_simulation.solver_registry import UnsupportedAnalysisError
 from app.module3_analysis.clustering import cluster_designs
 from app.module3_analysis.correlation import build_correlation_matrix
 from app.module3_analysis.synthesis import synthesize_report
@@ -28,6 +29,7 @@ def run_pipeline_flow(
     )
 
     design_results: list[dict[str, Any]] = []
+    skipped_analyses: set[str] = set()
     for idx, design in enumerate(generated_designs):
         if "error" in design:
             continue
@@ -42,14 +44,22 @@ def run_pipeline_flow(
 
         merged_metrics: dict[str, float] = {}
         for analysis in analyses:
-            sim_result = run_simulation_service(
-                SimulationRunRequest(
-                    design_id=design["design_id"],
-                    geometry_type=base_params.geometry_type.value,
-                    analysis_type=analysis,
-                    material=(base_params.material.value if base_params.material else "concrete"),
+            try:
+                sim_result = run_simulation_service(
+                    SimulationRunRequest(
+                        design_id=design["design_id"],
+                        geometry_type=base_params.geometry_type.value,
+                        analysis_type=analysis,
+                        material=(base_params.material.value if base_params.material else "concrete"),
+                    )
                 )
-            )
+            except UnsupportedAnalysisError:
+                # Do not fabricate a result for an analysis with no validated solver
+                # (see app.module2_simulation.solver_registry). Skip it and report the
+                # gap honestly in the pipeline response instead of silently pretending
+                # it ran or crashing the whole pipeline for the other, supported analyses.
+                skipped_analyses.add(analysis.value)
+                continue
             merged_metrics.update(sim_result.summary_metrics)
             if design_model_id:
                 persistence_service.store_simulation_metrics(
@@ -82,4 +92,5 @@ def run_pipeline_flow(
         "correlation": correlation_output,
         "insights": insights,
         "persistence_enabled": persistence_service.enabled,
+        "skipped_analyses": sorted(skipped_analyses),
     }
