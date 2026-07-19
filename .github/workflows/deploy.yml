@@ -98,6 +98,12 @@ jobs:
       - name: Run integration tests (real CadQuery/OCP required)
         run: pytest -m integration -q
 
+      - name: Run numerical solver benchmark tests
+        run: pytest -m benchmark -q
+
+      - name: Run end-to-end tests (real live uvicorn process over real HTTP)
+        run: pytest -m e2e -q
+
   deploy-backend:
     needs: [changes, test-backend]
     if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
