@@ -1,7 +1,8 @@
 """
 Real, executed proof that one user cannot download another user's
-exported design file (see app.module1_design.ownership_store for why this
-check was missing before and what it fixes).
+exported design file (see app.core.repository for the durable
+persistence/ownership abstraction this exercises, and why the check
+matters).
 
 This drives the actual FastAPI app with the real CadQuery kernel over
 TestClient (no stub), using two different authenticated identities.
@@ -48,5 +49,54 @@ def test_unknown_design_id_is_rejected_even_with_valid_auth():
         client_a = _client_as("user-a")
         response = client_a.get("/api/design/export/00000000-0000-0000-0000-000000000000")
         assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_malformed_design_id_is_rejected_not_500():
+    """A non-uuid path segment must fail closed (404), not 400/500 - callers
+    should not be able to distinguish "not a valid id" from "not found"."""
+    try:
+        client_a = _client_as("user-a")
+        response = client_a.get("/api/design/export/not-a-uuid")
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_path_traversal_attempt_in_design_id_is_rejected():
+    try:
+        client_a = _client_as("user-a")
+        response = client_a.get("/api/design/export/..%2F..%2F..%2Fetc%2Fpasswd")
+        assert response.status_code == 404
+    finally:
+        app.dependency_overrides.clear()
+
+
+def test_ownership_survives_repository_reconstruction():
+    """Simulates durability across a process restart / a second API
+    instance: a brand new repository object (re-reading the same backing
+    SQLite file) still enforces the same ownership decision."""
+    from app.core.repository import get_repository
+
+    try:
+        client_a = _client_as("user-a")
+        generate_response = client_a.post(
+            "/api/design/generate-single",
+            json={"prompt": "granite pyramid 90 meters tall"},
+        )
+        assert generate_response.status_code == 200
+        design_id = generate_response.json()["design_id"]
+
+        # A fresh repository instance (as a restarted process / another
+        # replica would construct) must see the same persisted record.
+        repo = get_repository()
+        record = repo.get_design_file(design_id)
+        assert record is not None
+        assert record.owner_id == "user-a"
+
+        client_b = _client_as("user-b")
+        other_download = client_b.get(f"/api/design/export/{design_id}")
+        assert other_download.status_code == 404
     finally:
         app.dependency_overrides.clear()

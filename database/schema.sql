@@ -1,5 +1,16 @@
 -- ASRE-LAB Supabase schema
 -- Core entities requested for bootstrap: profiles, experiments, design_models, simulation_metrics
+--
+-- Migration note (durable persistence/ownership hardening): `design_models`
+-- already stores one row per generated variation, keyed by
+-- (experiment_id, variation_index) — a separate `design_variants` table
+-- would duplicate that key and was judged unnecessary. What was missing
+-- was a table to track *ownership + storage location* of exported design
+-- files (STL/STEP) independent of whether a `design_models` row exists
+-- for that generation (e.g. single ad-hoc `/api/design/generate-single`
+-- calls, which do not populate `design_models`). `design_files` below
+-- fills that gap and is the backing store for
+-- `app.core.repository.SupabaseRepository`.
 
 create extension if not exists "pgcrypto";
 
@@ -127,3 +138,33 @@ with check (
       and e.owner_id = auth.uid()
   )
 );
+
+-- design_files: durable ownership + storage location of exported design
+-- files (STL/STEP), independent of the design_models pipeline table.
+-- user_id is the direct, authoritative owner for fail-closed ownership
+-- checks in application code (see app.core.repository) — RLS below is
+-- defense-in-depth, not the sole enforcement mechanism, because the
+-- backend currently talks to Supabase through a single shared client
+-- rather than a per-request, per-user authenticated session.
+create table if not exists public.design_files (
+  id uuid primary key default gen_random_uuid(),
+  design_model_id uuid references public.design_models(id) on delete cascade,
+  experiment_id uuid references public.experiments(id) on delete cascade,
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  file_format text not null,
+  storage_path text not null,
+  file_size_bytes bigint,
+  checksum text,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists idx_design_files_user_id on public.design_files(user_id);
+create index if not exists idx_design_files_experiment_id on public.design_files(experiment_id);
+
+alter table public.design_files enable row level security;
+
+drop policy if exists design_files_owner_all on public.design_files;
+create policy design_files_owner_all on public.design_files
+for all
+using (auth.uid() = user_id)
+with check (auth.uid() = user_id);
