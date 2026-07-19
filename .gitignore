@@ -1,0 +1,52 @@
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.egg-info/
+.Python
+
+# --- Virtual environments (never commit; local-only, includes copied
+#     Windows runtime DLL workaround files under Lib/site-packages/nlopt) ---
+.venv/
+.venv*/
+venv/
+env/
+
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+
+# --- Test / lint caches ---
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+htmlcov/
+.coverage
+coverage.xml
+
+# --- Generated CAD exports and other runtime artifacts (never commit) ---
+backend/tests/**/*.log
+**/asre_lab_exports/
+*.stl
+*.step
+*.stp
+requirements_run.log
+unit_run.log
+integration_run.log
+e2e_run.log
+
+# --- Node / frontend ---
+node_modules/
+frontend/.next/
+frontend/out/
+
+# --- Editor / OS ---
+.vscode/
+.DS_Store
+Thumbs.db
+
+# --- Logs ---
+*.log
+logs/
