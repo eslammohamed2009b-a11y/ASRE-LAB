@@ -1,5 +1,26 @@
 # ASRE-LAB
 
+> **Proprietary Source-Available Project**
+>
+> This repository is public for technical inspection, portfolio evaluation,
+> university review, and demonstration only. It is not open-source software.
+> No permission is granted to use, copy, modify, redistribute, deploy, train
+> AI systems on, or create derivative works from this project. All rights are
+> reserved. See the [LICENSE](LICENSE) file.
+
+## Repository Status
+
+- **Public for inspection** — the repository is intentionally public so
+  universities, reviewers, engineers, and competition judges can read the
+  code and history.
+- **Proprietary, all rights reserved** — public visibility is not an
+  open-source release; see [LICENSE](LICENSE).
+- **Active work in progress.**
+- Capability status (validated / implemented-but-unvalidated / partial /
+  unsupported / planned) is tracked honestly in the status table below and
+  in [GO_NO_GO_CHECKLIST.md](GO_NO_GO_CHECKLIST.md) — public visibility must
+  never be read as an implied claim that every listed feature is complete.
+
 New standalone project scaffold prepared separately from HydroSentinel.
 
 ## 1) Initialization and GitHub repository
