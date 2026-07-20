@@ -20,7 +20,10 @@ app = FastAPI(
     description="Autonomous Smart Reverse Engineering Laboratory — computational backend",
     version="1.0.0",
     contact={"name": "ASRE-LAB Engineering", "email": "research@asre-lab.local"},
-    license_info={"name": "Apache-2.0"},
+    license_info={
+        "name": "Proprietary Source-Available License",
+        "url": "https://github.com/eslammohamed2009b-a11y/ASRE-LAB/blob/main/LICENSE",
+    },
 )
 
 app.add_middleware(
