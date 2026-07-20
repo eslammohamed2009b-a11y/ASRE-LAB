@@ -1,3 +1,13 @@
+-- DEPRECATED - DO NOT APPLY THIS FILE.
+--
+-- This file and `database/schema.sql` were two divergent, contradictory
+-- full schemas (different table names/columns for the same concepts).
+-- They have been consolidated into an ordered, idempotent migrations
+-- directory: see `database/migrations/` (start with
+-- `database/migrations/README.md`).
+--
+-- This file is kept only for historical reference (git blame) and MUST
+-- NOT be applied to any database. Use database/migrations/*.sql instead.
 -- ASRE-LAB Supabase schema
 -- Run this script in Supabase SQL Editor
 

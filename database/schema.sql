@@ -1,3 +1,16 @@
+-- DEPRECATED - DO NOT APPLY THIS FILE.
+--
+-- This file and `database/supabase_schema.sql` were two divergent,
+-- contradictory full schemas (different table names/columns for the same
+-- concepts - e.g. this file used `owner_id`/`storage_path`, the other used
+-- `user_id` with a different table set entirely). They have been
+-- consolidated into a single authoritative, ordered, idempotent migrations
+-- directory: see `database/migrations/` (start with
+-- `database/migrations/README.md`).
+--
+-- This file is kept only for historical reference (git blame) and MUST
+-- NOT be applied to any database. Use database/migrations/*.sql instead.
+
 -- ASRE-LAB Supabase schema
 -- Core entities requested for bootstrap: profiles, experiments, design_models, simulation_metrics
 --
