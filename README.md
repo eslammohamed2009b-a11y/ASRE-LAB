@@ -32,15 +32,15 @@ result. **Planned** = not yet built.
 
 | Area | Status | Evidence |
 |---|---|---|
-| Module 1 — parametric CAD generation (real CadQuery/OCP kernel) | Validated | 8 integration tests generate real geometry, export real STEP/STL, re-import and verify bounding boxes, and confirm parameter sensitivity — no CAD stub involved. |
-| Module 1 — ownership-isolated file download | Validated | Durable `app/core/repository.py` (Supabase adapter + SQLite-backed local adapter, not an in-process dict); integration tests cover cross-user isolation, unknown ids, malformed ids, and path-traversal attempts. |
-| Local backend test suite | Validated | 31 passed (7 unit, 18 integration, 4 e2e, 2 benchmark) — 0 failed, run from the pinned Python 3.11.15 / real-CadQuery environment. |
-| Remote CI (GitHub Actions) | **Blocked** | Workflow triggers and is accepted by GitHub (`enabled: true`), but the one run attempted so far ended with `conclusion: startup_failure` and zero jobs scheduled before any of our code ran — consistent with a GitHub-side new-account hold on hosted runners, not a defect in the workflow file or code. Not yet observed passing. |
+| Module 1 — parametric CAD generation (real CadQuery/OCP kernel) | Validated locally | Real STEP/STL generation is covered by integration tests and real-HTTP E2E tests; files are persisted through `FileStorage`, not exposed as raw server paths. |
+| Module 1 — ownership-isolated jobs and files | Validated locally | Persisted job/status/result APIs and file downloads fail closed with 404 across users. Real-HTTP E2E evidence includes checksum/size verification and a process restart against the same SQLite database and storage root. |
+| Local backend test suite | Validated | Unit, integration, E2E, and benchmark marker suites pass in the pinned Python 3.11.15 / real-CadQuery environment. Current counts are recorded in `GO_NO_GO_CHECKLIST.md`. |
+| Remote CI (GitHub Actions) | **Blocked — unknown cause** | Latest inspected run `29708734759` ended `startup_failure` in the same second it was created, with zero jobs and empty billable timing. GitHub returned no explicit cause. No billing/account-hold theory is treated as confirmed; remote tests have not run. |
 | Module 2 — thermal solver | Implemented, not externally validated | Real finite-difference steady-state solver (no fabricated values), executed in benchmark tests against analytical/grid-convergence checks locally. Not run against live production infrastructure. |
 | Module 2 — structural / CFD solvers | Unsupported | Explicitly return HTTP 501 rather than a placeholder result. |
 | Persistence — durable ownership (SQLite local adapter) | Validated | Restart-durability and multi-instance-sharing proven with a real on-disk SQLite file (not `:memory:`), by unit tests. |
-| Persistence — Supabase (live) | **Blocked** | No live Supabase credentials exist in this environment (confirmed via repeated secret scans); the adapter code, migration (`design_files` table), and a corresponding test exist and are skipped, not fabricated as passing. |
-| Async job queue (Celery/Redis) | Planned | Config exists; no live worker run, no load test. |
+| Persistence — Supabase (live) | **Blocked** | Ordered migrations and repository/storage adapters exist, but no live credentials are available. Three external tests skip explicitly and are not counted as passing. |
+| Async batch generation (Celery/Redis) | Implemented; queue transport unvalidated | Persisted jobs, progress, partial failure, cancellation, idempotency keys, per-user active-job limits, and result retrieval are tested in Celery eager mode. `docker-compose.yml` provides API + worker + Redis, but a real broker/worker run and load test remain blocked locally because Docker/Redis are unavailable. |
 | Licensing | Validated | Proprietary, source-available [LICENSE](LICENSE); public repo, all rights reserved. |
 
 New standalone project scaffold prepared separately from HydroSentinel.
@@ -68,19 +68,31 @@ If you do not use GitHub CLI:
 - database: Supabase SQL schema
 - .github/workflows/deploy.yml: CI/CD deploy pipeline
 
-## 3) Supabase SQL schema
+## 3) Database migrations
 
-Use this file in Supabase SQL Editor:
+Apply the authoritative idempotent migrations in order:
 
-- database/supabase_schema.sql
+1. `database/migrations/001_initial_schema.sql`
+2. `database/migrations/002_design_files.sql`
+3. `database/migrations/003_job_tracking.sql`
 
-It creates:
+See `database/migrations/README.md`. The legacy `database/schema.sql` and
+`database/supabase_schema.sql` files are deprecated and must not be applied.
 
-- users
-- experiments
-- simulation_results
+## 4) Local queue stack
 
-## 4) CI/CD behavior
+`docker-compose.yml` defines the API, Celery worker, Redis broker/result
+backend, shared SQLite persistence, and shared design-file storage:
+
+```bash
+docker compose up --build
+```
+
+Provide production secrets through the environment. Celery eager-mode tests
+do not prove this separate-process stack; validate it in a Docker-capable
+environment before production use.
+
+## 5) CI/CD behavior
 
 Workflow file:
 
@@ -95,7 +107,7 @@ Zero-downtime note:
 
 - Render performs rolling deploy using health checks. Keep /health endpoint stable and pass health checks before traffic switch.
 
-## 5) Required secrets in GitHub Actions
+## 6) Required secrets in GitHub Actions
 
 Add these in GitHub repository secrets:
 
@@ -104,7 +116,7 @@ Add these in GitHub repository secrets:
 - VERCEL_PROJECT_ID
 - RENDER_DEPLOY_HOOK_URL
 
-## 6) Environment variables checklist
+## 7) Environment variables checklist
 
 Vercel (frontend):
 

@@ -101,16 +101,22 @@ def test_generate_single_over_real_http_produces_real_cad_files(live_server):
     assert resp.status_code == 200, resp.text
     payload = resp.json()
     assert "design_id" in payload
+    assert "stl_object_key" in payload
+    assert "step_object_key" in payload
 
-    stl_path = Path(payload["stl_path"])
-    step_path = Path(payload["step_path"])
-    assert stl_path.exists() and stl_path.stat().st_size > 0
-    assert step_path.exists() and step_path.stat().st_size > 500
+    download = httpx.get(
+        f"{live_server}/api/design/export/{payload['design_id']}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10.0,
+    )
+    assert download.status_code == 200, download.text
+    assert len(download.content) > 0
 
     print(
         f"[e2e evidence] status={resp.status_code} duration={duration:.3f}s "
-        f"stl={stl_path} ({stl_path.stat().st_size}B) "
-        f"step={step_path} ({step_path.stat().st_size}B)"
+        f"stl_object_key={payload['stl_object_key']} "
+        f"step_object_key={payload['step_object_key']} "
+        f"downloaded_stl_bytes={len(download.content)}"
     )
 
 

@@ -5,6 +5,58 @@ Status values per item:
 - `GO`: Requirement is implemented, verified, and documented.
 - `NO-GO`: Requirement is missing, incomplete, or unverified.
 
+## Latest Snapshot (2026-07-19, Module 1 production completion)
+
+- **Module 1 schema/storage: `GO` locally / `NO-GO` for live Supabase**
+  - Authoritative migrations are now ordered under `database/migrations/`
+    (`001_initial_schema.sql`, `002_design_files.sql`,
+    `003_job_tracking.sql`). Legacy full-schema files are deprecated.
+  - `FileStorage` has local and Supabase adapters. Server-built object keys,
+    traversal rejection, atomic local writes, checksums, duplicate-name
+    isolation, and restart durability are covered by unit tests.
+  - No Supabase credentials are available. Repository/storage external tests
+    are **3 skipped**, not passing; migrations were not applied to a live
+    project in this session.
+- **2) Module 1 async batch jobs: `GO` for application logic / `NO-GO` for
+  production queue transport and load**
+  - Persisted job creation/status/results, owner-only access, progress,
+    partial failure, cancellation, idempotency keys, batch-size limits,
+    per-user queued/running limits, safe terminal errors, and explicit
+    no-retry + task time-limit policy are implemented.
+  - Integration/E2E execution uses `CELERY_TASK_ALWAYS_EAGER=true`; this is
+    synchronous in-process proof and is **not** evidence of Redis plus a
+    separate worker. `docker-compose.yml` provides API + worker + Redis with
+    shared persistence/storage, but Docker/Redis are unavailable locally and
+    no 100-job load test was run.
+- **5) Module 1 ownership isolation: `GO` locally**
+  - A real-HTTP test starts uvicorn, authenticates User A, submits a two-design
+    batch, verifies persisted status/results and real STEP/STL sizes/checksums,
+    downloads the STL, restarts uvicorn against the same SQLite/storage paths,
+    and verifies retrieval still works. User B receives 404 for User A's job,
+    results, and file.
+- **Local test evidence: `GO`**
+  - `pytest -m "unit or integration or e2e or benchmark" -q`:
+    **57 passed, 3 deselected, 0 failed** in 20.39s (24 unit, 26 integration,
+    5 E2E, 2 benchmark), Python 3.11.15 with real CadQuery 2.4.0/OCP.
+  - `pytest -m external -q`: **3 skipped, 0 passed** because live Supabase
+    credentials are absent.
+- **Remote CI: `BLOCKED — UNKNOWN GITHUB STARTUP FAILURE`**
+  - Latest inspected run `29708734759` has `conclusion: startup_failure`,
+    identical created/updated timestamps, zero jobs, and empty billable
+    timing. GitHub returned no explicit root-cause message; check-suite reads
+    returned HTTP 503 during diagnosis. A billing/account hold is therefore
+    **not confirmed and is not claimed**.
+  - Required user action: inspect the run and account/billing notices in the
+    GitHub web UI; if no explicit notice appears, contact GitHub Support with
+    run ID `29708734759` and ask why hosted-runner provisioning stops before
+    job creation. Do not repeatedly retrigger until GitHub identifies or
+    clears the startup failure.
+
+**Updated overall result: `NO-GO` for final production sign-off.** Module 1
+application behavior is locally validated, but live Supabase, real
+Redis/Celery worker execution, remote CI, and the checklist's broader Module
+2/3 gates remain unvalidated or out of scope.
+
 ## Phase 1: Physics Core Reinforcement (Module 2 Focus)
 
 ### 1) Replace scaffold solvers with real physics solver
