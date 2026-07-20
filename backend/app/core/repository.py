@@ -1,64 +1,155 @@
 """
-Durable persistence and ownership abstraction (Module 1 design files).
+Durable persistence and ownership abstraction (Module 1 production schema).
 
-Replaces the previous `app.module1_design.ownership_store` in-process dict.
-That store worked but was explicitly disclosed as non-durable: it lost all
-ownership records on every process restart and could not be shared across
-multiple backend replicas (each worker/process had its own private dict).
+Backing tables (see `database/migrations/001_initial_schema.sql`,
+`002_design_files.sql`, `003_job_tracking.sql` - the single authoritative
+schema; the old root-level `database/schema.sql` /
+`database/supabase_schema.sql` full-schema files are deprecated):
 
-This module defines a small repository interface (`PersistenceRepository`)
-with two real implementations:
+- `experiments`: one row per logical unit of work (a single ad-hoc
+  generation or a batch job groups its designs under one experiment).
+- `design_models`: one row per generated geometry variant (real CadQuery
+  parameters/units captured as JSON for reproducibility).
+- `design_files`: durable ownership + storage location (provider + object
+  key, never a raw filesystem path) for every exported STL/STEP file.
+- `generation_jobs`: async batch generation job tracking (status,
+  progress, idempotency).
 
-- `SupabaseRepository`: production adapter, backed by the `experiments` and
-  `design_files` tables (see database/schema.sql). Used whenever Supabase
+Two real implementations of `PersistenceRepository`:
+
+- `SupabaseRepository`: production adapter. Used whenever Supabase
   credentials are configured (`SUPABASE_URL` + `SUPABASE_KEY`).
-- `LocalSQLiteRepository`: deterministic adapter used for local development
-  and for the automated test suite when Supabase credentials are not
-  available. It is backed by a real SQLite file on disk (not an in-memory
-  dict), so it is genuinely durable across process restarts and can be
-  shared by multiple repository instances/processes pointed at the same
-  database file - the same properties the Supabase adapter has in
-  production, without requiring live cloud credentials to test them.
+- `LocalSQLiteRepository`: deterministic adapter for local development and
+  the automated test suite, backed by a real on-disk SQLite file (not an
+  in-memory dict) - durable across process restarts and shareable across
+  multiple repository instances pointed at the same database file.
 
-Ownership enforcement happens in this layer's `get_design_file` result
-(the caller compares `owner_id` to the requesting user), not by relying on
-Supabase Row Level Security alone - `persistence_service` uses a single
-shared client without per-request auth binding, so RLS cannot be assumed
-to be the enforcing control here.
+Ownership enforcement happens in this layer's read methods (the caller
+compares `user_id` to the requesting user), not by relying on Supabase Row
+Level Security alone - `persistence_service` uses a single shared client
+without per-request auth binding, so RLS is defense-in-depth here, not the
+sole enforcing control.
 """
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import tempfile
 import threading
 import uuid
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 
+def _ts() -> str:
+    return datetime.now(timezone.utc).isoformat()
+
+
+@dataclass(frozen=True)
+class ExperimentRecord:
+    id: str
+    user_id: str
+    name: str
+    status: str
+    input_specification: dict = field(default_factory=dict)
+    application_version: str = "unknown"
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class DesignModelRecord:
+    id: str
+    experiment_id: str
+    user_id: str
+    geometry_family: str
+    parameters: dict = field(default_factory=dict)
+    units: dict = field(default_factory=dict)
+    variation_index: int = 0
+    generation_status: str = "pending"
+    cadquery_version: str | None = None
+    application_version: str = "unknown"
+    created_at: str = ""
+    updated_at: str = ""
+
+
 @dataclass(frozen=True)
 class DesignFileRecord:
-    design_id: str
+    id: str
     owner_id: str
     experiment_id: str | None
+    design_model_id: str | None
     file_format: str
-    storage_path: str
+    storage_provider: str
+    object_key: str
     file_size_bytes: int | None
-    checksum: str | None
+    checksum_sha256: str | None
+    media_type: str
     created_at: str
+
+
+@dataclass(frozen=True)
+class GenerationJobRecord:
+    id: str
+    experiment_id: str
+    user_id: str
+    job_type: str
+    status: str
+    requested_count: int
+    completed_count: int = 0
+    failed_count: int = 0
+    progress_percent: int = 0
+    error_code: str | None = None
+    safe_error_message: str | None = None
+    idempotency_key: str | None = None
+    created_at: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str = ""
 
 
 class PersistenceRepository(ABC):
     """Abstract persistence + ownership boundary used by Module 1 routes."""
 
+    # -- experiments ---------------------------------------------------
     @abstractmethod
-    def create_experiment(self, owner_id: str, title: str, description: str | None = None) -> str:
-        """Create an experiment row and return its id."""
+    def create_experiment(
+        self, user_id: str, name: str, input_specification: dict | None = None
+    ) -> str:
+        ...
 
+    @abstractmethod
+    def get_experiment(self, experiment_id: str) -> ExperimentRecord | None:
+        ...
+
+    # -- design_models ---------------------------------------------------
+    @abstractmethod
+    def create_design_model(
+        self,
+        experiment_id: str,
+        user_id: str,
+        geometry_family: str,
+        parameters: dict,
+        units: dict,
+        variation_index: int,
+        generation_status: str = "pending",
+        cadquery_version: str | None = None,
+    ) -> str:
+        ...
+
+    @abstractmethod
+    def update_design_model_status(self, design_model_id: str, generation_status: str) -> None:
+        ...
+
+    @abstractmethod
+    def list_design_models_for_experiment(self, experiment_id: str) -> list[DesignModelRecord]:
+        ...
+
+    # -- design_files ---------------------------------------------------
     @abstractmethod
     def record_design_file(
         self,
@@ -66,15 +157,62 @@ class PersistenceRepository(ABC):
         owner_id: str,
         experiment_id: str | None,
         file_format: str,
-        storage_path: str,
+        storage_provider: str,
+        object_key: str,
         file_size_bytes: int | None,
-        checksum: str | None,
+        checksum_sha256: str | None,
+        media_type: str = "application/octet-stream",
+        design_model_id: str | None = None,
     ) -> None:
-        """Persist an owned design file record."""
+        ...
 
     @abstractmethod
     def get_design_file(self, design_id: str) -> DesignFileRecord | None:
-        """Look up a design file record by id, or None if it does not exist."""
+        ...
+
+    @abstractmethod
+    def list_design_files_for_experiment(self, experiment_id: str) -> list[DesignFileRecord]:
+        ...
+
+    # -- generation_jobs -------------------------------------------------
+    @abstractmethod
+    def create_job(
+        self,
+        experiment_id: str,
+        user_id: str,
+        job_type: str,
+        requested_count: int,
+        idempotency_key: str | None = None,
+    ) -> str:
+        ...
+
+    @abstractmethod
+    def get_job_by_idempotency_key(self, user_id: str, idempotency_key: str) -> GenerationJobRecord | None:
+        ...
+
+    @abstractmethod
+    def get_job(self, job_id: str) -> GenerationJobRecord | None:
+        ...
+
+    @abstractmethod
+    def count_active_jobs_for_user(self, user_id: str) -> int:
+        ...
+
+    @abstractmethod
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        completed_count: int | None = None,
+        failed_count: int | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        ...
 
 
 class SupabaseRepository(PersistenceRepository):
@@ -83,43 +221,132 @@ class SupabaseRepository(PersistenceRepository):
     def __init__(self, client: Any) -> None:
         self._client = client
 
-    def _ts(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+    # -- experiments ---------------------------------------------------
+    def create_experiment(
+        self, user_id: str, name: str, input_specification: dict | None = None
+    ) -> str:
+        from app.core.config import settings
 
-    def create_experiment(self, owner_id: str, title: str, description: str | None = None) -> str:
         payload = {
-            "owner_id": owner_id,
-            "title": title,
-            "description": description,
+            "user_id": user_id,
+            "name": name,
             "status": "running",
-            "created_at": self._ts(),
-            "updated_at": self._ts(),
+            "input_specification": input_specification or {},
+            "application_version": settings.APPLICATION_VERSION,
+            "created_at": _ts(),
+            "updated_at": _ts(),
         }
         data = self._client.table("experiments").insert(payload).execute().data
         if not data:
             raise RuntimeError("Supabase did not return an inserted experiment row")
         return data[0]["id"]
 
+    def get_experiment(self, experiment_id: str) -> ExperimentRecord | None:
+        data = self._client.table("experiments").select("*").eq("id", experiment_id).execute().data
+        if not data:
+            return None
+        row = data[0]
+        return ExperimentRecord(
+            id=row["id"],
+            user_id=row["user_id"],
+            name=row["name"],
+            status=row["status"],
+            input_specification=row.get("input_specification") or {},
+            application_version=row.get("application_version", "unknown"),
+            created_at=row.get("created_at", ""),
+            updated_at=row.get("updated_at", ""),
+        )
+
+    # -- design_models ---------------------------------------------------
+    def create_design_model(
+        self,
+        experiment_id: str,
+        user_id: str,
+        geometry_family: str,
+        parameters: dict,
+        units: dict,
+        variation_index: int,
+        generation_status: str = "pending",
+        cadquery_version: str | None = None,
+    ) -> str:
+        from app.core.config import settings
+
+        payload = {
+            "experiment_id": experiment_id,
+            "user_id": user_id,
+            "geometry_family": geometry_family,
+            "parameters": parameters,
+            "units": units,
+            "variation_index": variation_index,
+            "generation_status": generation_status,
+            "cadquery_version": cadquery_version,
+            "application_version": settings.APPLICATION_VERSION,
+            "created_at": _ts(),
+            "updated_at": _ts(),
+        }
+        data = self._client.table("design_models").insert(payload).execute().data
+        if not data:
+            raise RuntimeError("Supabase did not return an inserted design_model row")
+        return data[0]["id"]
+
+    def update_design_model_status(self, design_model_id: str, generation_status: str) -> None:
+        self._client.table("design_models").update(
+            {"generation_status": generation_status, "updated_at": _ts()}
+        ).eq("id", design_model_id).execute()
+
+    def list_design_models_for_experiment(self, experiment_id: str) -> list[DesignModelRecord]:
+        data = (
+            self._client.table("design_models")
+            .select("*")
+            .eq("experiment_id", experiment_id)
+            .order("variation_index")
+            .execute()
+            .data
+        )
+        return [
+            DesignModelRecord(
+                id=row["id"],
+                experiment_id=row["experiment_id"],
+                user_id=row["user_id"],
+                geometry_family=row["geometry_family"],
+                parameters=row.get("parameters") or {},
+                units=row.get("units") or {},
+                variation_index=row.get("variation_index", 0),
+                generation_status=row.get("generation_status", "pending"),
+                cadquery_version=row.get("cadquery_version"),
+                application_version=row.get("application_version", "unknown"),
+                created_at=row.get("created_at", ""),
+                updated_at=row.get("updated_at", ""),
+            )
+            for row in (data or [])
+        ]
+
+    # -- design_files ---------------------------------------------------
     def record_design_file(
         self,
         design_id: str,
         owner_id: str,
         experiment_id: str | None,
         file_format: str,
-        storage_path: str,
+        storage_provider: str,
+        object_key: str,
         file_size_bytes: int | None,
-        checksum: str | None,
+        checksum_sha256: str | None,
+        media_type: str = "application/octet-stream",
+        design_model_id: str | None = None,
     ) -> None:
         payload = {
             "id": design_id,
             "user_id": owner_id,
             "experiment_id": experiment_id,
-            "design_model_id": None,
+            "design_model_id": design_model_id,
             "file_format": file_format,
-            "storage_path": storage_path,
+            "storage_provider": storage_provider,
+            "object_key": object_key,
             "file_size_bytes": file_size_bytes,
-            "checksum": checksum,
-            "created_at": self._ts(),
+            "checksum_sha256": checksum_sha256,
+            "media_type": media_type,
+            "created_at": _ts(),
         }
         self._client.table("design_files").insert(payload).execute()
 
@@ -129,14 +356,148 @@ class SupabaseRepository(PersistenceRepository):
             return None
         row = data[0]
         return DesignFileRecord(
-            design_id=row["id"],
+            id=row["id"],
             owner_id=row["user_id"],
             experiment_id=row.get("experiment_id"),
+            design_model_id=row.get("design_model_id"),
             file_format=row["file_format"],
-            storage_path=row["storage_path"],
+            storage_provider=row.get("storage_provider", "local"),
+            object_key=row.get("object_key", ""),
             file_size_bytes=row.get("file_size_bytes"),
-            checksum=row.get("checksum"),
+            checksum_sha256=row.get("checksum_sha256"),
+            media_type=row.get("media_type", "application/octet-stream"),
             created_at=row["created_at"],
+        )
+
+    def list_design_files_for_experiment(self, experiment_id: str) -> list[DesignFileRecord]:
+        data = (
+            self._client.table("design_files")
+            .select("*")
+            .eq("experiment_id", experiment_id)
+            .execute()
+            .data
+        )
+        return [
+            DesignFileRecord(
+                id=row["id"],
+                owner_id=row["user_id"],
+                experiment_id=row.get("experiment_id"),
+                design_model_id=row.get("design_model_id"),
+                file_format=row["file_format"],
+                storage_provider=row.get("storage_provider", "local"),
+                object_key=row.get("object_key", ""),
+                file_size_bytes=row.get("file_size_bytes"),
+                checksum_sha256=row.get("checksum_sha256"),
+                media_type=row.get("media_type", "application/octet-stream"),
+                created_at=row["created_at"],
+            )
+            for row in (data or [])
+        ]
+
+    # -- generation_jobs -------------------------------------------------
+    def create_job(
+        self,
+        experiment_id: str,
+        user_id: str,
+        job_type: str,
+        requested_count: int,
+        idempotency_key: str | None = None,
+    ) -> str:
+        payload = {
+            "experiment_id": experiment_id,
+            "user_id": user_id,
+            "job_type": job_type,
+            "status": "queued",
+            "requested_count": requested_count,
+            "completed_count": 0,
+            "failed_count": 0,
+            "progress_percent": 0,
+            "idempotency_key": idempotency_key,
+            "created_at": _ts(),
+            "updated_at": _ts(),
+        }
+        data = self._client.table("generation_jobs").insert(payload).execute().data
+        if not data:
+            raise RuntimeError("Supabase did not return an inserted generation_jobs row")
+        return data[0]["id"]
+
+    def get_job_by_idempotency_key(self, user_id: str, idempotency_key: str) -> GenerationJobRecord | None:
+        data = (
+            self._client.table("generation_jobs")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("idempotency_key", idempotency_key)
+            .execute()
+            .data
+        )
+        if not data:
+            return None
+        return self._row_to_job(data[0])
+
+    def get_job(self, job_id: str) -> GenerationJobRecord | None:
+        data = self._client.table("generation_jobs").select("*").eq("id", job_id).execute().data
+        if not data:
+            return None
+        return self._row_to_job(data[0])
+
+    def count_active_jobs_for_user(self, user_id: str) -> int:
+        data = (
+            self._client.table("generation_jobs")
+            .select("id")
+            .eq("user_id", user_id)
+            .in_("status", ["queued", "running"])
+            .execute()
+            .data
+        )
+        return len(data or [])
+
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        completed_count: int | None = None,
+        failed_count: int | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        updates: dict[str, Any] = {"updated_at": _ts()}
+        for key, value in (
+            ("status", status),
+            ("completed_count", completed_count),
+            ("failed_count", failed_count),
+            ("progress_percent", progress_percent),
+            ("error_code", error_code),
+            ("safe_error_message", safe_error_message),
+            ("started_at", started_at),
+            ("finished_at", finished_at),
+        ):
+            if value is not None:
+                updates[key] = value
+        self._client.table("generation_jobs").update(updates).eq("id", job_id).execute()
+
+    @staticmethod
+    def _row_to_job(row: dict) -> GenerationJobRecord:
+        return GenerationJobRecord(
+            id=row["id"],
+            experiment_id=row["experiment_id"],
+            user_id=row["user_id"],
+            job_type=row.get("job_type", "design_batch"),
+            status=row.get("status", "queued"),
+            requested_count=row.get("requested_count", 0),
+            completed_count=row.get("completed_count", 0),
+            failed_count=row.get("failed_count", 0),
+            progress_percent=row.get("progress_percent", 0),
+            error_code=row.get("error_code"),
+            safe_error_message=row.get("safe_error_message"),
+            idempotency_key=row.get("idempotency_key"),
+            created_at=row.get("created_at", ""),
+            started_at=row.get("started_at"),
+            finished_at=row.get("finished_at"),
+            updated_at=row.get("updated_at", ""),
         )
 
 
@@ -146,9 +507,7 @@ class LocalSQLiteRepository(PersistenceRepository):
 
     Genuinely durable across process restarts (data lives on disk, not in
     a Python dict) and shareable across multiple `LocalSQLiteRepository`
-    instances pointed at the same `db_path` - which is how this class
-    stands in for "multiple API instances share persisted ownership"
-    without needing live cloud infrastructure.
+    instances pointed at the same `db_path`.
     """
 
     _init_lock = threading.Lock()
@@ -171,11 +530,31 @@ class LocalSQLiteRepository(PersistenceRepository):
                 """
                 CREATE TABLE IF NOT EXISTS experiments (
                     id TEXT PRIMARY KEY,
-                    owner_id TEXT NOT NULL,
-                    title TEXT NOT NULL,
-                    description TEXT,
+                    user_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'running',
-                    created_at TEXT NOT NULL
+                    input_specification TEXT NOT NULL DEFAULT '{}',
+                    application_version TEXT NOT NULL DEFAULT 'unknown',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS design_models (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    geometry_family TEXT NOT NULL,
+                    parameters TEXT NOT NULL DEFAULT '{}',
+                    units TEXT NOT NULL DEFAULT '{}',
+                    variation_index INTEGER NOT NULL DEFAULT 0,
+                    generation_status TEXT NOT NULL DEFAULT 'pending',
+                    cadquery_version TEXT,
+                    application_version TEXT NOT NULL DEFAULT 'unknown',
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
                 )
                 """
             )
@@ -187,59 +566,204 @@ class LocalSQLiteRepository(PersistenceRepository):
                     experiment_id TEXT,
                     design_model_id TEXT,
                     file_format TEXT NOT NULL,
-                    storage_path TEXT NOT NULL,
+                    storage_provider TEXT NOT NULL DEFAULT 'local',
+                    object_key TEXT NOT NULL,
                     file_size_bytes INTEGER,
-                    checksum TEXT,
+                    checksum_sha256 TEXT,
+                    media_type TEXT NOT NULL DEFAULT 'application/octet-stream',
                     created_at TEXT NOT NULL
                 )
                 """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS generation_jobs (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    job_type TEXT NOT NULL DEFAULT 'design_batch',
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    requested_count INTEGER NOT NULL,
+                    completed_count INTEGER NOT NULL DEFAULT 0,
+                    failed_count INTEGER NOT NULL DEFAULT 0,
+                    progress_percent INTEGER NOT NULL DEFAULT 0,
+                    error_code TEXT,
+                    safe_error_message TEXT,
+                    idempotency_key TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_idempotency "
+                "ON generation_jobs(user_id, idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL"
             )
             conn.commit()
         finally:
             conn.close()
 
-    def _ts(self) -> str:
-        return datetime.now(timezone.utc).isoformat()
+    # -- experiments ---------------------------------------------------
+    def create_experiment(
+        self, user_id: str, name: str, input_specification: dict | None = None
+    ) -> str:
+        from app.core.config import settings
 
-    def create_experiment(self, owner_id: str, title: str, description: str | None = None) -> str:
         experiment_id = str(uuid.uuid4())
         conn = self._connect()
         try:
             conn.execute(
-                "INSERT INTO experiments (id, owner_id, title, description, status, created_at) "
-                "VALUES (?, ?, ?, ?, 'running', ?)",
-                (experiment_id, owner_id, title, description, self._ts()),
+                "INSERT INTO experiments (id, user_id, name, status, input_specification, "
+                "application_version, created_at, updated_at) VALUES (?, ?, ?, 'running', ?, ?, ?, ?)",
+                (
+                    experiment_id,
+                    user_id,
+                    name,
+                    json.dumps(input_specification or {}),
+                    settings.APPLICATION_VERSION,
+                    _ts(),
+                    _ts(),
+                ),
             )
             conn.commit()
         finally:
             conn.close()
         return experiment_id
 
+    def get_experiment(self, experiment_id: str) -> ExperimentRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM experiments WHERE id = ?", (experiment_id,)).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return ExperimentRecord(
+            id=row["id"],
+            user_id=row["user_id"],
+            name=row["name"],
+            status=row["status"],
+            input_specification=json.loads(row["input_specification"]),
+            application_version=row["application_version"],
+            created_at=row["created_at"],
+            updated_at=row["updated_at"],
+        )
+
+    # -- design_models ---------------------------------------------------
+    def create_design_model(
+        self,
+        experiment_id: str,
+        user_id: str,
+        geometry_family: str,
+        parameters: dict,
+        units: dict,
+        variation_index: int,
+        generation_status: str = "pending",
+        cadquery_version: str | None = None,
+    ) -> str:
+        from app.core.config import settings
+
+        design_model_id = str(uuid.uuid4())
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO design_models (id, experiment_id, user_id, geometry_family, parameters, "
+                "units, variation_index, generation_status, cadquery_version, application_version, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    design_model_id,
+                    experiment_id,
+                    user_id,
+                    geometry_family,
+                    json.dumps(parameters),
+                    json.dumps(units),
+                    variation_index,
+                    generation_status,
+                    cadquery_version,
+                    settings.APPLICATION_VERSION,
+                    _ts(),
+                    _ts(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return design_model_id
+
+    def update_design_model_status(self, design_model_id: str, generation_status: str) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE design_models SET generation_status = ?, updated_at = ? WHERE id = ?",
+                (generation_status, _ts(), design_model_id),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def list_design_models_for_experiment(self, experiment_id: str) -> list[DesignModelRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM design_models WHERE experiment_id = ? ORDER BY variation_index",
+                (experiment_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            DesignModelRecord(
+                id=row["id"],
+                experiment_id=row["experiment_id"],
+                user_id=row["user_id"],
+                geometry_family=row["geometry_family"],
+                parameters=json.loads(row["parameters"]),
+                units=json.loads(row["units"]),
+                variation_index=row["variation_index"],
+                generation_status=row["generation_status"],
+                cadquery_version=row["cadquery_version"],
+                application_version=row["application_version"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    # -- design_files ---------------------------------------------------
     def record_design_file(
         self,
         design_id: str,
         owner_id: str,
         experiment_id: str | None,
         file_format: str,
-        storage_path: str,
+        storage_provider: str,
+        object_key: str,
         file_size_bytes: int | None,
-        checksum: str | None,
+        checksum_sha256: str | None,
+        media_type: str = "application/octet-stream",
+        design_model_id: str | None = None,
     ) -> None:
         conn = self._connect()
         try:
             conn.execute(
                 "INSERT INTO design_files "
-                "(id, user_id, experiment_id, design_model_id, file_format, storage_path, "
-                "file_size_bytes, checksum, created_at) VALUES (?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+                "(id, user_id, experiment_id, design_model_id, file_format, storage_provider, "
+                "object_key, file_size_bytes, checksum_sha256, media_type, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     design_id,
                     owner_id,
                     experiment_id,
+                    design_model_id,
                     file_format,
-                    storage_path,
+                    storage_provider,
+                    object_key,
                     file_size_bytes,
-                    checksum,
-                    self._ts(),
+                    checksum_sha256,
+                    media_type,
+                    _ts(),
                 ),
             )
             conn.commit()
@@ -256,15 +780,146 @@ class LocalSQLiteRepository(PersistenceRepository):
             conn.close()
         if row is None:
             return None
+        return self._row_to_file(row)
+
+    def list_design_files_for_experiment(self, experiment_id: str) -> list[DesignFileRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM design_files WHERE experiment_id = ?", (experiment_id,)
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._row_to_file(row) for row in rows]
+
+    @staticmethod
+    def _row_to_file(row: sqlite3.Row) -> DesignFileRecord:
         return DesignFileRecord(
-            design_id=row["id"],
+            id=row["id"],
             owner_id=row["user_id"],
             experiment_id=row["experiment_id"],
+            design_model_id=row["design_model_id"],
             file_format=row["file_format"],
-            storage_path=row["storage_path"],
+            storage_provider=row["storage_provider"],
+            object_key=row["object_key"],
             file_size_bytes=row["file_size_bytes"],
-            checksum=row["checksum"],
+            checksum_sha256=row["checksum_sha256"],
+            media_type=row["media_type"],
             created_at=row["created_at"],
+        )
+
+    # -- generation_jobs -------------------------------------------------
+    def create_job(
+        self,
+        experiment_id: str,
+        user_id: str,
+        job_type: str,
+        requested_count: int,
+        idempotency_key: str | None = None,
+    ) -> str:
+        job_id = str(uuid.uuid4())
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO generation_jobs (id, experiment_id, user_id, job_type, status, "
+                "requested_count, completed_count, failed_count, progress_percent, idempotency_key, "
+                "created_at, updated_at) VALUES (?, ?, ?, ?, 'queued', ?, 0, 0, 0, ?, ?, ?)",
+                (job_id, experiment_id, user_id, job_type, requested_count, idempotency_key, _ts(), _ts()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return job_id
+
+    def get_job_by_idempotency_key(self, user_id: str, idempotency_key: str) -> GenerationJobRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM generation_jobs WHERE user_id = ? AND idempotency_key = ?",
+                (user_id, idempotency_key),
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_job(row) if row is not None else None
+
+    def get_job(self, job_id: str) -> GenerationJobRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM generation_jobs WHERE id = ?", (job_id,)).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_job(row) if row is not None else None
+
+    def count_active_jobs_for_user(self, user_id: str) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM generation_jobs "
+                "WHERE user_id = ? AND status IN ('queued', 'running')",
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row["count"])
+
+    def update_job(
+        self,
+        job_id: str,
+        *,
+        status: str | None = None,
+        completed_count: int | None = None,
+        failed_count: int | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        fields_to_set: list[str] = ["updated_at = ?"]
+        values: list[Any] = [_ts()]
+        for column, value in (
+            ("status", status),
+            ("completed_count", completed_count),
+            ("failed_count", failed_count),
+            ("progress_percent", progress_percent),
+            ("error_code", error_code),
+            ("safe_error_message", safe_error_message),
+            ("started_at", started_at),
+            ("finished_at", finished_at),
+        ):
+            if value is not None:
+                fields_to_set.append(f"{column} = ?")
+                values.append(value)
+        values.append(job_id)
+        conn = self._connect()
+        try:
+            conn.execute(
+                f"UPDATE generation_jobs SET {', '.join(fields_to_set)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _row_to_job(row: sqlite3.Row) -> GenerationJobRecord:
+        return GenerationJobRecord(
+            id=row["id"],
+            experiment_id=row["experiment_id"],
+            user_id=row["user_id"],
+            job_type=row["job_type"],
+            status=row["status"],
+            requested_count=row["requested_count"],
+            completed_count=row["completed_count"],
+            failed_count=row["failed_count"],
+            progress_percent=row["progress_percent"],
+            error_code=row["error_code"],
+            safe_error_message=row["safe_error_message"],
+            idempotency_key=row["idempotency_key"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            updated_at=row["updated_at"],
         )
 
 
@@ -272,7 +927,13 @@ def default_local_db_path() -> str:
     override = os.environ.get("LOCAL_PERSISTENCE_DB_PATH")
     if override:
         return override
-    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence.db")
+    # Versioned filename: the schema below (experiments/design_models/
+    # design_files/generation_jobs columns) changed in the "Module 1
+    # production completion" pass. `CREATE TABLE IF NOT EXISTS` never
+    # migrates an existing file with the old column set, so bumping this
+    # name forces a fresh, correctly-shaped database instead of crashing
+    # against a stale one left over from before this change.
+    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence_v2.db")
 
 
 def get_repository() -> PersistenceRepository:
