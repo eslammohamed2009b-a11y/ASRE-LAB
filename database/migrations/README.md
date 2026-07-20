@@ -1,5 +1,19 @@
 # ASRE-LAB database migrations
 
+> **Supabase CLI / GitHub Integration note:** this directory remains the
+> human-authored, canonical source of the SQL. For Supabase CLI tooling
+> and the Supabase GitHub Integration, the exact same SQL (byte-for-byte,
+> no semantic changes) is also mirrored under
+> [`backend/supabase/migrations/`](../../backend/supabase/migrations/)
+> using Supabase's required chronological timestamp filenames
+> (`YYYYMMDDHHMMSS_name.sql`), alongside
+> [`backend/supabase/config.toml`](../../backend/supabase/config.toml).
+> **`backend/supabase/migrations/` is what the Supabase GitHub Integration
+> actually applies** (Working Directory = `backend`); this directory is
+> kept as the readable, numbered original and for any tooling still
+> pointed at it directly. If a migration is ever added or changed, update
+> both locations together so they never diverge.
+
 This is the **single authoritative** schema source for the project. The
 old root-level `database/schema.sql` and `database/supabase_schema.sql`
 files defined two divergent, contradictory full schemas (different table

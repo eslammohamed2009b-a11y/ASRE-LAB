@@ -42,6 +42,13 @@ node_modules/
 frontend/.next/
 frontend/out/
 
+# --- Supabase CLI local/generated files (config.toml and migrations are
+#     intentionally tracked; these are only created locally by `supabase
+#     start`/`supabase link` and must never be committed) ---
+backend/supabase/.branches/
+backend/supabase/.temp/
+backend/supabase/.env
+
 # --- Editor / OS ---
 .vscode/
 .DS_Store

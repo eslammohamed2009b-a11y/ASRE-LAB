@@ -1,0 +1,54 @@
+# ASRE-LAB Supabase CLI project configuration.
+#
+# This file is the tracked, non-secret project configuration used by the
+# Supabase CLI / Supabase GitHub Integration. It contains NO project
+# reference, database password, service-role key, or access token - those
+# are supplied out-of-band (via `supabase link`, the Supabase GitHub
+# App/dashboard integration, or CI secrets), never committed here.
+#
+# Migrations live in ./migrations and are the exact, byte-for-byte content
+# of the repository's authoritative migrations at ../../database/migrations
+# (see that directory's README.md), renamed to valid chronological Supabase
+# CLI timestamps. No schema/RLS/constraint semantics were changed.
+
+project_id = "asre-lab"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public"]
+max_rows = 1000
+
+[db]
+port = 54322
+major_version = 15
+
+[db.pooler]
+enabled = false
+
+[studio]
+enabled = true
+port = 54323
+
+[inbucket]
+enabled = false
+
+[storage]
+enabled = true
+file_size_limit = "50MiB"
+
+[auth]
+enabled = true
+site_url = "http://127.0.0.1:3000"
+additional_redirect_urls = []
+jwt_expiry = 3600
+enable_signup = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = true
+enable_confirmations = false
+
+[analytics]
+enabled = false
