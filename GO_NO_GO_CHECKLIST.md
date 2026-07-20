@@ -57,6 +57,53 @@ application behavior is locally validated, but live Supabase, real
 Redis/Celery worker execution, remote CI, and the checklist's broader Module
 2/3 gates remain unvalidated or out of scope.
 
+## Latest Snapshot (2026-07-20, Module 2 unified solver architecture)
+
+- **Phase 1 Item 1 (real physics solvers): `GO` for thermal/structural/modal
+  1D+3D families / `NO-GO` for CFD/wave/electromagnetic/coupled**
+  - A single capability registry (`app/module2_simulation/solver_registry.py`
+    `SOLVER_REGISTRY`) is now the one source of truth for what each solver
+    family can do; the API (`POST /api/simulations`) refuses to run any
+    solver whose `implementation_status` is not `real`, so a prototype or
+    planned solver can never return a fabricated result.
+  - Three solvers are real, numerically validated implementations (not
+    scaffolds): `thermal_conduction_v1` (1D direct finite-difference +
+    legacy 3D Gauss-Seidel), `structural_linear_1d_v1` (2-node axial bar +
+    cubic-Hermite Euler-Bernoulli beam FEA), `modal_eigen_1d_v1` (SDOF
+    closed form + `scipy.linalg.eigh` generalized eigenvalue beam solve).
+  - Benchmark evidence (all in `backend/tests/integration/`, executed against
+    the real solver code, not mocks):
+
+    | Solver | Case | Reference value | Numerical result | Rel. error | Tolerance | Result |
+    |---|---|---|---|---|---|---|
+    | Thermal | 1D Dirichlet-Dirichlet slab | Linear profile `T(x)=T0+(T1-T0)x/L` | matches to abs 1e-8 | ~1e-14 | abs 1e-8 | PASS |
+    | Thermal | 1D prescribed-flux-Dirichlet | `T(x)=T_L+(q/k)(L-x)` | matches to abs 1e-6 | ~1e-9 | abs 1e-6 | PASS |
+    | Structural | Axial bar tip displacement/stress | `PL/(EA)`, `P/A` | matches | ~1e-10 | rel 1e-6 | PASS |
+    | Structural | Cantilever beam tip deflection | `PL^3/(3EI)` | matches | ~1e-14 (exact for cubic Hermite) | rel 1e-6 | PASS |
+    | Modal | SDOF natural frequency | `sqrt(k/m)/(2*pi)` | matches | 0 (closed form) | rel 1e-9 | PASS |
+    | Modal | Cantilever beam 1st mode | `(1.875104)^2/(2*pi*L^2)*sqrt(EI/(rho*A))` | matches | ~2.4e-7 | rel 1e-4 | PASS |
+
+  - Async job orchestration (`/api/simulations` REST surface) adds
+    idempotency-key replay, per-user concurrent-job rate limiting,
+    owner-only fail-closed 404s, and durable persistence
+    (`simulation_jobs`/`simulation_inputs`/`simulation_results`,
+    migrations `004`-`007`) — mirroring the Module 1 async batch job pattern.
+  - The pre-existing legacy `/api/simulate/*` endpoints and
+    `app.pipeline_service` integration are unchanged and still pass their
+    original tests; the new architecture was added alongside, not in place
+    of, the legacy code.
+  - Local test evidence: `pytest -m "unit or integration or e2e or benchmark" -q`
+    **70 passed, 3 deselected, 0 failed** (24 unit, 33 integration, 8
+    benchmark, 5 E2E) — up from the prior 57-test baseline, with zero
+    regressions. `pytest -m external -q`: **3 skipped**, unchanged (no live
+    Supabase credentials). `app.openapi()` generates successfully (24
+    routes). `git diff --check` and a secret-pattern scan of all changed
+    files are both clean.
+  - Remaining gap against Phase 1 Item 1: CFD (wind/drag), wave/acoustic,
+    electromagnetic, and coupled multiphysics solvers remain registered as
+    `prototype`/`planned` only — the registry documents this honestly and
+    the API rejects requests for them rather than approximating a result.
+
 ## Phase 1: Physics Core Reinforcement (Module 2 Focus)
 
 ### 1) Replace scaffold solvers with real physics solver
