@@ -11,4 +11,6 @@ def run_pipeline_task(payload: dict) -> dict:
         variation_count=payload["variation_count"],
         analyses=analyses,
         user_id=payload["user_id"],
+        job_id=payload.get("job_id"),
+        experiment_id=payload.get("experiment_id"),
     )

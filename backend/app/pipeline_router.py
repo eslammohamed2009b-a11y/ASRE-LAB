@@ -1,10 +1,15 @@
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from fastapi import APIRouter, Depends
-from celery.result import AsyncResult
 
 from app.core.auth import get_current_user
 from app.module2_simulation.schemas import AnalysisType
-from app.pipeline_service import run_pipeline_flow
+from app.pipeline_service import (
+    PipelineNotFoundError,
+    cancel_pipeline_job_service,
+    create_pipeline_job,
+    get_pipeline_job_service,
+    run_pipeline_flow,
+)
 from app.pipeline_tasks import run_pipeline_task
 
 router = APIRouter(
@@ -20,11 +25,7 @@ class PipelineRunRequest(BaseModel):
     analyses: list[AnalysisType] = Field(default_factory=lambda: [AnalysisType.THERMAL, AnalysisType.STRUCTURAL])
 
 
-@router.post(
-    "/run",
-    summary="Run full research pipeline synchronously",
-    description="Executes Module 1 -> Module 2 -> Module 3 in a single request and persists outputs when Supabase is configured.",
-)
+@router.post("/run", summary="Run full research pipeline synchronously")
 def run_pipeline(payload: PipelineRunRequest, current_user: dict = Depends(get_current_user)) -> dict:
     return run_pipeline_flow(
         prompt=payload.prompt,
@@ -34,33 +35,35 @@ def run_pipeline(payload: PipelineRunRequest, current_user: dict = Depends(get_c
     )
 
 
-@router.post(
-    "/run-async",
-    summary="Run full research pipeline asynchronously",
-    description="Queues the end-to-end pipeline in Celery and returns a job id for polling.",
-)
+@router.post("/run-async", summary="Run full research pipeline asynchronously")
 def run_pipeline_async(payload: PipelineRunRequest, current_user: dict = Depends(get_current_user)) -> dict:
-    task = run_pipeline_task.delay(
+    job_id, experiment_id = create_pipeline_job(
+        payload.prompt, payload.variation_count, payload.analyses, current_user["id"]
+    )
+    run_pipeline_task.delay(
         {
+            "job_id": job_id,
+            "experiment_id": experiment_id,
             "prompt": payload.prompt,
             "variation_count": payload.variation_count,
             "analyses": [a.value for a in payload.analyses],
             "user_id": current_user["id"],
         }
     )
-    return {"job_id": task.id, "status": "queued"}
+    return {"job_id": job_id, "experiment_id": experiment_id, "status": "queued"}
 
 
-@router.get(
-    "/jobs/{job_id}",
-    summary="Get pipeline async job status",
-    description="Returns queued/running/succeeded/failed plus result or error payload.",
-)
-def get_pipeline_job_status(job_id: str) -> dict:
-    task = AsyncResult(job_id)
-    response = {"job_id": job_id, "status": task.status.lower()}
-    if task.successful():
-        response["result"] = task.result
-    elif task.failed():
-        response["error"] = str(task.result)
-    return response
+@router.get("/jobs/{job_id}", summary="Get durable pipeline job status")
+def get_pipeline_job_status(job_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return get_pipeline_job_service(job_id, current_user["id"])
+    except PipelineNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Pipeline job not found") from exc
+
+
+@router.post("/jobs/{job_id}/cancel", summary="Cancel a queued or running pipeline job")
+def cancel_pipeline_job(job_id: str, current_user: dict = Depends(get_current_user)) -> dict:
+    try:
+        return cancel_pipeline_job_service(job_id, current_user["id"])
+    except PipelineNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Pipeline job not found") from exc
