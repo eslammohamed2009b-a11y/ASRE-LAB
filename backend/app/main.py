@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse
 from app.core.config import settings
 from app.pipeline_router import router as pipeline_router
 from app.module1_design.router import router as module1_router
+from app.module1_design.jobs_router import router as module1_jobs_router
 from app.module2_simulation.router import router as module2_router
 from app.module3_analysis.router import router as module3_router
 
@@ -30,6 +31,7 @@ app.add_middleware(
 )
 
 app.include_router(module1_router)
+app.include_router(module1_jobs_router)
 app.include_router(module2_router)
 app.include_router(module3_router)
 app.include_router(pipeline_router)

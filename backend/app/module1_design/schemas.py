@@ -95,5 +95,69 @@ class ParseResponse(BaseModel):
 class GenerateSingleResponse(BaseModel):
     design_id: str
     params: dict
-    stl_path: str
-    step_path: str
+    # Object keys inside the FileStorage abstraction (app.core.storage), NOT
+    # raw filesystem paths - the client downloads the actual bytes via the
+    # authenticated `/api/design/export/{design_id}` endpoint.
+    stl_object_key: str
+    step_object_key: str
+
+
+class BatchGenerateRequest(BaseModel):
+    base_params: DesignParameters
+    variation_count: int = Field(10, ge=1, le=500)
+    vary_fields: list[str] = Field(default_factory=lambda: ["slope_angle_deg", "height_m"])
+    variation_range_pct: float = Field(0.2, gt=0, le=1.0)
+
+    @field_validator("vary_fields")
+    @classmethod
+    def validate_vary_fields(cls, value: list[str]) -> list[str]:
+        allowed = {"base_length_m", "height_m", "slope_angle_deg", "wall_thickness_m"}
+        invalid = [field_name for field_name in value if field_name not in allowed]
+        if invalid:
+            raise ValueError(f"Unsupported vary_fields: {invalid}. Allowed: {sorted(allowed)}")
+        return value
+
+
+class BatchGenerateResponse(BaseModel):
+    job_id: str
+    experiment_id: str
+    status: str
+
+
+class JobStatusResponse(BaseModel):
+    job_id: str
+    experiment_id: str
+    status: str
+    requested_count: int
+    completed_count: int
+    failed_count: int
+    progress_percent: int
+    error_code: str | None = None
+    safe_error_message: str | None = None
+    created_at: str
+    started_at: str | None = None
+    finished_at: str | None = None
+
+
+class JobDesignFileSummary(BaseModel):
+    design_file_id: str
+    file_format: str
+    object_key: str
+    file_size_bytes: int | None
+    checksum_sha256: str | None
+    media_type: str
+
+
+class JobDesignSummary(BaseModel):
+    design_model_id: str
+    variation_index: int
+    geometry_family: str
+    parameters: dict
+    generation_status: str
+    files: list[JobDesignFileSummary]
+
+
+class JobResultsResponse(BaseModel):
+    job_id: str
+    status: str
+    designs: list[JobDesignSummary]

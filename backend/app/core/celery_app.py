@@ -11,6 +11,8 @@ celery_app = Celery(
 celery_app.conf.update(
     task_track_started=True,
     result_expires=3600,
+    task_always_eager=settings.CELERY_TASK_ALWAYS_EAGER,
+    task_eager_propagates=settings.CELERY_TASK_ALWAYS_EAGER,
 )
 
-celery_app.autodiscover_tasks(["app.module2_simulation", "app"])
+celery_app.autodiscover_tasks(["app.module1_design", "app.module2_simulation", "app"])
