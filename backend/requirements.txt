@@ -6,6 +6,7 @@ cadquery==2.4.0
 numpy==1.26.4
 pandas==2.2.2
 scikit-learn==1.5.1
+scipy==1.17.1
 anthropic==0.34.2
 supabase==2.7.4
 python-multipart==0.0.9
