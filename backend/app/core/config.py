@@ -23,6 +23,7 @@ class Settings(BaseSettings):
 
     MAX_BATCH_VARIANTS: int = 25
     MAX_CONCURRENT_JOBS_PER_USER: int = 3
+    MAX_CONCURRENT_SIMULATION_JOBS_PER_USER: int = 5
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

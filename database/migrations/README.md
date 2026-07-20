@@ -15,6 +15,17 @@ replaced with a deprecation notice pointing here.
 3. `003_job_tracking.sql` — `generation_jobs` (async batch job tracking,
    including idempotency-key duplicate-request protection). Depends on
    001.
+4. `004_simulation_jobs.sql` — `simulation_jobs` (Module 2 async simulation
+   job tracking, mirrors `generation_jobs`). Depends on 001.
+5. `005_simulation_inputs.sql` — `simulation_inputs` (immutable 1:1 request
+   snapshot for a simulation job). Depends on 004.
+6. `006_simulation_results.sql` — `simulation_results` (immutable 1:1
+   persisted result contract: equations, assumptions, convergence,
+   metrics, warnings, result-file object keys). Depends on 004.
+7. `007_material_library.sql` — `material_library` (global, non-user-owned
+   reference material properties with source/valid-range, mirroring
+   `app/module2_simulation/materials.py`; seeded via this migration). No
+   dependency on the simulation tables.
 
 Each file is idempotent (`create table if not exists`, `create index if
 not exists`, `drop policy/constraint if exists` before recreating) and
@@ -29,6 +40,10 @@ Postgres client pointed at the project's connection string):
 psql "$DATABASE_URL" -f database/migrations/001_initial_schema.sql
 psql "$DATABASE_URL" -f database/migrations/002_design_files.sql
 psql "$DATABASE_URL" -f database/migrations/003_job_tracking.sql
+psql "$DATABASE_URL" -f database/migrations/004_simulation_jobs.sql
+psql "$DATABASE_URL" -f database/migrations/005_simulation_inputs.sql
+psql "$DATABASE_URL" -f database/migrations/006_simulation_results.sql
+psql "$DATABASE_URL" -f database/migrations/007_material_library.sql
 ```
 
 **These migrations have NOT been applied to any live Supabase project in

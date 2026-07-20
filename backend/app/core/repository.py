@@ -112,6 +112,66 @@ class GenerationJobRecord:
     updated_at: str = ""
 
 
+@dataclass(frozen=True)
+class SimulationJobRecord:
+    """Module 2 — async simulation job tracking (mirrors `GenerationJobRecord`'s
+    ownership/status/idempotency model for Module 1 batch jobs)."""
+
+    id: str
+    experiment_id: str | None
+    design_id: str | None
+    user_id: str
+    solver_id: str
+    status: str
+    idempotency_key: str | None = None
+    error_code: str | None = None
+    safe_error_message: str | None = None
+    progress_percent: int = 0
+    created_at: str = ""
+    started_at: str | None = None
+    finished_at: str | None = None
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class SimulationInputRecord:
+    """Immutable snapshot of exactly what was requested for a simulation
+    job - never updated after creation, so it remains trustworthy evidence
+    of the inputs a persisted result was actually computed from."""
+
+    simulation_id: str
+    material_name: str
+    material_properties: dict = field(default_factory=dict)
+    units: dict = field(default_factory=dict)
+    initial_conditions: dict = field(default_factory=dict)
+    boundary_conditions: dict = field(default_factory=dict)
+    numerical_settings: dict = field(default_factory=dict)
+    created_at: str = ""
+
+
+@dataclass(frozen=True)
+class SimulationResultRecord:
+    """Immutable persisted result contract for a completed (or failed)
+    simulation job - see Phase C2/C8 of the Module 2 architecture."""
+
+    simulation_id: str
+    solver_id: str
+    solver_version: str
+    governing_equations: list = field(default_factory=list)
+    assumptions: list = field(default_factory=list)
+    warnings: list = field(default_factory=list)
+    converged: bool = False
+    residual: float | None = None
+    iteration_count: int = 0
+    tolerance: float | None = None
+    summary_metrics: dict = field(default_factory=dict)
+    field_values: list = field(default_factory=list)
+    hotspot_node_ids: list = field(default_factory=list)
+    result_object_keys: list = field(default_factory=list)
+    application_version: str = "unknown"
+    created_at: str = ""
+
+
 class PersistenceRepository(ABC):
     """Abstract persistence + ownership boundary used by Module 1 routes."""
 
@@ -212,6 +272,73 @@ class PersistenceRepository(ABC):
         started_at: str | None = None,
         finished_at: str | None = None,
     ) -> None:
+        ...
+
+    # -- simulation_jobs (Module 2) --------------------------------------
+    @abstractmethod
+    def create_simulation_job(
+        self,
+        user_id: str,
+        solver_id: str,
+        experiment_id: str | None = None,
+        design_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> str:
+        ...
+
+    @abstractmethod
+    def get_simulation_job(self, simulation_id: str) -> SimulationJobRecord | None:
+        ...
+
+    @abstractmethod
+    def get_simulation_job_by_idempotency_key(
+        self, user_id: str, idempotency_key: str
+    ) -> SimulationJobRecord | None:
+        ...
+
+    @abstractmethod
+    def count_active_simulation_jobs_for_user(self, user_id: str) -> int:
+        ...
+
+    @abstractmethod
+    def update_simulation_job(
+        self,
+        simulation_id: str,
+        *,
+        status: str | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        ...
+
+    # -- simulation_inputs (Module 2) -------------------------------------
+    @abstractmethod
+    def record_simulation_input(
+        self,
+        simulation_id: str,
+        material_name: str,
+        material_properties: dict,
+        units: dict,
+        initial_conditions: dict,
+        boundary_conditions: dict,
+        numerical_settings: dict,
+    ) -> None:
+        ...
+
+    @abstractmethod
+    def get_simulation_input(self, simulation_id: str) -> SimulationInputRecord | None:
+        ...
+
+    # -- simulation_results (Module 2) ------------------------------------
+    @abstractmethod
+    def record_simulation_result(self, result: SimulationResultRecord) -> None:
+        ...
+
+    @abstractmethod
+    def get_simulation_result(self, simulation_id: str) -> SimulationResultRecord | None:
         ...
 
 
@@ -500,6 +627,199 @@ class SupabaseRepository(PersistenceRepository):
             updated_at=row.get("updated_at", ""),
         )
 
+    # -- simulation_jobs (Module 2) --------------------------------------
+    def create_simulation_job(
+        self,
+        user_id: str,
+        solver_id: str,
+        experiment_id: str | None = None,
+        design_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> str:
+        payload = {
+            "user_id": user_id,
+            "solver_id": solver_id,
+            "experiment_id": experiment_id,
+            "design_id": design_id,
+            "status": "queued",
+            "progress_percent": 0,
+            "idempotency_key": idempotency_key,
+            "created_at": _ts(),
+            "updated_at": _ts(),
+        }
+        data = self._client.table("simulation_jobs").insert(payload).execute().data
+        if not data:
+            raise RuntimeError("Supabase did not return an inserted simulation_jobs row")
+        return data[0]["id"]
+
+    def get_simulation_job(self, simulation_id: str) -> SimulationJobRecord | None:
+        data = self._client.table("simulation_jobs").select("*").eq("id", simulation_id).execute().data
+        return self._row_to_simulation_job(data[0]) if data else None
+
+    def get_simulation_job_by_idempotency_key(
+        self, user_id: str, idempotency_key: str
+    ) -> SimulationJobRecord | None:
+        data = (
+            self._client.table("simulation_jobs")
+            .select("*")
+            .eq("user_id", user_id)
+            .eq("idempotency_key", idempotency_key)
+            .execute()
+            .data
+        )
+        return self._row_to_simulation_job(data[0]) if data else None
+
+    def count_active_simulation_jobs_for_user(self, user_id: str) -> int:
+        data = (
+            self._client.table("simulation_jobs")
+            .select("id")
+            .eq("user_id", user_id)
+            .in_("status", ["queued", "running"])
+            .execute()
+            .data
+        )
+        return len(data or [])
+
+    def update_simulation_job(
+        self,
+        simulation_id: str,
+        *,
+        status: str | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        updates: dict[str, Any] = {"updated_at": _ts()}
+        for key, value in (
+            ("status", status),
+            ("progress_percent", progress_percent),
+            ("error_code", error_code),
+            ("safe_error_message", safe_error_message),
+            ("started_at", started_at),
+            ("finished_at", finished_at),
+        ):
+            if value is not None:
+                updates[key] = value
+        self._client.table("simulation_jobs").update(updates).eq("id", simulation_id).execute()
+
+    @staticmethod
+    def _row_to_simulation_job(row: dict) -> SimulationJobRecord:
+        return SimulationJobRecord(
+            id=row["id"],
+            experiment_id=row.get("experiment_id"),
+            design_id=row.get("design_id"),
+            user_id=row["user_id"],
+            solver_id=row["solver_id"],
+            status=row.get("status", "queued"),
+            idempotency_key=row.get("idempotency_key"),
+            error_code=row.get("error_code"),
+            safe_error_message=row.get("safe_error_message"),
+            progress_percent=row.get("progress_percent", 0),
+            created_at=row.get("created_at", ""),
+            started_at=row.get("started_at"),
+            finished_at=row.get("finished_at"),
+            updated_at=row.get("updated_at", ""),
+        )
+
+    # -- simulation_inputs (Module 2) -------------------------------------
+    def record_simulation_input(
+        self,
+        simulation_id: str,
+        material_name: str,
+        material_properties: dict,
+        units: dict,
+        initial_conditions: dict,
+        boundary_conditions: dict,
+        numerical_settings: dict,
+    ) -> None:
+        payload = {
+            "simulation_id": simulation_id,
+            "material_name": material_name,
+            "material_properties": material_properties,
+            "units": units,
+            "initial_conditions": initial_conditions,
+            "boundary_conditions": boundary_conditions,
+            "numerical_settings": numerical_settings,
+            "created_at": _ts(),
+        }
+        self._client.table("simulation_inputs").insert(payload).execute()
+
+    def get_simulation_input(self, simulation_id: str) -> SimulationInputRecord | None:
+        data = (
+            self._client.table("simulation_inputs")
+            .select("*")
+            .eq("simulation_id", simulation_id)
+            .execute()
+            .data
+        )
+        if not data:
+            return None
+        row = data[0]
+        return SimulationInputRecord(
+            simulation_id=row["simulation_id"],
+            material_name=row.get("material_name", ""),
+            material_properties=row.get("material_properties") or {},
+            units=row.get("units") or {},
+            initial_conditions=row.get("initial_conditions") or {},
+            boundary_conditions=row.get("boundary_conditions") or {},
+            numerical_settings=row.get("numerical_settings") or {},
+            created_at=row.get("created_at", ""),
+        )
+
+    # -- simulation_results (Module 2) ------------------------------------
+    def record_simulation_result(self, result: SimulationResultRecord) -> None:
+        payload = {
+            "simulation_id": result.simulation_id,
+            "solver_id": result.solver_id,
+            "solver_version": result.solver_version,
+            "governing_equations": result.governing_equations,
+            "assumptions": result.assumptions,
+            "warnings": result.warnings,
+            "converged": result.converged,
+            "residual": result.residual,
+            "iteration_count": result.iteration_count,
+            "tolerance": result.tolerance,
+            "summary_metrics": result.summary_metrics,
+            "field_values": result.field_values,
+            "hotspot_node_ids": result.hotspot_node_ids,
+            "result_object_keys": result.result_object_keys,
+            "application_version": result.application_version,
+            "created_at": _ts(),
+        }
+        self._client.table("simulation_results").insert(payload).execute()
+
+    def get_simulation_result(self, simulation_id: str) -> SimulationResultRecord | None:
+        data = (
+            self._client.table("simulation_results")
+            .select("*")
+            .eq("simulation_id", simulation_id)
+            .execute()
+            .data
+        )
+        if not data:
+            return None
+        row = data[0]
+        return SimulationResultRecord(
+            simulation_id=row["simulation_id"],
+            solver_id=row["solver_id"],
+            solver_version=row.get("solver_version", "unknown"),
+            governing_equations=row.get("governing_equations") or [],
+            assumptions=row.get("assumptions") or [],
+            warnings=row.get("warnings") or [],
+            converged=bool(row.get("converged", False)),
+            residual=row.get("residual"),
+            iteration_count=row.get("iteration_count", 0),
+            tolerance=row.get("tolerance"),
+            summary_metrics=row.get("summary_metrics") or {},
+            field_values=row.get("field_values") or [],
+            hotspot_node_ids=row.get("hotspot_node_ids") or [],
+            result_object_keys=row.get("result_object_keys") or [],
+            application_version=row.get("application_version", "unknown"),
+            created_at=row.get("created_at", ""),
+        )
+
 
 class LocalSQLiteRepository(PersistenceRepository):
     """
@@ -601,6 +921,67 @@ class LocalSQLiteRepository(PersistenceRepository):
                 "CREATE UNIQUE INDEX IF NOT EXISTS idx_jobs_user_idempotency "
                 "ON generation_jobs(user_id, idempotency_key) "
                 "WHERE idempotency_key IS NOT NULL"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS simulation_jobs (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT,
+                    design_id TEXT,
+                    user_id TEXT NOT NULL,
+                    solver_id TEXT NOT NULL,
+                    status TEXT NOT NULL DEFAULT 'queued',
+                    progress_percent INTEGER NOT NULL DEFAULT 0,
+                    idempotency_key TEXT,
+                    error_code TEXT,
+                    safe_error_message TEXT,
+                    created_at TEXT NOT NULL,
+                    started_at TEXT,
+                    finished_at TEXT,
+                    updated_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_sim_jobs_user_idempotency "
+                "ON simulation_jobs(user_id, idempotency_key) "
+                "WHERE idempotency_key IS NOT NULL"
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS simulation_inputs (
+                    simulation_id TEXT PRIMARY KEY,
+                    material_name TEXT NOT NULL,
+                    material_properties TEXT NOT NULL DEFAULT '{}',
+                    units TEXT NOT NULL DEFAULT '{}',
+                    initial_conditions TEXT NOT NULL DEFAULT '{}',
+                    boundary_conditions TEXT NOT NULL DEFAULT '{}',
+                    numerical_settings TEXT NOT NULL DEFAULT '{}',
+                    created_at TEXT NOT NULL
+                )
+                """
+            )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS simulation_results (
+                    simulation_id TEXT PRIMARY KEY,
+                    solver_id TEXT NOT NULL,
+                    solver_version TEXT NOT NULL,
+                    governing_equations TEXT NOT NULL DEFAULT '[]',
+                    assumptions TEXT NOT NULL DEFAULT '[]',
+                    warnings TEXT NOT NULL DEFAULT '[]',
+                    converged INTEGER NOT NULL DEFAULT 0,
+                    residual REAL,
+                    iteration_count INTEGER NOT NULL DEFAULT 0,
+                    tolerance REAL,
+                    summary_metrics TEXT NOT NULL DEFAULT '{}',
+                    field_values TEXT NOT NULL DEFAULT '[]',
+                    hotspot_node_ids TEXT NOT NULL DEFAULT '[]',
+                    result_object_keys TEXT NOT NULL DEFAULT '[]',
+                    application_version TEXT NOT NULL DEFAULT 'unknown',
+                    created_at TEXT NOT NULL
+                )
+                """
             )
             conn.commit()
         finally:
@@ -922,6 +1303,232 @@ class LocalSQLiteRepository(PersistenceRepository):
             updated_at=row["updated_at"],
         )
 
+    # -- simulation_jobs (Module 2) --------------------------------------
+    def create_simulation_job(
+        self,
+        user_id: str,
+        solver_id: str,
+        experiment_id: str | None = None,
+        design_id: str | None = None,
+        idempotency_key: str | None = None,
+    ) -> str:
+        simulation_id = str(uuid.uuid4())
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO simulation_jobs (id, experiment_id, design_id, user_id, solver_id, "
+                "status, progress_percent, idempotency_key, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, 'queued', 0, ?, ?, ?)",
+                (simulation_id, experiment_id, design_id, user_id, solver_id, idempotency_key, _ts(), _ts()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+        return simulation_id
+
+    def get_simulation_job(self, simulation_id: str) -> SimulationJobRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM simulation_jobs WHERE id = ?", (simulation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_simulation_job(row) if row is not None else None
+
+    def get_simulation_job_by_idempotency_key(
+        self, user_id: str, idempotency_key: str
+    ) -> SimulationJobRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM simulation_jobs WHERE user_id = ? AND idempotency_key = ?",
+                (user_id, idempotency_key),
+            ).fetchone()
+        finally:
+            conn.close()
+        return self._row_to_simulation_job(row) if row is not None else None
+
+    def count_active_simulation_jobs_for_user(self, user_id: str) -> int:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT COUNT(*) AS count FROM simulation_jobs "
+                "WHERE user_id = ? AND status IN ('queued', 'running')",
+                (user_id,),
+            ).fetchone()
+        finally:
+            conn.close()
+        return int(row["count"])
+
+    def update_simulation_job(
+        self,
+        simulation_id: str,
+        *,
+        status: str | None = None,
+        progress_percent: int | None = None,
+        error_code: str | None = None,
+        safe_error_message: str | None = None,
+        started_at: str | None = None,
+        finished_at: str | None = None,
+    ) -> None:
+        fields_to_set: list[str] = ["updated_at = ?"]
+        values: list[Any] = [_ts()]
+        for column, value in (
+            ("status", status),
+            ("progress_percent", progress_percent),
+            ("error_code", error_code),
+            ("safe_error_message", safe_error_message),
+            ("started_at", started_at),
+            ("finished_at", finished_at),
+        ):
+            if value is not None:
+                fields_to_set.append(f"{column} = ?")
+                values.append(value)
+        values.append(simulation_id)
+        conn = self._connect()
+        try:
+            conn.execute(
+                f"UPDATE simulation_jobs SET {', '.join(fields_to_set)} WHERE id = ?",
+                values,
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _row_to_simulation_job(row: sqlite3.Row) -> SimulationJobRecord:
+        return SimulationJobRecord(
+            id=row["id"],
+            experiment_id=row["experiment_id"],
+            design_id=row["design_id"],
+            user_id=row["user_id"],
+            solver_id=row["solver_id"],
+            status=row["status"],
+            idempotency_key=row["idempotency_key"],
+            error_code=row["error_code"],
+            safe_error_message=row["safe_error_message"],
+            progress_percent=row["progress_percent"],
+            created_at=row["created_at"],
+            started_at=row["started_at"],
+            finished_at=row["finished_at"],
+            updated_at=row["updated_at"],
+        )
+
+    # -- simulation_inputs (Module 2) -------------------------------------
+    def record_simulation_input(
+        self,
+        simulation_id: str,
+        material_name: str,
+        material_properties: dict,
+        units: dict,
+        initial_conditions: dict,
+        boundary_conditions: dict,
+        numerical_settings: dict,
+    ) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO simulation_inputs (simulation_id, material_name, material_properties, "
+                "units, initial_conditions, boundary_conditions, numerical_settings, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    simulation_id,
+                    material_name,
+                    json.dumps(material_properties),
+                    json.dumps(units),
+                    json.dumps(initial_conditions),
+                    json.dumps(boundary_conditions),
+                    json.dumps(numerical_settings),
+                    _ts(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_simulation_input(self, simulation_id: str) -> SimulationInputRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM simulation_inputs WHERE simulation_id = ?", (simulation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return SimulationInputRecord(
+            simulation_id=row["simulation_id"],
+            material_name=row["material_name"],
+            material_properties=json.loads(row["material_properties"]),
+            units=json.loads(row["units"]),
+            initial_conditions=json.loads(row["initial_conditions"]),
+            boundary_conditions=json.loads(row["boundary_conditions"]),
+            numerical_settings=json.loads(row["numerical_settings"]),
+            created_at=row["created_at"],
+        )
+
+    # -- simulation_results (Module 2) ------------------------------------
+    def record_simulation_result(self, result: SimulationResultRecord) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO simulation_results (simulation_id, solver_id, solver_version, "
+                "governing_equations, assumptions, warnings, converged, residual, iteration_count, "
+                "tolerance, summary_metrics, field_values, hotspot_node_ids, result_object_keys, "
+                "application_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    result.simulation_id,
+                    result.solver_id,
+                    result.solver_version,
+                    json.dumps(result.governing_equations),
+                    json.dumps(result.assumptions),
+                    json.dumps(result.warnings),
+                    int(result.converged),
+                    result.residual,
+                    result.iteration_count,
+                    result.tolerance,
+                    json.dumps(result.summary_metrics),
+                    json.dumps(result.field_values),
+                    json.dumps(result.hotspot_node_ids),
+                    json.dumps(result.result_object_keys),
+                    result.application_version,
+                    _ts(),
+                ),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_simulation_result(self, simulation_id: str) -> SimulationResultRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute(
+                "SELECT * FROM simulation_results WHERE simulation_id = ?", (simulation_id,)
+            ).fetchone()
+        finally:
+            conn.close()
+        if row is None:
+            return None
+        return SimulationResultRecord(
+            simulation_id=row["simulation_id"],
+            solver_id=row["solver_id"],
+            solver_version=row["solver_version"],
+            governing_equations=json.loads(row["governing_equations"]),
+            assumptions=json.loads(row["assumptions"]),
+            warnings=json.loads(row["warnings"]),
+            converged=bool(row["converged"]),
+            residual=row["residual"],
+            iteration_count=row["iteration_count"],
+            tolerance=row["tolerance"],
+            summary_metrics=json.loads(row["summary_metrics"]),
+            field_values=json.loads(row["field_values"]),
+            hotspot_node_ids=json.loads(row["hotspot_node_ids"]),
+            result_object_keys=json.loads(row["result_object_keys"]),
+            application_version=row["application_version"],
+            created_at=row["created_at"],
+        )
+
 
 def default_local_db_path() -> str:
     override = os.environ.get("LOCAL_PERSISTENCE_DB_PATH")
@@ -933,7 +1540,7 @@ def default_local_db_path() -> str:
     # migrates an existing file with the old column set, so bumping this
     # name forces a fresh, correctly-shaped database instead of crashing
     # against a stale one left over from before this change.
-    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence_v2.db")
+    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence_v3.db")
 
 
 def get_repository() -> PersistenceRepository:

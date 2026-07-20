@@ -68,3 +68,133 @@ def get_simulation_job_status(job_id: str) -> dict:
     elif task.failed():
         response["error"] = str(task.result)
     return response
+
+
+# -- new unified simulations API (Phase C8) ------------------------------------------------
+# Mounted alongside (not instead of) the legacy `/api/simulate/*` router above -
+# see `app.main` and the module-level note in `app.module2_simulation.schemas`.
+from fastapi import Header  # noqa: E402
+
+from app.module2_simulation.materials import MaterialNotFoundError, MaterialPropertyNotFoundError  # noqa: E402
+from app.module2_simulation.schemas import (  # noqa: E402
+    CapabilitiesResponse,
+    RecommendRequest,
+    RecommendResponse,
+    SimulationCreateRequest,
+    SimulationJobResponse,
+    SimulationResultsResponse,
+)
+from app.module2_simulation.service import (  # noqa: E402
+    SimulationNotFoundError,
+    SimulationRateLimitError,
+    cancel_simulation_service,
+    create_simulation_job_service,
+    get_simulation_results_service,
+    get_simulation_status_service,
+)
+from app.module2_simulation.simulation_advisor import recommend_from_registry  # noqa: E402
+from app.module2_simulation.solver_registry import (  # noqa: E402
+    UnknownSolverError,
+    UnsupportedCapabilityError,
+    list_solvers,
+)
+
+simulations_router = APIRouter(
+    prefix="/api/simulations",
+    tags=["Module 2 - Multi-Physics Simulations"],
+    dependencies=[Depends(get_current_user)],
+)
+
+
+@simulations_router.get(
+    "/capabilities",
+    response_model=CapabilitiesResponse,
+    summary="List every registered solver's declared capabilities",
+    description=(
+        "Single source of truth for what each solver family can and cannot do - governing "
+        "equations, supported dimensions/materials/boundary conditions, known limitations, and "
+        "benchmark test references. A solver's `implementation_status` here is always accurate: "
+        "'real' solvers are backed by a validated numerical method, 'prototype'/'planned' solvers "
+        "have no validated result and this API refuses to return one for them (see POST /)."
+    ),
+)
+def get_capabilities() -> CapabilitiesResponse:
+    return CapabilitiesResponse(solvers=list_solvers())
+
+
+@simulations_router.post(
+    "/recommend",
+    response_model=RecommendResponse,
+    summary="Recommend solvers for a geometry category",
+    description="Registry-backed recommendations; each recommendation's status is derived directly "
+    "from the capability registry, never hand-picked.",
+)
+def recommend(payload: RecommendRequest) -> RecommendResponse:
+    return recommend_from_registry(payload)
+
+
+@simulations_router.post(
+    "",
+    response_model=SimulationJobResponse,
+    status_code=202,
+    summary="Queue a new simulation job",
+    description=(
+        "Validates the requested solver is 'real' (never accepts a request for a prototype/planned "
+        "solver), persists a queued job + an immutable snapshot of its inputs, and dispatches the "
+        "solve to Celery. Returns immediately with a simulation_id for polling."
+    ),
+)
+def create_simulation(
+    payload: SimulationCreateRequest,
+    current_user: dict = Depends(get_current_user),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> SimulationJobResponse:
+    try:
+        return create_simulation_job_service(payload, current_user["id"], idempotency_key)
+    except (UnknownSolverError, UnsupportedCapabilityError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except (MaterialNotFoundError, MaterialPropertyNotFoundError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SimulationRateLimitError as exc:
+        raise HTTPException(status_code=429, detail=str(exc)) from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}",
+    response_model=SimulationJobResponse,
+    summary="Get simulation job status",
+    description="Returns the persisted status/progress of a simulation job. Owner-only.",
+)
+def get_simulation(simulation_id: str, current_user: dict = Depends(get_current_user)) -> SimulationJobResponse:
+    try:
+        return get_simulation_status_service(simulation_id, current_user["id"])
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Simulation not found") from exc
+
+
+@simulations_router.post(
+    "/{simulation_id}/cancel",
+    response_model=SimulationJobResponse,
+    summary="Cancel a simulation job",
+    description="Cooperative cancellation: marks the job 'cancelled' if not already in a terminal state. Owner-only.",
+)
+def cancel_simulation(simulation_id: str, current_user: dict = Depends(get_current_user)) -> SimulationJobResponse:
+    try:
+        return cancel_simulation_service(simulation_id, current_user["id"])
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Simulation not found") from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}/results",
+    response_model=SimulationResultsResponse,
+    summary="Get persisted simulation results",
+    description="Returns the job status plus its persisted result payload (null until completed). Owner-only.",
+)
+def get_simulation_results(
+    simulation_id: str, current_user: dict = Depends(get_current_user)
+) -> SimulationResultsResponse:
+    try:
+        return get_simulation_results_service(simulation_id, current_user["id"])
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Simulation not found") from exc
