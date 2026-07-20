@@ -1,0 +1,17 @@
+name: Actions Diagnostic
+
+on:
+  workflow_dispatch:
+
+jobs:
+  diagnostic:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Echo diagnostic success
+        run: echo "diagnostic success"
+
+      - name: Python version
+        run: python --version
