@@ -93,16 +93,16 @@ jobs:
         run: pip install -r requirements.txt
 
       - name: Run unit tests (no CAD kernel required)
-        run: pytest -m unit -q
+        run: python -m pytest -m unit -q
 
       - name: Run integration tests (real CadQuery/OCP required)
-        run: pytest -m integration -q
+        run: python -m pytest -m integration -q
 
       - name: Run numerical solver benchmark tests
-        run: pytest -m benchmark -q
+        run: python -m pytest -m benchmark -q
 
       - name: Run end-to-end tests (real live uvicorn process over real HTTP)
-        run: pytest -m e2e -q
+        run: python -m pytest -m e2e -q
 
   deploy-backend:
     needs: [changes, test-backend]
