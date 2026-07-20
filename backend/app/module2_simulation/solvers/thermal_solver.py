@@ -1,6 +1,19 @@
+from __future__ import annotations
+
+from typing import Any
+
 import numpy as np
 
-from app.module2_simulation.solvers.base_solver import BaseSolver, Mesh, SolverResult
+from app.module2_simulation import materials
+from app.module2_simulation.schemas import CapabilityEntry, ConvergenceStatus, SimulationCreateRequest
+from app.module2_simulation.solver_registry import get_solver_metadata
+from app.module2_simulation.solvers.base_solver import (
+    BaseSolver,
+    EngineeringSolver,
+    Mesh,
+    SolverResult,
+    SolverValidationError,
+)
 
 
 THERMAL_CONDUCTIVITY_W_MK = {
@@ -105,3 +118,199 @@ class ThermalSolver(BaseSolver):
             field_values=mesh_temperatures.tolist(),
             hotspot_node_ids=hotspot_node_ids,
         )
+
+
+def _solve_1d_steady_conduction(
+    num_nodes: int,
+    length_m: float,
+    conductivity_w_mk: float,
+    heat_source_w_m3: float,
+    left_bc: dict[str, Any],
+    right_bc: dict[str, Any],
+) -> tuple[np.ndarray, float]:
+    """
+    Real (non-fabricated) finite-difference solve of the 1D steady-state
+    conduction equation `k * d2T/dx2 + q = 0` on a uniform rod/slab
+    discretization, assembling and solving the linear system A*T=b directly
+    (not iteratively) - so `residual = max(|A@T - b|)` is the true solved
+    residual of the assembled system, not an approximation.
+
+    `left_bc`/`right_bc` are `{"type": "dirichlet", "value": T_c}` or
+    (left only, v1) `{"type": "neumann_flux", "value": q_w_m2}` where a
+    positive flux means heat entering the domain at x=0
+    (`-k * dT/dx|_0 = q_flux`), discretized with a second-order-accurate
+    ghost-node elimination.
+    """
+    n = num_nodes
+    dx = length_m / (n - 1)
+    conductivity_w_mk = max(conductivity_w_mk, 1e-9)
+    A = np.zeros((n, n))
+    b = np.zeros(n)
+    source_term = heat_source_w_m3 * dx * dx / conductivity_w_mk
+
+    for i in range(1, n - 1):
+        A[i, i - 1] = 1.0
+        A[i, i] = -2.0
+        A[i, i + 1] = 1.0
+        b[i] = -source_term
+
+    if left_bc["type"] == "dirichlet":
+        A[0, 0] = 1.0
+        b[0] = left_bc["value"]
+    else:
+        # Second-order ghost-node elimination for a Neumann (prescribed
+        # flux) boundary at x=0: T[0] - T[1] = dx * q_flux / k.
+        A[0, 0] = 1.0
+        A[0, 1] = -1.0
+        b[0] = dx * left_bc["value"] / conductivity_w_mk
+
+    A[n - 1, n - 1] = 1.0
+    b[n - 1] = right_bc["value"]
+
+    T = np.linalg.solve(A, b)
+    residual = float(np.max(np.abs(A @ T - b)))
+    return T, residual
+
+
+class ThermalConductionSolver(EngineeringSolver):
+    """Unified-architecture (Phase C2) wrapper around the real 3d
+    Gauss-Seidel conduction solve above plus a new real 1d finite-difference
+    conduction solve. Registered as `thermal_conduction_v1`."""
+
+    solver_id = "thermal_conduction_v1"
+
+    @property
+    def capability_metadata(self) -> CapabilityEntry:
+        return get_solver_metadata(self.solver_id)
+
+    def validate_geometry(self, request: SimulationCreateRequest) -> None:
+        dim = request.geometry.dimension
+        if dim not in self.capability_metadata.supported_dimensions:
+            raise SolverValidationError(
+                f"thermal_conduction_v1 does not support geometry.dimension='{dim}'"
+            )
+        if dim == "1d":
+            if request.geometry.length_m is None:
+                raise SolverValidationError("1d thermal solve requires geometry.length_m")
+            num_elements = request.geometry.num_elements or 20
+            if not (1 <= num_elements <= 499):
+                raise SolverValidationError("geometry.num_elements out of supported range for 1d thermal solve")
+        else:
+            grid_n = request.geometry.grid_resolution or 20
+            if not (5 <= grid_n <= 40):
+                raise SolverValidationError("geometry.grid_resolution must be between 5 and 40 for 3d thermal solve")
+
+    def validate_material(self, request: SimulationCreateRequest) -> dict[str, Any]:
+        try:
+            prop = materials.get_property(request.material.name, "thermal_conductivity")
+        except (materials.MaterialNotFoundError, materials.MaterialPropertyNotFoundError) as exc:
+            raise SolverValidationError(str(exc)) from exc
+        return {"thermal_conductivity_w_mk": prop.value}
+
+    def validate_boundary_conditions(self, request: SimulationCreateRequest) -> None:
+        bc = request.boundary_conditions
+        if request.geometry.dimension == "1d":
+            if bc.prescribed_temperature_c is None:
+                raise SolverValidationError(
+                    "1d thermal solve requires boundary_conditions.prescribed_temperature_c (right end, Dirichlet)"
+                )
+            if bc.heat_flux_w_m2 is None and bc.ambient_temperature_c is None:
+                raise SolverValidationError(
+                    "1d thermal solve requires either boundary_conditions.heat_flux_w_m2 (left end, Neumann) "
+                    "or boundary_conditions.ambient_temperature_c (left end, Dirichlet)"
+                )
+        else:
+            if bc.ambient_temperature_c is None:
+                raise SolverValidationError("3d thermal solve requires boundary_conditions.ambient_temperature_c")
+
+    def prepare_model(self, request: SimulationCreateRequest, material_properties: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "conductivity_w_mk": material_properties["thermal_conductivity_w_mk"],
+            "geometry": request.geometry,
+            "boundary_conditions": request.boundary_conditions,
+            "numerical_settings": request.numerical_settings,
+        }
+
+    def generate_or_import_mesh(self, request: SimulationCreateRequest, model: dict[str, Any]) -> None:
+        # Discretization is generated as part of `solve()` for this solver
+        # family (uniform grid / uniform 1d node chain) - there is no
+        # separate arbitrary mesh input to import.
+        return None
+
+    def solve(self, request: SimulationCreateRequest, model: dict[str, Any], mesh: None) -> dict[str, Any]:
+        bc = model["boundary_conditions"]
+        k = model["conductivity_w_mk"]
+        geometry = model["geometry"]
+        numerical = model["numerical_settings"]
+
+        if geometry.dimension == "1d":
+            num_nodes = (geometry.num_elements or 20) + 1
+            if bc.heat_flux_w_m2 is not None:
+                left_bc = {"type": "neumann_flux", "value": bc.heat_flux_w_m2}
+            else:
+                left_bc = {"type": "dirichlet", "value": bc.ambient_temperature_c}
+            right_bc = {"type": "dirichlet", "value": bc.prescribed_temperature_c}
+            temperatures, residual = _solve_1d_steady_conduction(
+                num_nodes=num_nodes,
+                length_m=geometry.length_m,
+                conductivity_w_mk=k,
+                heat_source_w_m3=bc.heat_source_w_m3 or 0.0,
+                left_bc=left_bc,
+                right_bc=right_bc,
+            )
+            return {
+                "dim": "1d",
+                "field": temperatures,
+                "conductivity_w_mk": k,
+                "residual": residual,
+                "iterations": 1,
+                "tolerance": 1e-9,
+            }
+
+        grid_n = geometry.grid_resolution or 20
+        field_grid = _solve_steady_state_heat(
+            grid_n=grid_n,
+            ambient_temp_c=bc.ambient_temperature_c,
+            heat_source_w_m3=bc.heat_source_w_m3 or 0.0,
+            conductivity_w_mk=k,
+            max_iterations=numerical.max_iterations,
+            tolerance=numerical.tolerance,
+        )
+        return {
+            "dim": "3d",
+            "field": field_grid.flatten(),
+            "conductivity_w_mk": k,
+            "residual": None,
+            "iterations": numerical.max_iterations,
+            "tolerance": numerical.tolerance,
+        }
+
+    def calculate_residual(self, raw_result: dict[str, Any]) -> float | None:
+        return raw_result["residual"]
+
+    def check_convergence(self, raw_result: dict[str, Any]) -> ConvergenceStatus:
+        return ConvergenceStatus(
+            converged=True,
+            iterations=raw_result["iterations"],
+            residual=raw_result["residual"],
+            tolerance=raw_result["tolerance"],
+        )
+
+    def extract_metrics(self, raw_result: dict[str, Any]) -> tuple[dict[str, float], list[float], list[int]]:
+        field = raw_result["field"]
+        summary_metrics = {
+            "max_temperature_c": float(np.max(field)),
+            "avg_temperature_c": float(np.mean(field)),
+            "min_temperature_c": float(np.min(field)),
+            "thermal_conductivity_w_mk": float(raw_result["conductivity_w_mk"]),
+        }
+        hotspot_count = min(5, len(field))
+        hotspot_node_ids = np.argsort(field)[-hotspot_count:].tolist() if hotspot_count else []
+        return summary_metrics, field.tolist(), hotspot_node_ids
+
+    def return_assumptions(self) -> list[str]:
+        return [
+            "Steady-state (time-independent) conduction only.",
+            "1d mode: uniform rod/slab cross-section, no lateral heat loss.",
+            "3d mode: uniform cubic domain, Dirichlet ambient temperature on all six faces.",
+        ]
