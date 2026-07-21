@@ -178,6 +178,8 @@ class SimulationResultPayload(BaseModel):
     validation_metadata: dict = Field(default_factory=dict)
     elapsed_time_seconds: float | None = Field(default=None, ge=0)
     reproducibility_hash: str = ""
+    source_design_id: str | None = None
+    source_simulation_id: str | None = None
 
 
 class SimulationJobResponse(BaseModel):

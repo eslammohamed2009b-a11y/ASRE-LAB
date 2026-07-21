@@ -78,6 +78,7 @@ def run_simulation_job(
     solver_cls = SOLVER_CLASSES[solver_id]
     try:
         result, numerical_fields = solver_cls().run_with_fields(request)
+        result.source_simulation_id = simulation_id
     except SolverValidationError as exc:
         repo.update_simulation_job(
             simulation_id,
@@ -130,6 +131,11 @@ def run_simulation_job(
             finished_at=_now_iso(),
         )
 
+    persisted_status = (
+        "partial_failure"
+        if repo.get_simulation_job(simulation_id).status == "partial_failure"
+        else "completed"
+    )
     repo.record_simulation_result(
         SimulationResultRecord(
             simulation_id=simulation_id,
@@ -147,6 +153,13 @@ def run_simulation_job(
             hotspot_node_ids=result.hotspot_node_ids,
             result_object_keys=[record.storage_object_key for record in field_records],
             application_version=_settings.APPLICATION_VERSION,
+            status=persisted_status,
+            numerical_method=result.numerical_method,
+            residual_history=result.residual_history,
+            validation_metadata=result.validation_metadata,
+            elapsed_time_seconds=result.elapsed_time_seconds,
+            reproducibility_hash=result.reproducibility_hash,
+            source_design_id=design_id,
         )
     )
     latest = repo.get_simulation_job(simulation_id)

@@ -169,7 +169,34 @@ class SimulationResultRecord:
     hotspot_node_ids: list = field(default_factory=list)
     result_object_keys: list = field(default_factory=list)
     application_version: str = "unknown"
+    status: str = "completed"
+    numerical_method: str = ""
+    residual_history: list = field(default_factory=list)
+    validation_metadata: dict = field(default_factory=dict)
+    elapsed_time_seconds: float | None = None
+    reproducibility_hash: str = ""
+    source_design_id: str | None = None
     created_at: str = ""
+
+
+@dataclass(frozen=True)
+class AnalysisRecord:
+    id: str
+    experiment_id: str
+    user_id: str
+    analysis_type: str
+    status: str
+    dataset_hash: str
+    configuration: dict = field(default_factory=dict)
+    result: dict = field(default_factory=dict)
+    warnings: list = field(default_factory=list)
+    source_design_ids: list = field(default_factory=list)
+    source_simulation_ids: list = field(default_factory=list)
+    data_quality: dict = field(default_factory=dict)
+    engine_version: str = "1.0"
+    reproducibility_hash: str = ""
+    created_at: str = ""
+    updated_at: str = ""
 
 
 @dataclass(frozen=True)
@@ -325,6 +352,10 @@ class PersistenceRepository(ABC):
         ...
 
     @abstractmethod
+    def list_simulation_jobs_for_experiment(self, experiment_id: str) -> list[SimulationJobRecord]:
+        ...
+
+    @abstractmethod
     def update_simulation_job(
         self,
         simulation_id: str,
@@ -375,6 +406,19 @@ class PersistenceRepository(ABC):
 
     @abstractmethod
     def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
+        ...
+
+    # -- analyses (Module 3) ----------------------------------------------
+    @abstractmethod
+    def create_analysis(self, record: AnalysisRecord) -> None:
+        ...
+
+    @abstractmethod
+    def get_analysis(self, analysis_id: str) -> AnalysisRecord | None:
+        ...
+
+    @abstractmethod
+    def list_analyses_for_experiment(self, experiment_id: str) -> list[AnalysisRecord]:
         ...
 
 
@@ -614,6 +658,18 @@ class SupabaseRepository(PersistenceRepository):
         )
         return len(data or [])
 
+    def list_simulation_jobs_for_experiment(self, experiment_id: str) -> list[SimulationJobRecord]:
+        data = (
+            self._client.table("simulation_jobs")
+            .select("*")
+            .eq("experiment_id", experiment_id)
+            .order("created_at")
+            .order("id")
+            .execute()
+            .data
+        )
+        return [self._row_to_simulation_job(row) for row in (data or [])]
+
     def update_job(
         self,
         job_id: str,
@@ -822,6 +878,13 @@ class SupabaseRepository(PersistenceRepository):
             "hotspot_node_ids": result.hotspot_node_ids,
             "result_object_keys": result.result_object_keys,
             "application_version": result.application_version,
+            "status": result.status,
+            "numerical_method": result.numerical_method,
+            "residual_history": result.residual_history,
+            "validation_metadata": result.validation_metadata,
+            "elapsed_time_seconds": result.elapsed_time_seconds,
+            "reproducibility_hash": result.reproducibility_hash,
+            "source_design_id": result.source_design_id,
             "created_at": _ts(),
         }
         self._client.table("simulation_results").insert(payload).execute()
@@ -853,6 +916,12 @@ class SupabaseRepository(PersistenceRepository):
             hotspot_node_ids=row.get("hotspot_node_ids") or [],
             result_object_keys=row.get("result_object_keys") or [],
             application_version=row.get("application_version", "unknown"),
+            status=row.get("status", "completed"), numerical_method=row.get("numerical_method", ""),
+            residual_history=row.get("residual_history") or [],
+            validation_metadata=row.get("validation_metadata") or {},
+            elapsed_time_seconds=row.get("elapsed_time_seconds"),
+            reproducibility_hash=row.get("reproducibility_hash", ""),
+            source_design_id=row.get("source_design_id"),
             created_at=row.get("created_at", ""),
         )
 
@@ -889,6 +958,44 @@ class SupabaseRepository(PersistenceRepository):
     def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
         data = self._client.table("simulation_field_results").select("*").eq("simulation_id", simulation_id).execute().data
         return [self._field_result_from_row(row) for row in data]
+
+    # -- analyses (Module 3) ----------------------------------------------
+    @staticmethod
+    def _analysis_from_row(row: dict) -> AnalysisRecord:
+        return AnalysisRecord(
+            id=row["id"], experiment_id=row["experiment_id"], user_id=row["user_id"],
+            analysis_type=row["analysis_type"], status=row["status"],
+            dataset_hash=row["dataset_hash"], configuration=row.get("configuration") or {},
+            result=row.get("result") or {}, warnings=row.get("warnings") or [],
+            source_design_ids=row.get("source_design_ids") or [],
+            source_simulation_ids=row.get("source_simulation_ids") or [],
+            data_quality=row.get("data_quality") or {}, engine_version=row.get("engine_version", "1.0"),
+            reproducibility_hash=row.get("reproducibility_hash", ""),
+            created_at=row.get("created_at", ""), updated_at=row.get("updated_at", ""),
+        )
+
+    def create_analysis(self, record: AnalysisRecord) -> None:
+        self._client.table("experiment_analyses").insert({
+            "id": record.id, "experiment_id": record.experiment_id,
+            "user_id": record.user_id, "analysis_type": record.analysis_type,
+            "status": record.status, "dataset_hash": record.dataset_hash,
+            "configuration": record.configuration, "result": record.result,
+            "warnings": record.warnings, "source_design_ids": record.source_design_ids,
+            "source_simulation_ids": record.source_simulation_ids, "data_quality": record.data_quality,
+            "engine_version": record.engine_version, "reproducibility_hash": record.reproducibility_hash,
+            "created_at": record.created_at or _ts(), "updated_at": record.updated_at or _ts(),
+        }).execute()
+
+    def get_analysis(self, analysis_id: str) -> AnalysisRecord | None:
+        data = self._client.table("experiment_analyses").select("*").eq("id", analysis_id).execute().data
+        return self._analysis_from_row(data[0]) if data else None
+
+    def list_analyses_for_experiment(self, experiment_id: str) -> list[AnalysisRecord]:
+        data = (
+            self._client.table("experiment_analyses").select("*")
+            .eq("experiment_id", experiment_id).order("created_at").order("id").execute().data
+        )
+        return [self._analysis_from_row(row) for row in (data or [])]
 
 
 class LocalSQLiteRepository(PersistenceRepository):
@@ -1049,6 +1156,13 @@ class LocalSQLiteRepository(PersistenceRepository):
                     hotspot_node_ids TEXT NOT NULL DEFAULT '[]',
                     result_object_keys TEXT NOT NULL DEFAULT '[]',
                     application_version TEXT NOT NULL DEFAULT 'unknown',
+                    status TEXT NOT NULL DEFAULT 'completed',
+                    numerical_method TEXT NOT NULL DEFAULT '',
+                    residual_history TEXT NOT NULL DEFAULT '[]',
+                    validation_metadata TEXT NOT NULL DEFAULT '{}',
+                    elapsed_time_seconds REAL,
+                    reproducibility_hash TEXT NOT NULL DEFAULT '',
+                    source_design_id TEXT,
                     created_at TEXT NOT NULL
                 )
                 """
@@ -1081,6 +1195,33 @@ class LocalSQLiteRepository(PersistenceRepository):
                 """
             )
             conn.execute("CREATE INDEX IF NOT EXISTS idx_field_results_simulation ON simulation_field_results(simulation_id)")
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS experiment_analyses (
+                    id TEXT PRIMARY KEY,
+                    experiment_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    analysis_type TEXT NOT NULL,
+                    status TEXT NOT NULL,
+                    dataset_hash TEXT NOT NULL,
+                    configuration TEXT NOT NULL DEFAULT '{}',
+                    result TEXT NOT NULL DEFAULT '{}',
+                    warnings TEXT NOT NULL DEFAULT '[]',
+                    source_design_ids TEXT NOT NULL DEFAULT '[]',
+                    source_simulation_ids TEXT NOT NULL DEFAULT '[]',
+                    data_quality TEXT NOT NULL DEFAULT '{}',
+                    engine_version TEXT NOT NULL DEFAULT '1.0',
+                    reproducibility_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY(experiment_id) REFERENCES experiments(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute(
+                "CREATE INDEX IF NOT EXISTS idx_analyses_experiment "
+                "ON experiment_analyses(experiment_id, created_at, id)"
+            )
             conn.commit()
         finally:
             conn.close()
@@ -1459,6 +1600,17 @@ class LocalSQLiteRepository(PersistenceRepository):
             conn.close()
         return int(row["count"])
 
+    def list_simulation_jobs_for_experiment(self, experiment_id: str) -> list[SimulationJobRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM simulation_jobs WHERE experiment_id = ? ORDER BY created_at, id",
+                (experiment_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._row_to_simulation_job(row) for row in rows]
+
     def update_simulation_job(
         self,
         simulation_id: str,
@@ -1574,7 +1726,9 @@ class LocalSQLiteRepository(PersistenceRepository):
                 "INSERT INTO simulation_results (simulation_id, solver_id, solver_version, "
                 "governing_equations, assumptions, warnings, converged, residual, iteration_count, "
                 "tolerance, summary_metrics, field_values, hotspot_node_ids, result_object_keys, "
-                "application_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "application_version, status, numerical_method, residual_history, validation_metadata, "
+                "elapsed_time_seconds, reproducibility_hash, source_design_id, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     result.simulation_id,
                     result.solver_id,
@@ -1591,6 +1745,13 @@ class LocalSQLiteRepository(PersistenceRepository):
                     json.dumps(result.hotspot_node_ids),
                     json.dumps(result.result_object_keys),
                     result.application_version,
+                    result.status,
+                    result.numerical_method,
+                    json.dumps(result.residual_history),
+                    json.dumps(result.validation_metadata),
+                    result.elapsed_time_seconds,
+                    result.reproducibility_hash,
+                    result.source_design_id,
                     _ts(),
                 ),
             )
@@ -1624,6 +1785,11 @@ class LocalSQLiteRepository(PersistenceRepository):
             hotspot_node_ids=json.loads(row["hotspot_node_ids"]),
             result_object_keys=json.loads(row["result_object_keys"]),
             application_version=row["application_version"],
+            status=row["status"], numerical_method=row["numerical_method"],
+            residual_history=json.loads(row["residual_history"]),
+            validation_metadata=json.loads(row["validation_metadata"]),
+            elapsed_time_seconds=row["elapsed_time_seconds"],
+            reproducibility_hash=row["reproducibility_hash"], source_design_id=row["source_design_id"],
             created_at=row["created_at"],
         )
 
@@ -1677,6 +1843,59 @@ class LocalSQLiteRepository(PersistenceRepository):
             conn.close()
         return [self._field_result_from_sqlite(row) for row in rows]
 
+    # -- analyses (Module 3) ----------------------------------------------
+    @staticmethod
+    def _analysis_from_sqlite(row: sqlite3.Row) -> AnalysisRecord:
+        return AnalysisRecord(
+            id=row["id"], experiment_id=row["experiment_id"], user_id=row["user_id"],
+            analysis_type=row["analysis_type"], status=row["status"],
+            dataset_hash=row["dataset_hash"], configuration=json.loads(row["configuration"]),
+            result=json.loads(row["result"]), warnings=json.loads(row["warnings"]),
+            source_design_ids=json.loads(row["source_design_ids"]),
+            source_simulation_ids=json.loads(row["source_simulation_ids"]),
+            data_quality=json.loads(row["data_quality"]), engine_version=row["engine_version"],
+            reproducibility_hash=row["reproducibility_hash"],
+            created_at=row["created_at"], updated_at=row["updated_at"],
+        )
+
+    def create_analysis(self, record: AnalysisRecord) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO experiment_analyses (id, experiment_id, user_id, analysis_type, status, "
+                "dataset_hash, configuration, result, warnings, source_design_ids, source_simulation_ids, "
+                "data_quality, engine_version, reproducibility_hash, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (record.id, record.experiment_id, record.user_id, record.analysis_type, record.status,
+                 record.dataset_hash, json.dumps(record.configuration), json.dumps(record.result),
+                 json.dumps(record.warnings), json.dumps(record.source_design_ids),
+                 json.dumps(record.source_simulation_ids), json.dumps(record.data_quality),
+                 record.engine_version, record.reproducibility_hash, record.created_at or _ts(),
+                 record.updated_at or record.created_at or _ts()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    def get_analysis(self, analysis_id: str) -> AnalysisRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM experiment_analyses WHERE id = ?", (analysis_id,)).fetchone()
+        finally:
+            conn.close()
+        return self._analysis_from_sqlite(row) if row else None
+
+    def list_analyses_for_experiment(self, experiment_id: str) -> list[AnalysisRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM experiment_analyses WHERE experiment_id = ? ORDER BY created_at, id",
+                (experiment_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._analysis_from_sqlite(row) for row in rows]
+
 
 def default_local_db_path() -> str:
     override = os.environ.get("LOCAL_PERSISTENCE_DB_PATH")
@@ -1688,7 +1907,7 @@ def default_local_db_path() -> str:
     # migrates an existing file with the old column set, so bumping this
     # name forces a fresh, correctly-shaped database instead of crashing
     # against a stale one left over from before this change.
-    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence_v3.db")
+    return str(Path(tempfile.gettempdir()) / "asre_lab_local_persistence_v4.db")
 
 
 def get_repository() -> PersistenceRepository:

@@ -216,6 +216,14 @@ class EngineeringSolver(ABC):
             "summary_metrics": payload.summary_metrics,
         }
         payload.numerical_method = self.numerical_method
+        payload.source_design_id = request.design_id
+        if convergence.residual is not None:
+            payload.residual_history = [convergence.residual]
+        payload.validation_metadata = {
+            "implementation_status": self.capability_metadata.implementation_status.value,
+            "validation_status": self.capability_metadata.validation_status.value,
+            "benchmark_references": self.capability_metadata.benchmark_references,
+        }
         payload.elapsed_time_seconds = time.perf_counter() - started
         payload.reproducibility_hash = hashlib.sha256(
             json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()

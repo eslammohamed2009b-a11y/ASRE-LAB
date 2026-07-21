@@ -195,6 +195,14 @@ def get_simulation_results_service(simulation_id: str, user_id: str) -> Simulati
             summary_metrics=result_record.summary_metrics,
             field_values=result_record.field_values,
             hotspot_node_ids=result_record.hotspot_node_ids,
+            status=result_record.status,
+            numerical_method=result_record.numerical_method,
+            residual_history=result_record.residual_history,
+            validation_metadata=result_record.validation_metadata,
+            elapsed_time_seconds=result_record.elapsed_time_seconds,
+            reproducibility_hash=result_record.reproducibility_hash,
+            source_design_id=result_record.source_design_id,
+            source_simulation_id=simulation_id,
         )
 
     base = _to_job_response(job)
