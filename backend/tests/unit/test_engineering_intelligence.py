@@ -81,6 +81,7 @@ def test_statistics_correlations_and_sensitivity_are_deterministic(tmp_path):
 
     assert stats["design.width"]["mean"] == pytest.approx(4.5)
     assert abs(relation["pearson"]["coefficient"]) == pytest.approx(1.0)
+    assert relation["effect_size_interpretation"] == "very_large"
     assert "does not establish causation" in relation["warning"]
     assert sensitivity["features"][0]["standardized_coefficient"] == pytest.approx(1.0)
     assert sensitivity["r_squared"] == pytest.approx(1.0)

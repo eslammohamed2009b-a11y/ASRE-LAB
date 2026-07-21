@@ -75,6 +75,18 @@ def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
             if method in {"spearman", "both"}:
                 coefficient, p_value = stats.spearmanr(x, y)
                 item["spearman"] = {"coefficient": float(coefficient), "p_value": float(p_value)}
+            magnitude = max(
+                abs(item.get("pearson", {}).get("coefficient", 0.0)),
+                abs(item.get("spearman", {}).get("coefficient", 0.0)),
+            )
+            item["effect_size_interpretation"] = (
+                "negligible" if magnitude < 0.1 else "small" if magnitude < 0.3
+                else "moderate" if magnitude < 0.5 else "large" if magnitude < 0.7
+                else "very_large"
+            )
+            item["interpretation_warning"] = (
+                "The label describes association magnitude only, not physical importance or causation."
+            )
             relationships.append(item)
     relationships.sort(
         key=lambda item: (

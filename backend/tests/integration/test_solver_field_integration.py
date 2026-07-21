@@ -34,6 +34,12 @@ def test_thermal_persists_genuine_temperature_field(tmp_path, monkeypatch):
     fields = repo.list_field_results(simulation_id)
     assert [(f.variable_name, f.unit, f.array_shape) for f in fields] == [("temperature", "degC", [11])]
     assert storage.file_exists(fields[0].storage_object_key)
+    assert "convergence" in fields[0].grid_metadata
+    assert "warnings" in fields[0].grid_metadata
+    persisted = repo.get_simulation_result(simulation_id)
+    assert persisted.numerical_method
+    assert len(persisted.reproducibility_hash) == 64
+    assert persisted.source_design_id == "design-a"
 
 
 def test_structural_persists_displacement_and_real_element_stress(tmp_path, monkeypatch):
