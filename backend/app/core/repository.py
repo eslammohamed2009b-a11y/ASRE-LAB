@@ -172,6 +172,30 @@ class SimulationResultRecord:
     created_at: str = ""
 
 
+@dataclass(frozen=True)
+class FieldResultRecord:
+    id: str
+    simulation_id: str
+    user_id: str
+    variable_name: str
+    unit: str
+    format: str
+    format_version: str
+    dimensions: int
+    axes: list = field(default_factory=list)
+    array_shape: list = field(default_factory=list)
+    grid_metadata: dict = field(default_factory=dict)
+    storage_object_key: str = ""
+    checksum_sha256: str = ""
+    byte_size: int = 0
+    minimum: float = 0.0
+    maximum: float = 0.0
+    mean: float = 0.0
+    preview: list = field(default_factory=list)
+    reproducibility_hash: str = ""
+    created_at: str = ""
+
+
 class PersistenceRepository(ABC):
     """Abstract persistence + ownership boundary used by Module 1 routes."""
 
@@ -339,6 +363,18 @@ class PersistenceRepository(ABC):
 
     @abstractmethod
     def get_simulation_result(self, simulation_id: str) -> SimulationResultRecord | None:
+        ...
+
+    @abstractmethod
+    def record_field_result(self, result: FieldResultRecord) -> None:
+        ...
+
+    @abstractmethod
+    def get_field_result(self, field_result_id: str) -> FieldResultRecord | None:
+        ...
+
+    @abstractmethod
+    def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
         ...
 
 
@@ -820,6 +856,40 @@ class SupabaseRepository(PersistenceRepository):
             created_at=row.get("created_at", ""),
         )
 
+    def record_field_result(self, result: FieldResultRecord) -> None:
+        payload = {
+            "id": result.id, "simulation_id": result.simulation_id, "user_id": result.user_id,
+            "variable_name": result.variable_name, "unit": result.unit, "format": result.format,
+            "format_version": result.format_version, "dimensions": result.dimensions,
+            "axes": result.axes, "array_shape": result.array_shape, "grid_metadata": result.grid_metadata,
+            "storage_object_key": result.storage_object_key, "checksum_sha256": result.checksum_sha256,
+            "byte_size": result.byte_size, "minimum": result.minimum, "maximum": result.maximum,
+            "mean": result.mean, "preview": result.preview,
+            "reproducibility_hash": result.reproducibility_hash, "created_at": result.created_at or _ts(),
+        }
+        self._client.table("simulation_field_results").insert(payload).execute()
+
+    @staticmethod
+    def _field_result_from_row(row: dict) -> FieldResultRecord:
+        return FieldResultRecord(
+            id=row["id"], simulation_id=row["simulation_id"], user_id=row["user_id"],
+            variable_name=row["variable_name"], unit=row["unit"], format=row["format"],
+            format_version=row["format_version"], dimensions=row["dimensions"], axes=row.get("axes") or [],
+            array_shape=row.get("array_shape") or [], grid_metadata=row.get("grid_metadata") or {},
+            storage_object_key=row["storage_object_key"], checksum_sha256=row["checksum_sha256"],
+            byte_size=row["byte_size"], minimum=row["minimum"], maximum=row["maximum"], mean=row["mean"],
+            preview=row.get("preview") or [], reproducibility_hash=row["reproducibility_hash"],
+            created_at=row.get("created_at", ""),
+        )
+
+    def get_field_result(self, field_result_id: str) -> FieldResultRecord | None:
+        data = self._client.table("simulation_field_results").select("*").eq("id", field_result_id).execute().data
+        return self._field_result_from_row(data[0]) if data else None
+
+    def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
+        data = self._client.table("simulation_field_results").select("*").eq("simulation_id", simulation_id).execute().data
+        return [self._field_result_from_row(row) for row in data]
+
 
 class LocalSQLiteRepository(PersistenceRepository):
     """
@@ -983,6 +1053,34 @@ class LocalSQLiteRepository(PersistenceRepository):
                 )
                 """
             )
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS simulation_field_results (
+                    id TEXT PRIMARY KEY,
+                    simulation_id TEXT NOT NULL,
+                    user_id TEXT NOT NULL,
+                    variable_name TEXT NOT NULL,
+                    unit TEXT NOT NULL,
+                    format TEXT NOT NULL,
+                    format_version TEXT NOT NULL,
+                    dimensions INTEGER NOT NULL,
+                    axes TEXT NOT NULL DEFAULT '[]',
+                    array_shape TEXT NOT NULL DEFAULT '[]',
+                    grid_metadata TEXT NOT NULL DEFAULT '{}',
+                    storage_object_key TEXT NOT NULL UNIQUE,
+                    checksum_sha256 TEXT NOT NULL,
+                    byte_size INTEGER NOT NULL,
+                    minimum REAL NOT NULL,
+                    maximum REAL NOT NULL,
+                    mean REAL NOT NULL,
+                    preview TEXT NOT NULL DEFAULT '[]',
+                    reproducibility_hash TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    FOREIGN KEY(simulation_id) REFERENCES simulation_jobs(id) ON DELETE CASCADE
+                )
+                """
+            )
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_field_results_simulation ON simulation_field_results(simulation_id)")
             conn.commit()
         finally:
             conn.close()
@@ -1528,6 +1626,56 @@ class LocalSQLiteRepository(PersistenceRepository):
             application_version=row["application_version"],
             created_at=row["created_at"],
         )
+
+    def record_field_result(self, result: FieldResultRecord) -> None:
+        conn = self._connect()
+        try:
+            conn.execute(
+                "INSERT INTO simulation_field_results (id, simulation_id, user_id, variable_name, unit, "
+                "format, format_version, dimensions, axes, array_shape, grid_metadata, storage_object_key, "
+                "checksum_sha256, byte_size, minimum, maximum, mean, preview, reproducibility_hash, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (result.id, result.simulation_id, result.user_id, result.variable_name, result.unit,
+                 result.format, result.format_version, result.dimensions, json.dumps(result.axes),
+                 json.dumps(result.array_shape), json.dumps(result.grid_metadata), result.storage_object_key,
+                 result.checksum_sha256, result.byte_size, result.minimum, result.maximum, result.mean,
+                 json.dumps(result.preview), result.reproducibility_hash, result.created_at or _ts()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+    @staticmethod
+    def _field_result_from_sqlite(row: sqlite3.Row) -> FieldResultRecord:
+        return FieldResultRecord(
+            id=row["id"], simulation_id=row["simulation_id"], user_id=row["user_id"],
+            variable_name=row["variable_name"], unit=row["unit"], format=row["format"],
+            format_version=row["format_version"], dimensions=row["dimensions"], axes=json.loads(row["axes"]),
+            array_shape=json.loads(row["array_shape"]), grid_metadata=json.loads(row["grid_metadata"]),
+            storage_object_key=row["storage_object_key"], checksum_sha256=row["checksum_sha256"],
+            byte_size=row["byte_size"], minimum=row["minimum"], maximum=row["maximum"], mean=row["mean"],
+            preview=json.loads(row["preview"]), reproducibility_hash=row["reproducibility_hash"],
+            created_at=row["created_at"],
+        )
+
+    def get_field_result(self, field_result_id: str) -> FieldResultRecord | None:
+        conn = self._connect()
+        try:
+            row = conn.execute("SELECT * FROM simulation_field_results WHERE id = ?", (field_result_id,)).fetchone()
+        finally:
+            conn.close()
+        return self._field_result_from_sqlite(row) if row else None
+
+    def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM simulation_field_results WHERE simulation_id = ? ORDER BY created_at, id",
+                (simulation_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._field_result_from_sqlite(row) for row in rows]
 
 
 def default_local_db_path() -> str:

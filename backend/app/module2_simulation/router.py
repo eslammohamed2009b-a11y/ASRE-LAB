@@ -83,6 +83,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
     SimulationCreateRequest,
     SimulationJobResponse,
     SimulationResultsResponse,
+    FieldResultMetadataResponse,
 )
 from app.module2_simulation.service import (  # noqa: E402
     SimulationNotFoundError,
@@ -91,7 +92,11 @@ from app.module2_simulation.service import (  # noqa: E402
     create_simulation_job_service,
     get_simulation_results_service,
     get_simulation_status_service,
+    list_field_results_service,
+    get_field_result_service,
+    download_field_result_service,
 )
+from app.core.storage import StorageError  # noqa: E402
 from app.module2_simulation.simulation_advisor import recommend_from_registry  # noqa: E402
 from app.module2_simulation.solver_registry import (  # noqa: E402
     UnknownSolverError,
@@ -198,3 +203,47 @@ def get_simulation_results(
         return get_simulation_results_service(simulation_id, current_user["id"])
     except SimulationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Simulation not found") from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}/fields",
+    response_model=list[FieldResultMetadataResponse],
+    summary="List persisted scientific field artifacts",
+)
+def list_simulation_fields(simulation_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return list_field_results_service(simulation_id, current_user["id"])
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Simulation not found") from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}/fields/{field_result_id}",
+    response_model=FieldResultMetadataResponse,
+    summary="Get scientific field metadata",
+)
+def get_simulation_field(simulation_id: str, field_result_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        record = get_field_result_service(simulation_id, field_result_id, current_user["id"])
+        return FieldResultMetadataResponse(
+            id=record.id, simulation_id=record.simulation_id, variable_name=record.variable_name,
+            unit=record.unit, format=record.format, format_version=record.format_version,
+            dimensions=record.dimensions, axes=record.axes, array_shape=record.array_shape,
+            grid_metadata=record.grid_metadata, checksum_sha256=record.checksum_sha256,
+            byte_size=record.byte_size, minimum=record.minimum, maximum=record.maximum,
+            mean=record.mean, preview=record.preview, reproducibility_hash=record.reproducibility_hash,
+            created_at=record.created_at,
+        )
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Field result not found") from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}/fields/{field_result_id}/download",
+    summary="Download an owner-protected compressed field artifact",
+)
+def download_simulation_field(simulation_id: str, field_result_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return download_field_result_service(simulation_id, field_result_id, current_user["id"])
+    except (SimulationNotFoundError, StorageError) as exc:
+        raise HTTPException(status_code=404, detail="Field result not found") from exc

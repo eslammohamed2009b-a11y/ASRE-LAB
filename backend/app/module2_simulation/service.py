@@ -33,6 +33,7 @@ from datetime import datetime, timezone  # noqa: E402
 
 from app.core.config import settings  # noqa: E402
 from app.core.repository import SimulationResultRecord, get_repository  # noqa: E402
+from app.core.storage import StorageError, get_storage  # noqa: E402
 from app.module2_simulation.materials import properties_as_dict  # noqa: E402
 from app.module2_simulation.schemas import (  # noqa: E402
     ConvergenceStatus,
@@ -40,6 +41,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
     SimulationJobResponse,
     SimulationResultPayload,
     SimulationResultsResponse,
+    FieldResultMetadataResponse,
     SimulationStatus,
 )
 from app.module2_simulation.solver_registry import require_available  # noqa: E402
@@ -197,3 +199,44 @@ def get_simulation_results_service(simulation_id: str, user_id: str) -> Simulati
 
     base = _to_job_response(job)
     return SimulationResultsResponse(**base.model_dump(), result=result_payload)
+
+
+def _field_metadata(record) -> FieldResultMetadataResponse:
+    return FieldResultMetadataResponse(
+        id=record.id, simulation_id=record.simulation_id, variable_name=record.variable_name,
+        unit=record.unit, format=record.format, format_version=record.format_version,
+        dimensions=record.dimensions, axes=record.axes, array_shape=record.array_shape,
+        grid_metadata=record.grid_metadata, checksum_sha256=record.checksum_sha256,
+        byte_size=record.byte_size, minimum=record.minimum, maximum=record.maximum,
+        mean=record.mean, preview=record.preview, reproducibility_hash=record.reproducibility_hash,
+        created_at=record.created_at,
+    )
+
+
+def list_field_results_service(simulation_id: str, user_id: str) -> list[FieldResultMetadataResponse]:
+    repo = get_repository()
+    job = repo.get_simulation_job(simulation_id)
+    if job is None or job.user_id != user_id:
+        raise SimulationNotFoundError(simulation_id)
+    return [_field_metadata(record) for record in repo.list_field_results(simulation_id)]
+
+
+def get_field_result_service(simulation_id: str, field_result_id: str, user_id: str):
+    repo = get_repository()
+    job = repo.get_simulation_job(simulation_id)
+    record = repo.get_field_result(field_result_id)
+    if job is None or job.user_id != user_id or record is None or record.simulation_id != simulation_id:
+        raise SimulationNotFoundError(field_result_id)
+    return record
+
+
+def download_field_result_service(simulation_id: str, field_result_id: str, user_id: str):
+    record = get_field_result_service(simulation_id, field_result_id, user_id)
+    storage = get_storage()
+    data = storage.open_bytes(record.storage_object_key)
+    import hashlib
+    if hashlib.sha256(data).hexdigest() != record.checksum_sha256:
+        raise StorageError("Field artifact failed integrity verification")
+    return storage.create_download_response(
+        record.storage_object_key, f"{record.variable_name}.npz", "application/octet-stream"
+    )

@@ -191,6 +191,33 @@ class SimulationResultsResponse(SimulationJobResponse):
     result: SimulationResultPayload | None = None
 
 
+class CoordinateAxis(BaseModel):
+    name: str = Field(min_length=1, max_length=64)
+    unit: str = Field(min_length=1, max_length=64)
+    values: list[float] = Field(min_length=1, max_length=2000)
+
+
+class FieldResultMetadataResponse(BaseModel):
+    id: str
+    simulation_id: str
+    variable_name: str
+    unit: str
+    format: str
+    format_version: str
+    dimensions: int = Field(ge=1, le=4)
+    axes: list[CoordinateAxis]
+    array_shape: list[int]
+    grid_metadata: dict
+    checksum_sha256: str
+    byte_size: int
+    minimum: float
+    maximum: float
+    mean: float
+    preview: list[float]
+    reproducibility_hash: str
+    created_at: str
+
+
 class CapabilityEntry(BaseModel):
     solver_id: str
     family: SolverFamily

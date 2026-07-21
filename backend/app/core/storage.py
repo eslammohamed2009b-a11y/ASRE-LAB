@@ -38,7 +38,8 @@ logger = logging.getLogger(__name__)
 # claims used in tests/dev (e.g. "user-test") are plain safe strings, so this
 # accepts any safe identifier shape rather than hex-only.
 _OBJECT_KEY_PATTERN = re.compile(
-    r"^users/[A-Za-z0-9_-]{1,128}/experiments/[A-Za-z0-9_-]{1,128}/designs/[A-Za-z0-9_-]{1,128}/"
+    r"^users/[A-Za-z0-9_-]{1,128}/experiments/[A-Za-z0-9_-]{1,128}/"
+    r"(?:designs|simulations)/[A-Za-z0-9_-]{1,128}/"
     r"[A-Za-z0-9._-]{1,255}$"
 )
 
@@ -64,6 +65,23 @@ def build_object_key(user_id: str, experiment_id: str, design_id: str, filename:
     if not _OBJECT_KEY_PATTERN.match(key):
         # user_id/experiment_id/design_id are expected to be safe identifiers
         # already validated upstream; this is a fail-closed backstop.
+        raise StorageError("Refusing to build an unsafe storage object key")
+    return key
+
+
+def build_simulation_object_key(
+    user_id: str, experiment_id: str, simulation_id: str, filename: str
+) -> str:
+    """Build a server-owned key for a simulation result artifact."""
+    base_name = Path(filename).name or "field-result.npz"
+    safe_filename = re.sub(r"[^A-Za-z0-9._-]", "_", base_name).replace("..", "_").lstrip(".")
+    if not safe_filename:
+        safe_filename = "field-result.npz"
+    key = (
+        f"users/{user_id}/experiments/{experiment_id}/simulations/"
+        f"{simulation_id}/{safe_filename}"
+    )
+    if not _OBJECT_KEY_PATTERN.match(key):
         raise StorageError("Refusing to build an unsafe storage object key")
     return key
 
