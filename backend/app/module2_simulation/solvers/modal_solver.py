@@ -27,7 +27,7 @@ from scipy.linalg import eigh
 from app.module2_simulation import materials
 from app.module2_simulation.schemas import CapabilityEntry, ConvergenceStatus, SimulationCreateRequest
 from app.module2_simulation.solver_registry import get_solver_metadata
-from app.module2_simulation.solvers.base_solver import EngineeringSolver, SolverValidationError
+from app.module2_simulation.solvers.base_solver import EngineeringSolver, SolverValidationError, NumericalFieldOutput
 from app.module2_simulation.solvers.structural_solver import _beam_element_stiffness
 
 
@@ -99,6 +99,7 @@ class ModalSolver(EngineeringSolver):
     """Registered as `modal_eigen_1d_v1`."""
 
     solver_id = "modal_eigen_1d_v1"
+    numerical_method = "Closed-form SDOF or generalized Euler-Bernoulli finite-element eigenvalue solve"
 
     def __init__(self) -> None:
         self._num_modes_computed = 0
@@ -205,3 +206,19 @@ class ModalSolver(EngineeringSolver):
             "Cantilever beam mode: prismatic Euler-Bernoulli beam, fixed support at x=0, "
             "consistent (not lumped) mass matrix.",
         ]
+
+    def extract_field_outputs(self, raw_result, request):
+        if raw_result["mode"] == "sdof":
+            return []
+        shapes = np.asarray(raw_result["mode_shapes"], dtype=float)
+        return [NumericalFieldOutput(
+            variable_name="mode_shape", unit="normalized", values=shapes,
+            axes=[
+                {"name": "reduced_degree_of_freedom", "unit": "index", "values": list(range(shapes.shape[0]))},
+                {"name": "mode", "unit": "index", "values": list(range(1, shapes.shape[1] + 1))},
+            ],
+            grid_metadata={
+                "normalization": "mass-normalized eigenvectors returned by scipy.linalg.eigh",
+                "dof_order": "alternating transverse displacement and rotation, fixed-end DOFs removed",
+            },
+        )]

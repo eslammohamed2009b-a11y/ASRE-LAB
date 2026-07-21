@@ -13,6 +13,7 @@ from app.module2_simulation.solvers.base_solver import (
     Mesh,
     SolverResult,
     SolverValidationError,
+    NumericalFieldOutput,
 )
 
 
@@ -178,6 +179,7 @@ class ThermalConductionSolver(EngineeringSolver):
     conduction solve. Registered as `thermal_conduction_v1`."""
 
     solver_id = "thermal_conduction_v1"
+    numerical_method = "Finite-difference steady-state heat conduction"
 
     @property
     def capability_metadata(self) -> CapabilityEntry:
@@ -278,7 +280,7 @@ class ThermalConductionSolver(EngineeringSolver):
         )
         return {
             "dim": "3d",
-            "field": field_grid.flatten(),
+            "field": field_grid,
             "conductivity_w_mk": k,
             "residual": None,
             "iterations": numerical.max_iterations,
@@ -297,16 +299,30 @@ class ThermalConductionSolver(EngineeringSolver):
         )
 
     def extract_metrics(self, raw_result: dict[str, Any]) -> tuple[dict[str, float], list[float], list[int]]:
-        field = raw_result["field"]
+        field = np.asarray(raw_result["field"])
+        flat_field = field.ravel()
         summary_metrics = {
             "max_temperature_c": float(np.max(field)),
             "avg_temperature_c": float(np.mean(field)),
             "min_temperature_c": float(np.min(field)),
             "thermal_conductivity_w_mk": float(raw_result["conductivity_w_mk"]),
         }
-        hotspot_count = min(5, len(field))
-        hotspot_node_ids = np.argsort(field)[-hotspot_count:].tolist() if hotspot_count else []
-        return summary_metrics, field.tolist(), hotspot_node_ids
+        hotspot_count = min(5, len(flat_field))
+        hotspot_node_ids = np.argsort(flat_field)[-hotspot_count:].tolist() if hotspot_count else []
+        return summary_metrics, flat_field.tolist(), hotspot_node_ids
+
+    def extract_field_outputs(self, raw_result, request):
+        field = np.asarray(raw_result["field"], dtype=float)
+        if raw_result["dim"] == "1d":
+            axes = [{"name": "x", "unit": "m", "values": np.linspace(0, request.geometry.length_m, field.size).tolist()}]
+        else:
+            n = field.shape[0]
+            coords = np.linspace(0.0, 1.0, n).tolist()
+            axes = [{"name": name, "unit": "normalized", "values": coords} for name in ("x", "y", "z")]
+        return [NumericalFieldOutput(
+            variable_name="temperature", unit="degC", values=field, axes=axes,
+            grid_metadata={"dimension": raw_result["dim"], "structured": True},
+        )]
 
     def return_assumptions(self) -> list[str]:
         return [

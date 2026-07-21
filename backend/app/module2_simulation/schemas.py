@@ -94,6 +94,7 @@ class SimulationStatus(str, Enum):
     QUEUED = "queued"
     RUNNING = "running"
     COMPLETED = "completed"
+    PARTIAL_FAILURE = "partial_failure"
     FAILED = "failed"
     CANCELLED = "cancelled"
 
@@ -171,6 +172,12 @@ class SimulationResultPayload(BaseModel):
     summary_metrics: dict[str, float]
     field_values: list[float]
     hotspot_node_ids: list[int]
+    status: str = "completed"
+    numerical_method: str = ""
+    residual_history: list[float] = Field(default_factory=list, max_length=5000)
+    validation_metadata: dict = Field(default_factory=dict)
+    elapsed_time_seconds: float | None = Field(default=None, ge=0)
+    reproducibility_hash: str = ""
 
 
 class SimulationJobResponse(BaseModel):

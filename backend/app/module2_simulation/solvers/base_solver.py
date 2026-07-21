@@ -21,6 +21,10 @@ Two interfaces live here on purpose:
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from dataclasses import dataclass, field
+import hashlib
+import json
+import time
 from typing import Any
 
 from pydantic import BaseModel
@@ -68,12 +72,22 @@ class SolverValidationError(Exception):
     422 HTTP response - never a fabricated result."""
 
 
+@dataclass(frozen=True)
+class NumericalFieldOutput:
+    variable_name: str
+    unit: str
+    values: Any
+    axes: list[dict]
+    grid_metadata: dict = field(default_factory=dict)
+
+
 class EngineeringSolver(ABC):
     """Unified multi-physics solver interface (Phase C2). Concrete solvers:
     `thermal_solver_engine.ThermalConductionSolver`,
     `structural_solver.StructuralLinearSolver`, `modal_solver.ModalSolver`."""
 
     solver_id: str = "base"
+    numerical_method: str = ""
 
     # -- metadata ---------------------------------------------------------
     @property
@@ -154,6 +168,15 @@ class EngineeringSolver(ABC):
         solver-specific warnings."""
         return []
 
+    def extract_field_outputs(
+        self, raw_result: Any, request: SimulationCreateRequest
+    ) -> list[NumericalFieldOutput]:
+        """Return only genuine numerical state produced by the solver.
+
+        Scalar-only solvers deliberately inherit the empty implementation.
+        """
+        return []
+
     def serialize_results(
         self,
         raw_result: Any,
@@ -173,13 +196,31 @@ class EngineeringSolver(ABC):
         )
 
     # -- orchestration ---------------------------------------------------------
-    def run(self, request: SimulationCreateRequest) -> SimulationResultPayload:
+    def run_with_fields(
+        self, request: SimulationCreateRequest
+    ) -> tuple[SimulationResultPayload, list[NumericalFieldOutput]]:
         """Template method: validate -> prepare -> mesh -> solve ->
         convergence -> serialize. Raises `SolverValidationError` for bad
         inputs before any numerical work is attempted."""
+        started = time.perf_counter()
         material_properties = self.validate_inputs(request)
         model = self.prepare_model(request, material_properties)
         mesh = self.generate_or_import_mesh(request, model)
         raw_result = self.solve(request, model, mesh)
         convergence = self.check_convergence(raw_result)
-        return self.serialize_results(raw_result, convergence)
+        payload = self.serialize_results(raw_result, convergence)
+        evidence = {
+            "solver_id": payload.solver_id,
+            "solver_version": payload.solver_version,
+            "request": request.model_dump(mode="json"),
+            "summary_metrics": payload.summary_metrics,
+        }
+        payload.numerical_method = self.numerical_method
+        payload.elapsed_time_seconds = time.perf_counter() - started
+        payload.reproducibility_hash = hashlib.sha256(
+            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
+        ).hexdigest()
+        return payload, self.extract_field_outputs(raw_result, request)
+
+    def run(self, request: SimulationCreateRequest) -> SimulationResultPayload:
+        return self.run_with_fields(request)[0]

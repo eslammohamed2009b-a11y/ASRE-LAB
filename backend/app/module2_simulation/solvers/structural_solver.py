@@ -13,6 +13,7 @@ from app.module2_simulation.solvers.base_solver import (
     Mesh,
     SolverResult,
     SolverValidationError,
+    NumericalFieldOutput,
 )
 
 
@@ -160,6 +161,7 @@ class StructuralLinearSolver(EngineeringSolver):
     assembly + direct linear solve."""
 
     solver_id = "structural_linear_1d_v1"
+    numerical_method = "Direct linear finite-element solve using 1D bar or Euler-Bernoulli beam elements"
 
     @property
     def capability_metadata(self) -> CapabilityEntry:
@@ -288,3 +290,27 @@ class StructuralLinearSolver(EngineeringSolver):
             "Linear-elastic material behavior only (no plasticity, buckling, or large deflection).",
             "Single prismatic 1D bar/beam, fixed support at x=0, load applied only at the free end.",
         ]
+
+    def extract_field_outputs(self, raw_result, request):
+        length = request.geometry.length_m
+        if raw_result["mode"] == "axial_bar":
+            displacement = np.asarray(raw_result["displacements_m"], dtype=float)
+            stress = np.asarray(raw_result["element_stress_pa"], dtype=float)
+            return [
+                NumericalFieldOutput(
+                    variable_name="axial_displacement", unit="m", values=displacement,
+                    axes=[{"name": "x", "unit": "m", "values": np.linspace(0, length, displacement.size).tolist()}],
+                    grid_metadata={"element_type": "linear_bar", "location": "nodes"},
+                ),
+                NumericalFieldOutput(
+                    variable_name="axial_stress", unit="Pa", values=stress,
+                    axes=[{"name": "x", "unit": "m", "values": ((np.arange(stress.size) + 0.5) * length / stress.size).tolist()}],
+                    grid_metadata={"element_type": "linear_bar", "location": "element_centers"},
+                ),
+            ]
+        displacement = np.asarray(raw_result["transverse_displacements_m"], dtype=float)
+        return [NumericalFieldOutput(
+            variable_name="transverse_displacement", unit="m", values=displacement,
+            axes=[{"name": "x", "unit": "m", "values": np.linspace(0, length, displacement.size).tolist()}],
+            grid_metadata={"element_type": "euler_bernoulli_beam", "location": "nodes"},
+        )]
