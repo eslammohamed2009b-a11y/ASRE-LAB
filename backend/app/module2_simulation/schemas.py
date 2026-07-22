@@ -109,12 +109,15 @@ class Geometry(BaseModel):
     solvers may even attempt the request (see each solver's
     `supported_dimensions` in the registry)."""
 
-    dimension: str = Field(description="'1d' or '3d' - must match a solver's supported_dimensions")
+    dimension: str = Field(description="'1d', '2d', or '3d' - must match a solver's supported_dimensions")
     length_m: float | None = Field(default=None, gt=0)
+    width_m: float | None = Field(default=None, gt=0)
+    height_m: float | None = Field(default=None, gt=0)
     cross_section_area_m2: float | None = Field(default=None, gt=0)
     moment_of_inertia_m4: float | None = Field(default=None, gt=0)
     num_elements: int | None = Field(default=None, ge=1, le=500)
     grid_resolution: int | None = Field(default=None, ge=5, le=60)
+    grid_resolution_y: int | None = Field(default=None, ge=5, le=60)
 
 
 class MaterialSelection(BaseModel):
@@ -137,6 +140,21 @@ class BoundaryConditions(BaseModel):
     transverse_load_n: float | None = None
     point_mass_kg: float | None = Field(default=None, gt=0)
     spring_stiffness_n_m: float | None = Field(default=None, gt=0)
+    source_frequency_hz: float | None = Field(default=None, gt=0)
+    source_pressure_pa: float | None = None
+    acoustic_left_boundary: str | None = None
+    acoustic_right_boundary: str | None = None
+    potential_left_v: float | None = None
+    potential_right_v: float | None = None
+    potential_top_v: float | None = None
+    potential_bottom_v: float | None = None
+    potential_gradient_x_v_m: float | None = None
+    charge_density_c_m3: float | None = None
+    pressure_gradient_pa_m: float | None = None
+    inlet_mean_velocity_m_s: float | None = Field(default=None, gt=0)
+    thermal_delta_temperature_c: float | None = None
+    thermal_expansion_coefficient_1_k: float | None = Field(default=None, gt=0)
+    thermal_restraint: str | None = None
 
 
 class NumericalSettings(BaseModel):

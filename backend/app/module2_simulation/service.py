@@ -49,11 +49,17 @@ from app.module2_simulation.solvers.base_solver import EngineeringSolver  # noqa
 from app.module2_simulation.solvers.modal_solver import ModalSolver  # noqa: E402
 from app.module2_simulation.solvers.structural_solver import StructuralLinearSolver  # noqa: E402
 from app.module2_simulation.solvers.thermal_solver import ThermalConductionSolver  # noqa: E402
+from app.module2_simulation.solvers.acoustic_solver import AcousticDuctSolver  # noqa: E402
+from app.module2_simulation.solvers.electrostatic_solver import ElectrostaticRectangularSolver  # noqa: E402
+from app.module2_simulation.solvers.channel_flow_solver import LaminarChannelFlowSolver  # noqa: E402
 
 SOLVER_CLASSES: dict[str, type[EngineeringSolver]] = {
     "thermal_conduction_v1": ThermalConductionSolver,
     "structural_linear_1d_v1": StructuralLinearSolver,
     "modal_eigen_1d_v1": ModalSolver,
+    "acoustic_duct_1d_v1": AcousticDuctSolver,
+    "electrostatic_rectangular_2d_v1": ElectrostaticRectangularSolver,
+    "cfd_laminar_channel_2d_v1": LaminarChannelFlowSolver,
 }
 
 
