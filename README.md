@@ -37,13 +37,20 @@ result. **Planned** = not yet built.
 | Local backend test suite | Validated | Unit, integration, E2E, and benchmark marker suites pass in the pinned Python 3.11.15 / real-CadQuery environment. Current counts are recorded in `GO_NO_GO_CHECKLIST.md`. |
 | Remote CI (GitHub Actions) | **Blocked — unknown cause** | Latest inspected run `29708734759` ended `startup_failure` in the same second it was created, with zero jobs and empty billable timing. GitHub returned no explicit cause. No billing/account-hold theory is treated as confirmed; remote tests have not run. |
 | Module 2 — thermal solver | Implemented, not externally validated | Real finite-difference steady-state solver (no fabricated values), executed in benchmark tests against analytical/grid-convergence checks locally. Not run against live production infrastructure. |
-| Module 2 — structural / CFD solvers | Unsupported | Explicitly return HTTP 501 rather than a placeholder result. |
+| Module 2 — structural solver | Validated locally | Real 1D linear bar and Euler–Bernoulli cantilever finite-element solvers are benchmarked against analytical solutions. This is not 2D/3D arbitrary-CAD FEA. |
+| Module 2 — modal solver | Validated locally | Real SDOF frequency and 1D cantilever generalized eigenvalue calculations are benchmarked analytically. SDOF is scalar-only; beam mode shapes are persisted. |
+| Module 2 — CFD / acoustic / electromagnetic / coupled solvers | Unsupported or planned | CFD is an explicitly labelled empirical prototype and is not available through the authoritative API. Acoustic, electromagnetic, and coupled solvers are not implemented. |
+| Scientific field results | Validated locally | Genuine thermal, structural, and beam-modal arrays are stored as bounded compressed NPZ artifacts with checksums, reproducibility hashes, safe keys, owner-scoped metadata, and integrity-checked loading. |
+| Module 3 — deterministic engineering intelligence | Validated locally | Persisted datasets feed descriptive statistics, Pearson/Spearman association, first-order standardized linear sensitivity estimates, Pareto analysis, transparent ranking, and evidence-linked recommendations. Correlation is not causation and regression is not Sobol/global sensitivity. |
+| Integrated Module 1 → 2 → 3 pipeline | Validated locally | Uses authoritative persisted designs, unified real solver jobs/fields, and persisted deterministic analysis. Thermal and structural runs are disclosed 1D comparison scenarios, not arbitrary-CAD mesh simulation or inferred service loading. |
 | Persistence — durable ownership (SQLite local adapter) | Validated | Restart-durability and multi-instance-sharing proven with a real on-disk SQLite file (not `:memory:`), by unit tests. |
 | Persistence — Supabase (live) | **Blocked** | Ordered migrations and repository/storage adapters exist, but no live credentials are available. Three external tests skip explicitly and are not counted as passing. |
 | Async batch generation (Celery/Redis) | Implemented; queue transport unvalidated | Persisted jobs, progress, partial failure, cancellation, idempotency keys, per-user active-job limits, and result retrieval are tested in Celery eager mode. `docker-compose.yml` provides API + worker + Redis, but a real broker/worker run and load test remain blocked locally because Docker/Redis are unavailable. |
 | Licensing | Validated | Proprietary, source-available [LICENSE](LICENSE); public repo, all rights reserved. |
 
-New standalone project scaffold prepared separately from HydroSentinel.
+The legacy `/api/simulate/*` and `/api/analyze/full-report` compatibility paths are
+deprecated and isolated from the authoritative integrated pipeline. They must not be
+used as evidence for unified solver or deterministic-intelligence capability.
 
 ## 1) Initialization and GitHub repository
 

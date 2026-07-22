@@ -12,7 +12,7 @@ Two interfaces live here on purpose:
   `run()` orchestrates a fixed pipeline (validate -> prepare -> mesh ->
   solve -> residual/convergence -> extract -> serialize) and each concrete
   solver only implements the family-specific pieces. This is what
-  `thermal_solver_engine.py`, `structural_solver.py`, and `modal_solver.py`
+  `thermal_solver.py`, `structural_solver.py`, and `modal_solver.py`
   actually implement; the still-unimplemented families (CFD/wave/EM/coupled)
   are represented only as `solver_registry.py` metadata entries with
   `implementation_status != real`, never as a fake subclass returning
@@ -83,7 +83,7 @@ class NumericalFieldOutput:
 
 class EngineeringSolver(ABC):
     """Unified multi-physics solver interface (Phase C2). Concrete solvers:
-    `thermal_solver_engine.ThermalConductionSolver`,
+    `thermal_solver.ThermalConductionSolver`,
     `structural_solver.StructuralLinearSolver`, `modal_solver.ModalSolver`."""
 
     solver_id: str = "base"

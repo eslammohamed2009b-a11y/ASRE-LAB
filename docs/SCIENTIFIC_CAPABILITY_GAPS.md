@@ -111,6 +111,14 @@ temperature, structural displacement/stress, and modal beam mode-shape field out
 feed directly into Module 3 statistics/correlation/sensitivity/Pareto/ranking without any separate
 hand-off step or caller-assembled payload.
 
+The `/api/pipeline` orchestration uses this authoritative path end to end: persisted design
+variants are linked to unified `thermal_conduction_v1` and `structural_linear_1d_v1` jobs,
+genuine fields are persisted, and a deterministic `engineering_intelligence` analysis record
+is created for the experiment. Because these solvers do not consume arbitrary CAD meshes,
+pipeline simulations are explicitly disclosed 1D comparison scenarios with prescribed
+reference boundary conditions. They are not full-geometry service-load predictions.
+Unsupported wind/CFD requests fail without invoking the empirical legacy estimator.
+
 **Tested:** `backend/tests/unit/test_engineering_intelligence.py` (statistics, correlation,
 sensitivity, Pareto, ranking, and recommendation behavior, including warning generation and edge
 cases), `backend/tests/integration/test_analysis_api.py` (persisted-analysis API), and
@@ -135,8 +143,8 @@ wiring).
 - The pre-existing `clustering.py` (K-Means) + `correlation.py` (Pearson-only matrix) +
   `synthesis.py` (optional Claude/LLM narrative) path under `/api/analyze/full-report` is unchanged
   by Big Batch 2 and remains unvalidated against a ground-truth dataset (no correctness benchmark).
-- No automated Module 3 → Module 1 feedback loop exists (e.g. automatically generating a new design
-  from a recommendation).
+- No automated Module 3 → Module 1 feedback loop exists. The repaired forward pipeline reaches
+  persisted Module 3 analysis, but it does not turn a recommendation into a new reviewed design.
 - Migration 009 has not been applied against a live production Supabase instance as part of this
   batch — Big Batch 2 is still Draft PR #1 (`codex/big-batch-solver-intelligence`), not merged into
   `main`, and must not be treated as merged production code.
