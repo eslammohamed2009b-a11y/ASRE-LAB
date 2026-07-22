@@ -63,6 +63,27 @@ def _generate_one_variant(
     failure - the caller is responsible for catching per-variant so one
     failed design does not abort the whole batch."""
     result = generate_model(params)
+    persist_generated_design(
+        repo=repo, storage=storage, experiment_id=experiment_id, user_id=user_id,
+        variation_index=variation_index, params=params, result=result,
+    )
+
+
+def persist_generated_design(
+    *,
+    repo: PersistenceRepository,
+    storage: FileStorage,
+    experiment_id: str,
+    user_id: str,
+    variation_index: int,
+    params: DesignParameters,
+    result: dict[str, Any],
+) -> str:
+    """Persist one already-generated CAD variant through authoritative contracts.
+
+    Shared by Module 1 batch generation and the integrated pipeline so neither
+    path invents a second design-file storage workflow.
+    """
     design_id = result["design_id"]
 
     design_model_id = repo.create_design_model(
@@ -105,6 +126,7 @@ def _generate_one_variant(
             )
     finally:
         _cleanup_scratch_files(result)
+    return design_model_id
 
 
 def run_batch_generation(

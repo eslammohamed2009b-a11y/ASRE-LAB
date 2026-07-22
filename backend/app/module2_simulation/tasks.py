@@ -44,6 +44,9 @@ def run_simulation_job(
     numerical_settings: dict[str, Any],
     experiment_id: str | None = None,
     design_id: str | None = None,
+    *,
+    repository=None,
+    storage=None,
 ) -> dict[str, Any]:
     """The real, synchronous solve for a persisted `simulation_jobs` row.
     Safe to call directly (tests) or from inside a Celery task
@@ -52,7 +55,7 @@ def run_simulation_job(
     triple-callable pattern."""
     from app.module2_simulation.service import SOLVER_CLASSES  # local import avoids an import cycle
 
-    repo = get_repository()
+    repo = repository or get_repository()
     job = repo.get_simulation_job(simulation_id)
     if job is None:
         raise ValueError(f"Unknown simulation_id: {simulation_id}")
@@ -107,7 +110,7 @@ def run_simulation_job(
 
     field_records = []
     try:
-        storage = get_storage()
+        storage = storage or get_storage()
         for numerical_field in numerical_fields:
             field_records.append(persist_field_result(
                 repository=repo, storage=storage, user_id=job.user_id,

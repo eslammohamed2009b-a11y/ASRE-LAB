@@ -1,7 +1,8 @@
-"""Durable orchestration for the legacy Module 1 -> 2 -> 3 pipeline.
+"""Durable orchestration for the authoritative Module 1 -> 2 -> 3 pipeline.
 
-The public pipeline request/response remains legacy-compatible, while all
-persistence is translated onto the authoritative repository contracts.
+The integrated pipeline uses the same persisted design, simulation, field-result,
+and deterministic-analysis contracts as the standalone module APIs.  The legacy
+``/api/simulate`` compatibility surface is intentionally not called from here.
 """
 from __future__ import annotations
 
@@ -9,17 +10,16 @@ import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from app.core.config import settings
-from app.core.repository import PersistenceRepository, SimulationResultRecord, get_repository
+from app.core.repository import PersistenceRepository, get_repository
+from app.core.storage import get_storage
 from app.module1_design.nl_parser import parse_design_request
-from app.module1_design.schemas import DesignVariationRequest
+from app.module1_design.schemas import DesignParameters, DesignVariationRequest
+from app.module1_design.tasks import persist_generated_design
 from app.module2_simulation.materials import properties_as_dict
-from app.module2_simulation.schemas import AnalysisType, SimulationRunRequest
-from app.module2_simulation.service import run_simulation_service
-from app.module2_simulation.solver_registry import UnsupportedAnalysisError
-from app.module3_analysis.clustering import cluster_designs
-from app.module3_analysis.correlation import build_correlation_matrix
-from app.module3_analysis.synthesis import synthesize_report
+from app.module2_simulation.schemas import AnalysisType
+from app.module2_simulation.tasks import run_simulation_job
+from app.module3_analysis.schemas import AnalysisCreateRequest
+from app.module3_analysis.service import run_experiment_analysis
 
 logger = logging.getLogger(__name__)
 TERMINAL_STATES = {"partial_failure", "completed", "failed", "cancelled"}
@@ -101,7 +101,68 @@ def cancel_pipeline_job_service(job_id: str, user_id: str) -> dict[str, Any]:
     return _job_payload(job)
 
 
-def _persist_legacy_simulation(
+PIPELINE_REFERENCE_SCENARIOS = {
+    AnalysisType.THERMAL: {
+        "solver_id": "thermal_conduction_v1",
+        "disclosure": (
+            "1D steady-state reference scenario derived from the persisted design length; "
+            "20 degC end temperatures and 100 W/m3 volumetric heating are prescribed inputs, "
+            "not inferred service conditions."
+        ),
+    },
+    AnalysisType.STRUCTURAL: {
+        "solver_id": "structural_linear_1d_v1",
+        "disclosure": (
+            "1D axial-bar reference scenario derived from the persisted design length and "
+            "base-length x wall-thickness area; the 1000 N end load is a prescribed comparison "
+            "load, not a predicted service load."
+        ),
+    },
+}
+
+
+def _positive_number(parameters: dict[str, Any], name: str, fallback: float) -> float:
+    value = parameters.get(name)
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value > 0:
+        return float(value)
+    return fallback
+
+
+def _authoritative_simulation_inputs(
+    analysis: AnalysisType, parameters: dict[str, Any]
+) -> tuple[str, dict[str, Any], dict[str, Any]] | None:
+    """Map a CAD variant to a bounded, explicitly disclosed reference model.
+
+    This is a comparison scenario, not arbitrary-CAD mesh ingestion. Unsupported
+    families return ``None`` instead of falling through to an empirical placeholder.
+    """
+    scenario = PIPELINE_REFERENCE_SCENARIOS.get(analysis)
+    if scenario is None:
+        return None
+    length_m = _positive_number(
+        parameters, "height_m", _positive_number(parameters, "base_length_m", 1.0)
+    )
+    if analysis is AnalysisType.THERMAL:
+        geometry = {"dimension": "1d", "length_m": length_m, "num_elements": 20}
+        boundary_conditions = {
+            "ambient_temperature_c": 20.0,
+            "prescribed_temperature_c": 20.0,
+            "heat_source_w_m3": 100.0,
+        }
+    else:
+        base_length = _positive_number(parameters, "base_length_m", 1.0)
+        thickness = _positive_number(parameters, "wall_thickness_m", 0.1)
+        geometry = {
+            "dimension": "1d",
+            "length_m": length_m,
+            "cross_section_area_m2": base_length * thickness,
+            "num_elements": 20,
+        }
+        boundary_conditions = {"axial_load_n": 1000.0}
+    return scenario["solver_id"], geometry, boundary_conditions
+
+
+def _persist_authoritative_simulation(
     repo: PersistenceRepository,
     *,
     user_id: str,
@@ -109,11 +170,12 @@ def _persist_legacy_simulation(
     design_model_id: str,
     analysis: AnalysisType,
     material: str,
-    geometry_type: str,
-    legacy_design_id: str,
-) -> tuple[dict[str, float], str | None]:
-    """Narrow adapter from the legacy solver response to Module 2 tables."""
-    solver_id = f"legacy_{analysis.value}_v1"
+    design_parameters: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    mapped = _authoritative_simulation_inputs(analysis, design_parameters)
+    if mapped is None:
+        return None, analysis.value
+    solver_id, geometry, boundary_conditions = mapped
     simulation_id = repo.create_simulation_job(
         user_id=user_id,
         solver_id=solver_id,
@@ -124,63 +186,25 @@ def _persist_legacy_simulation(
         simulation_id=simulation_id,
         material_name=material,
         material_properties=properties_as_dict(material),
-        units={},
+        units={"geometry.length_m": "m", "geometry.cross_section_area_m2": "m^2"},
         initial_conditions={},
-        boundary_conditions={"geometry_type": geometry_type},
-        numerical_settings={"interface": "legacy_pipeline"},
+        boundary_conditions=boundary_conditions,
+        numerical_settings={"max_iterations": 300, "tolerance": 1e-5},
     )
-    repo.update_simulation_job(
-        simulation_id, status="running", progress_percent=10, started_at=_now_iso()
+    outcome = run_simulation_job(
+        simulation_id=simulation_id,
+        solver_id=solver_id,
+        material_name=material,
+        geometry=geometry,
+        boundary_conditions=boundary_conditions,
+        initial_conditions={},
+        numerical_settings={"max_iterations": 300, "tolerance": 1e-5},
+        experiment_id=experiment_id,
+        design_id=design_model_id,
+        repository=repo,
+        storage=get_storage(),
     )
-    try:
-        result = run_simulation_service(
-            SimulationRunRequest(
-                design_id=legacy_design_id,
-                geometry_type=geometry_type,
-                analysis_type=analysis,
-                material=material,
-            )
-        )
-    except UnsupportedAnalysisError as exc:
-        repo.update_simulation_job(
-            simulation_id,
-            status="failed",
-            progress_percent=100,
-            error_code="unsupported_analysis",
-            safe_error_message=str(exc),
-            finished_at=_now_iso(),
-        )
-        return {}, analysis.value
-    except Exception:
-        logger.error("Pipeline simulation %s failed", simulation_id, exc_info=True)
-        repo.update_simulation_job(
-            simulation_id,
-            status="failed",
-            progress_percent=100,
-            error_code="simulation_failed",
-            safe_error_message="The simulation failed unexpectedly.",
-            finished_at=_now_iso(),
-        )
-        return {}, analysis.value
-
-    repo.record_simulation_result(
-        SimulationResultRecord(
-            simulation_id=simulation_id,
-            solver_id=solver_id,
-            solver_version="legacy-v1",
-            assumptions=["Legacy /api/simulate compatibility solver"],
-            warnings=[],
-            converged=True,
-            summary_metrics=result.summary_metrics,
-            field_values=result.field_values,
-            hotspot_node_ids=result.hotspot_node_ids,
-            application_version=settings.APPLICATION_VERSION,
-        )
-    )
-    repo.update_simulation_job(
-        simulation_id, status="completed", progress_percent=100, finished_at=_now_iso()
-    )
-    return result.summary_metrics, None
+    return simulation_id, None if outcome["status"] in {"completed", "partial_failure"} else analysis.value
 
 
 def run_pipeline_flow(
@@ -204,7 +228,7 @@ def run_pipeline_flow(
         return _job_payload(job)
 
     repo.update_job(job_id, status="running", started_at=_now_iso())
-    design_results: list[dict[str, Any]] = []
+    successful_simulation_ids: list[str] = []
     skipped_analyses: set[str] = set()
     completed_count = 0
     failed_count = 0
@@ -225,40 +249,34 @@ def run_pipeline_flow(
             if "error" in design:
                 failed_count += 1
             else:
-                design_model_id = repo.create_design_model(
+                design_model_id = persist_generated_design(
+                    repo=repo,
+                    storage=get_storage(),
                     experiment_id=experiment_id,
                     user_id=user_id,
-                    geometry_family=base_params.geometry_type.value,
-                    parameters=design.get("params", {}),
-                    units={"length": "m", "angle": "deg"},
                     variation_index=idx,
-                    generation_status="completed",
+                    params=DesignParameters(**design.get("params", {})),
+                    result=design,
                 )
-                merged_metrics: dict[str, float] = {}
                 item_failed = False
                 for analysis in analyses:
                     current = repo.get_job(job_id)
                     if current is not None and current.status == "cancelled":
                         return {**_job_payload(current), "skipped_analyses": sorted(skipped_analyses)}
-                    metrics, failed_analysis = _persist_legacy_simulation(
+                    simulation_id, failed_analysis = _persist_authoritative_simulation(
                         repo,
                         user_id=user_id,
                         experiment_id=experiment_id,
                         design_model_id=design_model_id,
                         analysis=analysis,
                         material=base_params.material.value if base_params.material else "concrete",
-                        geometry_type=base_params.geometry_type.value,
-                        legacy_design_id=design["design_id"],
+                        design_parameters=design.get("params", {}),
                     )
-                    merged_metrics.update(metrics)
+                    if simulation_id and not failed_analysis:
+                        successful_simulation_ids.append(simulation_id)
                     if failed_analysis:
                         skipped_analyses.add(failed_analysis)
                         item_failed = True
-
-                if merged_metrics:
-                    design_results.append(
-                        {"design_id": design["design_id"], "params": design["params"], "metrics": merged_metrics}
-                    )
                 if item_failed:
                     failed_count += 1
                 else:
@@ -272,14 +290,16 @@ def run_pipeline_flow(
                 progress_percent=progress,
             )
 
-        cluster_output = cluster_designs(design_results, n_clusters=4)
-        correlation_output = build_correlation_matrix(design_results)
-        insights = synthesize_report(cluster_output, correlation_output)
+        analysis_record = None
+        if successful_simulation_ids:
+            analysis_record = run_experiment_analysis(
+                experiment_id, user_id, AnalysisCreateRequest(), repository=repo
+            )
         current = repo.get_job(job_id)
         if current is not None and current.status == "cancelled":
             return {**_job_payload(current), "skipped_analyses": sorted(skipped_analyses)}
         status = "partial_failure" if failed_count else "completed"
-        if not design_results and failed_count:
+        if not successful_simulation_ids and failed_count:
             status = "failed"
         repo.update_job(
             job_id,
@@ -306,19 +326,20 @@ def run_pipeline_flow(
             safe_error_message="The pipeline failed unexpectedly; successful intermediate records were preserved.",
             finished_at=_now_iso(),
         )
-        cluster_output = cluster_designs(design_results, n_clusters=4)
-        correlation_output = build_correlation_matrix(design_results)
-        insights = synthesize_report(cluster_output, correlation_output)
+        analysis_record = None
 
     final_job = repo.get_job(job_id)
     return {
         **_job_payload(final_job),
         "base_params": base_params.model_dump() if "base_params" in locals() else None,
         "generated_count": generated_count,
-        "analyzed_count": len(design_results),
-        "clusters": cluster_output,
-        "correlation": correlation_output,
-        "insights": insights,
+        "analyzed_count": len(successful_simulation_ids),
+        "analysis_id": analysis_record.id if analysis_record else None,
+        "analysis": analysis_record.model_dump(mode="json") if analysis_record else None,
+        "reference_scenarios": {
+            item.value: PIPELINE_REFERENCE_SCENARIOS[item]["disclosure"]
+            for item in analyses if item in PIPELINE_REFERENCE_SCENARIOS
+        },
         "persistence_enabled": True,
         "skipped_analyses": sorted(skipped_analyses),
     }

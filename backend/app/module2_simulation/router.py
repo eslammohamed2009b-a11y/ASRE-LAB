@@ -16,8 +16,9 @@ from app.module2_simulation.tasks import run_simulation_task
 
 router = APIRouter(
     prefix="/api/simulate",
-    tags=["Module 2 - Automated Simulation Lab"],
+    tags=["Module 2 - Legacy Simulation Compatibility"],
     dependencies=[Depends(get_current_user)],
+    deprecated=True,
 )
 
 
@@ -36,7 +37,10 @@ def advisor(payload: AdvisorRequest) -> AdvisorResponse:
     "/run",
     response_model=SimulationRunResponse,
     summary="Run simulation synchronously",
-    description="Executes selected analysis immediately and returns field/summary metrics.",
+    description=(
+        "Deprecated compatibility endpoint for the original thermal-only interface. "
+        "Use /api/simulations for authoritative persisted solver execution."
+    ),
 )
 def run_simulation(payload: SimulationRunRequest) -> SimulationRunResponse:
     try:
