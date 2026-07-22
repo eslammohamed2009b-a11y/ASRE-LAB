@@ -30,10 +30,13 @@ def supported_analyses(recommended: list[str]) -> list[str]:
 # -- new unified registry-backed advisor (Phase C8) ------------------------------------------------
 _GEOMETRY_FAMILY_HINTS: dict[str, list[str]] = {
     "bridge": ["structural_linear_1d_v1", "modal_eigen_1d_v1", "thermal_conduction_v1"],
-    "tower": ["structural_linear_1d_v1", "modal_eigen_1d_v1", "thermal_conduction_v1", "cfd_wind_drag_v1"],
-    "pyramid": ["thermal_conduction_v1", "cfd_wind_drag_v1"],
+    "tower": ["structural_linear_1d_v1", "modal_eigen_1d_v1", "thermal_conduction_v1"],
+    "pyramid": ["thermal_conduction_v1"],
     "arch": ["structural_linear_1d_v1", "thermal_conduction_v1"],
-    "dome": ["structural_linear_1d_v1", "thermal_conduction_v1", "cfd_wind_drag_v1"],
+    "dome": ["structural_linear_1d_v1", "thermal_conduction_v1"],
+    "duct": ["acoustic_duct_1d_v1"],
+    "channel": ["cfd_laminar_channel_2d_v1"],
+    "electrostatic rectangle": ["electrostatic_rectangular_2d_v1"],
 }
 _DEFAULT_SOLVER_HINTS = ["thermal_conduction_v1", "structural_linear_1d_v1", "modal_eigen_1d_v1"]
 

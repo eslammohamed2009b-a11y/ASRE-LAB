@@ -19,10 +19,8 @@ from pydantic import BaseModel, Field
 
 
 # -- legacy schemas (unchanged) ------------------------------------------------
-# Still used by the legacy `/api/simulate/*` router and the integrated
-# Module1->2->3 pipeline (`app.pipeline_service`). Kept exactly as before so
-# that existing surface keeps working unmodified; new work should use the
-# typed schemas further down this file instead.
+# Used only by the legacy `/api/simulate/*` compatibility router. The authoritative
+# integrated pipeline uses the typed schemas below.
 class AnalysisType(str, Enum):
     THERMAL = "thermal"
     STRUCTURAL = "structural"

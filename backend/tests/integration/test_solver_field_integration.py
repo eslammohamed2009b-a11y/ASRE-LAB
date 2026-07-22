@@ -7,7 +7,7 @@ from app.module2_simulation import tasks
 pytestmark = pytest.mark.integration
 
 
-def _run(tmp_path, monkeypatch, solver_id, geometry, boundary_conditions):
+def _run(tmp_path, monkeypatch, solver_id, geometry, boundary_conditions, material="steel"):
     repo = LocalSQLiteRepository(tmp_path / f"{solver_id}.db")
     storage = LocalFileStorage(tmp_path / f"{solver_id}-objects")
     simulation_id = repo.create_simulation_job(
@@ -16,7 +16,7 @@ def _run(tmp_path, monkeypatch, solver_id, geometry, boundary_conditions):
     monkeypatch.setattr(tasks, "get_repository", lambda: repo)
     monkeypatch.setattr(tasks, "get_storage", lambda: storage)
     result = tasks.run_simulation_job(
-        simulation_id=simulation_id, solver_id=solver_id, material_name="steel",
+        simulation_id=simulation_id, solver_id=solver_id, material_name=material,
         geometry=geometry, boundary_conditions=boundary_conditions,
         initial_conditions={}, numerical_settings={"max_iterations": 300, "tolerance": 1e-5},
         experiment_id="experiment-a", design_id="design-a",
@@ -71,3 +71,21 @@ def test_modal_beam_persists_modes_but_sdof_remains_scalar_only(tmp_path, monkey
     )
     assert repo2.list_field_results(simulation_id2) == []
     assert repo2.get_simulation_result(simulation_id2).summary_metrics["fundamental_frequency_hz"] > 0
+
+
+@pytest.mark.parametrize(("solver_id","material","geometry","boundary","names"), [
+    ("acoustic_duct_1d_v1","air",{"dimension":"1d","length_m":1,"num_elements":20},
+     {"source_frequency_hz":80,"source_pressure_pa":1,"acoustic_left_boundary":"driven","acoustic_right_boundary":"pressure_release"},
+     ["pressure_amplitude","pressure_phase","pressure_real"]),
+    ("electrostatic_rectangular_2d_v1","air",{"dimension":"2d","width_m":1,"height_m":1,"grid_resolution":9,"grid_resolution_y":9},
+     {"potential_left_v":0,"potential_gradient_x_v_m":1},
+     ["electric_field_magnitude","electric_field_x","electric_field_y","electric_potential"]),
+    ("cfd_laminar_channel_2d_v1","air",{"dimension":"2d","length_m":.1,"height_m":.01,"grid_resolution":9,"grid_resolution_y":11},
+     {"pressure_gradient_pa_m":-.01},["pressure","velocity_magnitude","velocity_x","velocity_y"]),
+])
+def test_new_solver_fields_use_authoritative_persistence_and_owner_metadata(tmp_path,monkeypatch,solver_id,material,geometry,boundary,names):
+    repo,storage,simulation_id=_run(tmp_path,monkeypatch,solver_id,geometry,boundary,material)
+    fields=repo.list_field_results(simulation_id)
+    assert [field.variable_name for field in fields]==names
+    assert all(field.user_id=="user-a" and storage.file_exists(field.storage_object_key) for field in fields)
+    assert all("convergence" in field.grid_metadata for field in fields)

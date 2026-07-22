@@ -25,6 +25,12 @@ Redis/Celery, CI, or production validation.
   thermal/structural reference scenarios and field artifacts, then persists Module 3 analysis.
 - [x] Unsupported wind/CFD requests fail without an empirical or fabricated fallback.
 - [x] Legacy `/api/simulate/*` is deprecated and isolated from the authoritative pipeline.
+- [x] Bounded 1D acoustic Helmholtz, 2D electrostatic Poisson, and fully developed laminar
+  channel-flow solvers produce genuine persisted fields and pass analytical benchmarks.
+- [x] One-way sequential steady linear thermal-to-structural coupling persists both stages,
+  mapping evidence, provenance, and partial-failure state.
+- [x] Reviewable improvement proposals require explicit acceptance before Module 1 execution and
+  persist proposal state plus parent/child iteration lineage.
 
 ## Scientific scope gates
 
@@ -34,11 +40,11 @@ Redis/Celery, CI, or production validation.
 - [x] SDOF modal analysis remains scalar-only.
 - [x] Pipeline thermal/structural inputs are disclosed comparison scenarios, not inferred service
   conditions or arbitrary-CAD mesh simulations.
-- [ ] CFD flow-field solver: not implemented.
-- [ ] Acoustic/wave solver: not implemented.
-- [ ] Electromagnetic solver: not implemented.
-- [ ] Coupled multiphysics: not implemented.
-- [ ] Automated Module 3 → Module 1 reviewed design iteration: not implemented.
+- [x] Bounded laminar channel-flow field solver; broader CFD remains unsupported.
+- [x] Bounded 1D acoustic duct solver; arbitrary room/3D wave simulation remains unsupported.
+- [x] Bounded 2D electrostatic solver; electromagnetic waves remain unsupported.
+- [x] One-way thermal-to-structural coupling; bidirectional/full coupling remains unsupported.
+- [x] Human-reviewed Module 3 → Module 1 iteration; autonomous approval remains prohibited.
 
 ## Validation required before merge or deployment
 
@@ -53,9 +59,9 @@ Redis/Celery, CI, or production validation.
 
 ## Current local validation evidence (2026-07-22)
 
-- Combined unit/integration/E2E/benchmark selection: **92 passed, 14 deselected**; real process
+- Combined unit/integration/E2E/benchmark selection: **107 passed, 14 deselected**; real process
   exit code 0.
-- Complete backend suite: **102 passed, 4 skipped**; real process exit code 0.
+- Complete backend suite: **117 passed, 4 skipped**; real process exit code 0.
 - The four external Supabase tests skipped because live credentials are unavailable; these are
   blocked evidence, never passing evidence.
 - The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4

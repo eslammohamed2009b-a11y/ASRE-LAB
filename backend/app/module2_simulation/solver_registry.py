@@ -21,11 +21,10 @@ from app.module2_simulation.schemas import (
 )
 
 # -- legacy registry (unchanged) ------------------------------------------------
-# Still used by the legacy `/api/simulate/*` router, `service.py`, and the
-# integrated Module1->2->3 pipeline (`app.pipeline_service`). This is a
+# Used only by the legacy `/api/simulate/*` compatibility router and its service. This is a
 # narrower, older concept ("is this analysis_type backed by a real solver at
 # all") than the new `SOLVER_REGISTRY` below and is kept exactly as before so
-# existing surface keeps working unmodified.
+# compatibility surface; the authoritative pipeline uses `SOLVER_REGISTRY` and `EngineeringSolver`.
 SOLVER_VALIDATION_STATUS: dict[str, str] = {
     "thermal": "validated_prototype",
     "structural": "unsupported",
