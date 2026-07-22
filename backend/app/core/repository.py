@@ -956,7 +956,10 @@ class SupabaseRepository(PersistenceRepository):
         return self._field_result_from_row(data[0]) if data else None
 
     def list_field_results(self, simulation_id: str) -> list[FieldResultRecord]:
-        data = self._client.table("simulation_field_results").select("*").eq("simulation_id", simulation_id).execute().data
+        data = (
+            self._client.table("simulation_field_results").select("*")
+            .eq("simulation_id", simulation_id).order("variable_name").order("id").execute().data
+        )
         return [self._field_result_from_row(row) for row in data]
 
     # -- analyses (Module 3) ----------------------------------------------
@@ -1836,7 +1839,7 @@ class LocalSQLiteRepository(PersistenceRepository):
         conn = self._connect()
         try:
             rows = conn.execute(
-                "SELECT * FROM simulation_field_results WHERE simulation_id = ? ORDER BY created_at, id",
+                "SELECT * FROM simulation_field_results WHERE simulation_id = ? ORDER BY variable_name, id",
                 (simulation_id,),
             ).fetchall()
         finally:

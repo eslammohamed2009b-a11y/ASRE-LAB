@@ -11,6 +11,7 @@ from collections.abc import Generator
 import pytest
 
 try:
+    from app.core import native_runtime as _native_runtime  # noqa: F401
     import cadquery  # noqa: F401
     from cadquery import Workplane  # noqa: F401
 except ImportError as exc:  # pragma: no cover - fail-fast path
