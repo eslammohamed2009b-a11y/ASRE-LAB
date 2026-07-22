@@ -3,12 +3,12 @@ Module 2 — solver interfaces.
 
 Two interfaces live here on purpose:
 
-- `Mesh` / `SolverResult` / `BaseSolver` (legacy, unchanged): the original
-  minimal interface still used by the legacy `/api/simulate/*` router and
-  the integrated Module1->2->3 pipeline (`app.pipeline_service`). Kept
-  exactly as it was so that existing surface keeps working unmodified.
+- `Mesh` / `SolverResult` / `BaseSolver` (legacy): the original minimal
+  interface used only by the deprecated `/api/simulate/*` compatibility
+  router. It is isolated from the authoritative Module 1 -> 2 -> 3 pipeline.
 - `EngineeringSolver` (new, Phase C2 unified architecture): a
-  template-method abstraction used by the new `/api/simulations/*` router.
+  template-method abstraction used by `/api/simulations/*` and the
+  authoritative integrated pipeline (`app.pipeline_service`).
   `run()` orchestrates a fixed pipeline (validate -> prepare -> mesh ->
   solve -> residual/convergence -> extract -> serialize) and each concrete
   solver only implements the family-specific pieces. This is what

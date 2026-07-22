@@ -44,7 +44,7 @@ result. **Planned** = not yet built.
 | Module 3 — deterministic engineering intelligence | Validated locally | Persisted datasets feed descriptive statistics, Pearson/Spearman association, first-order standardized linear sensitivity estimates, Pareto analysis, transparent ranking, and evidence-linked recommendations. Correlation is not causation and regression is not Sobol/global sensitivity. |
 | Integrated Module 1 → 2 → 3 pipeline | Validated locally | Uses authoritative persisted designs, unified real solver jobs/fields, and persisted deterministic analysis. Thermal and structural runs are disclosed 1D comparison scenarios, not arbitrary-CAD mesh simulation or inferred service loading. |
 | Persistence — durable ownership (SQLite local adapter) | Validated | Restart-durability and multi-instance-sharing proven with a real on-disk SQLite file (not `:memory:`), by unit tests. |
-| Persistence — Supabase (live) | **Blocked** | Ordered migrations and repository/storage adapters exist, but no live credentials are available. Three external tests skip explicitly and are not counted as passing. |
+| Persistence — Supabase (live) | **Blocked** | Ordered migrations and repository/storage adapters exist, but no live credentials are available. External tests skip explicitly and are not counted as passing. |
 | Async batch generation (Celery/Redis) | Implemented; queue transport unvalidated | Persisted jobs, progress, partial failure, cancellation, idempotency keys, per-user active-job limits, and result retrieval are tested in Celery eager mode. `docker-compose.yml` provides API + worker + Redis, but a real broker/worker run and load test remain blocked locally because Docker/Redis are unavailable. |
 | Licensing | Validated | Proprietary, source-available [LICENSE](LICENSE); public repo, all rights reserved. |
 
@@ -77,11 +77,9 @@ If you do not use GitHub CLI:
 
 ## 3) Database migrations
 
-Apply the authoritative idempotent migrations in order:
-
-1. `database/migrations/001_initial_schema.sql`
-2. `database/migrations/002_design_files.sql`
-3. `database/migrations/003_job_tracking.sql`
+Apply every numbered migration in `database/migrations/` in ascending order. The current
+authoritative sequence is `001` through `009`; do not stop at Migration 003. Migration 009
+adds unified solver-result provenance and owner-scoped persisted experiment analyses.
 
 See `database/migrations/README.md`. The legacy `database/schema.sql` and
 `database/supabase_schema.sql` files are deprecated and must not be applied.

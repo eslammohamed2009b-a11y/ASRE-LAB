@@ -49,23 +49,20 @@ Redis/Celery, CI, or production validation.
   concurrency, partial failure, and load behavior.
 - [ ] Obtain a successful remote CI run of the required backend suites.
 - [ ] Run final production-like Module 1 → Module 2 → Module 3 end-to-end validation.
-- [ ] Reconcile final validation evidence with README and scientific capability documentation.
+- [x] Reconcile local validation evidence with README and scientific capability documentation.
 
 ## Current local validation evidence (2026-07-22)
 
-- Focused pipeline/field/analysis/routes: **16 passed**.
-- Unit: **38 passed**.
-- Integration: **38 passed**.
-- Benchmark: **8 passed**.
-- E2E: **5 passed**.
-- Combined local selection: **89 passed, 13 deselected**.
-- External: **3 skipped** because live Supabase credentials are unavailable; these are blocked,
-  not passing evidence.
-- Windows-native caveat: after pytest prints successful completion, the shared CadQuery/OCP
-  interpreter terminates with Windows status `0xC0000005` during process teardown. The same
-  post-summary status occurs for every marker split, including external collection, and is not
-  associated with a failed assertion. It remains an environment/runtime issue to resolve or
-  reproduce in CI; the production release gate therefore remains NO-GO.
+- Combined unit/integration/E2E/benchmark selection: **92 passed, 14 deselected**; real process
+  exit code 0.
+- Complete backend suite: **102 passed, 4 skipped**; real process exit code 0.
+- The four external Supabase tests skipped because live credentials are unavailable; these are
+  blocked evidence, never passing evidence.
+- The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4
+  dependency set's NLopt and CasADi imports. The pinned CadQuery 2.8/OCP 7.9 dependency set plus
+  the Windows DLL bootstrap exits cleanly after STEP/STL generation. A subprocess regression test
+  now requires a genuine zero process exit code, so a post-summary native crash cannot be mistaken
+  for passing evidence.
 
 ## Test commands
 
@@ -77,6 +74,7 @@ python -m pytest tests/unit/test_pipeline_persistence.py \
   tests/integration/test_analysis_api.py -q
 python -m pytest -m "unit or integration or benchmark or e2e" -q
 python -m pytest -m external -q
+./scripts/validate_supabase_release_gate.ps1
 ```
 
 External tests that skip for missing credentials are **blocked/skipped**, never passing evidence.
