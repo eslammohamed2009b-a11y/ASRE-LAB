@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import datetime, timezone
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -17,6 +18,32 @@ class ProposalRequest(BaseModel):
     analysis_id: str
     source_design_id: str
     parameter_bounds: dict[str, tuple[float,float]]
+
+class ProposalResponse(BaseModel):
+    id: str
+    experiment_id: str
+    analysis_id: str
+    user_id: str
+    status: Literal["generated","accepted","rejected","superseded","executed","failed"]
+    modifications: list[dict[str, Any]]
+    evidence: list[Any]
+    source_design_ids: list[str]
+    expected_tradeoffs: list[str]
+    confidence_limitations: list[str]
+    constraint_checks: dict[str, Any]
+    created_at: str
+    updated_at: str
+
+class IterationResponse(BaseModel):
+    id: str
+    experiment_id: str
+    proposal_id: str
+    user_id: str
+    parent_design_ids: list[str]
+    child_design_ids: list[str]
+    status: Literal["planned","completed","failed"]
+    created_at: str
+    updated_at: str
 
 class FeedbackNotFoundError(LookupError): pass
 class FeedbackStateError(ValueError): pass

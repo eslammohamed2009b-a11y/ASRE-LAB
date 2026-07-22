@@ -1,0 +1,60 @@
+name: Backend CI
+
+on:
+  pull_request:
+    paths:
+      - "backend/**"
+      - "database/migrations/**"
+      - "docs/**"
+      - "README.md"
+      - "GO_NO_GO_CHECKLIST.md"
+      - ".github/workflows/backend-ci.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend-linux:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.15"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install authoritative backend requirements
+        run: python -m pip install -r requirements.txt
+      - name: Compile application and tests
+        run: python -m compileall -q app tests
+      - name: Validate application import and OpenAPI contract
+        run: python -m pytest -p no:cacheprovider tests/contract -q
+      - name: Validate migrations and fresh local schema
+        run: python -m pytest -p no:cacheprovider tests/unit/test_migration_009_contract.py tests/unit/test_repository.py -q
+      - name: Run authoritative backend suite
+        env:
+          DEBUG: "false"
+        run: python -m pytest -p no:cacheprovider -q --disable-warnings
+
+  cadquery-windows-clean-exit:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11.15"
+          cache: pip
+          cache-dependency-path: backend/requirements.txt
+      - name: Install authoritative backend requirements
+        run: python -m pip install -r requirements.txt
+      - name: Verify CadQuery STEP/STL generation and clean process exit
+        env:
+          DEBUG: "false"
+        run: python -m pytest -p no:cacheprovider tests/integration/test_cadquery_clean_process_exit.py -q

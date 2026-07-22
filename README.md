@@ -20,6 +20,9 @@
   unsupported / planned) is tracked honestly in the status table below and
   in [GO_NO_GO_CHECKLIST.md](GO_NO_GO_CHECKLIST.md) — public visibility must
   never be read as an implied claim that every listed feature is complete.
+- The frozen backend HTTP contract for downstream frontend work is documented in
+  [docs/BACKEND_API_CONTRACT.md](docs/BACKEND_API_CONTRACT.md) and enforced by
+  `backend/openapi-contract.json` plus a regression test.
 
 ## Honest capability status
 

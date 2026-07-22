@@ -5,6 +5,7 @@ import hashlib
 import json
 import uuid
 from datetime import datetime, timezone
+from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -24,6 +25,22 @@ class ThermalStructuralCouplingRequest(BaseModel):
     reference_temperature_c: float = 20.0
     hot_end_temperature_c: float
     restraint: str = "fully_restrained"
+
+
+class ThermalStructuralCouplingResponse(BaseModel):
+    id: str
+    experiment_id: str
+    user_id: str
+    analysis_type: str
+    status: str
+    configuration: dict[str, Any]
+    result: dict[str, Any]
+    warnings: list[str]
+    source_design_ids: list[str]
+    source_simulation_ids: list[str]
+    reproducibility_hash: str
+    created_at: str
+    updated_at: str
 
 
 class CouplingNotFoundError(LookupError):

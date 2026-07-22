@@ -31,6 +31,8 @@ Redis/Celery, CI, or production validation.
   mapping evidence, provenance, and partial-failure state.
 - [x] Reviewable improvement proposals require explicit acceptance before Module 1 execution and
   persist proposal state plus parent/child iteration lineage.
+- [x] Backend OpenAPI contract frozen at version 1.0.0 with a deterministic snapshot and
+  regression test; all 40 paths, authentication, legacy deprecation, and core response types audited.
 
 ## Scientific scope gates
 
@@ -59,9 +61,9 @@ Redis/Celery, CI, or production validation.
 
 ## Current local validation evidence (2026-07-22)
 
-- Combined unit/integration/E2E/benchmark selection: **107 passed, 14 deselected**; real process
+- Combined unit/integration/E2E/benchmark selection: **108 passed, 14 deselected**; real process
   exit code 0.
-- Complete backend suite: **117 passed, 4 skipped**; real process exit code 0.
+- Complete backend suite: **118 passed, 4 skipped**; real process exit code 0.
 - The four external Supabase tests skipped because live credentials are unavailable; these are
   blocked evidence, never passing evidence.
 - The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4
