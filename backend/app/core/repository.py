@@ -223,6 +223,36 @@ class FieldResultRecord:
     created_at: str = ""
 
 
+@dataclass(frozen=True)
+class DesignProposalRecord:
+    id: str
+    experiment_id: str
+    analysis_id: str
+    user_id: str
+    status: str
+    modifications: list = field(default_factory=list)
+    evidence: list = field(default_factory=list)
+    source_design_ids: list = field(default_factory=list)
+    expected_tradeoffs: list = field(default_factory=list)
+    confidence_limitations: list = field(default_factory=list)
+    constraint_checks: dict = field(default_factory=dict)
+    created_at: str = ""
+    updated_at: str = ""
+
+
+@dataclass(frozen=True)
+class DesignIterationRecord:
+    id: str
+    experiment_id: str
+    proposal_id: str
+    user_id: str
+    parent_design_ids: list = field(default_factory=list)
+    child_design_ids: list = field(default_factory=list)
+    status: str = "planned"
+    created_at: str = ""
+    updated_at: str = ""
+
+
 class PersistenceRepository(ABC):
     """Abstract persistence + ownership boundary used by Module 1 routes."""
 
@@ -420,6 +450,21 @@ class PersistenceRepository(ABC):
     @abstractmethod
     def list_analyses_for_experiment(self, experiment_id: str) -> list[AnalysisRecord]:
         ...
+
+    @abstractmethod
+    def create_design_proposal(self, record: DesignProposalRecord) -> None: ...
+    @abstractmethod
+    def get_design_proposal(self, proposal_id: str) -> DesignProposalRecord | None: ...
+    @abstractmethod
+    def list_design_proposals(self, experiment_id: str) -> list[DesignProposalRecord]: ...
+    @abstractmethod
+    def update_design_proposal_status(self, proposal_id: str, status: str) -> None: ...
+    @abstractmethod
+    def create_design_iteration(self, record: DesignIterationRecord) -> None: ...
+    @abstractmethod
+    def get_design_iteration(self, iteration_id: str) -> DesignIterationRecord | None: ...
+    @abstractmethod
+    def list_design_iterations(self, experiment_id: str) -> list[DesignIterationRecord]: ...
 
 
 class SupabaseRepository(PersistenceRepository):
@@ -1000,6 +1045,39 @@ class SupabaseRepository(PersistenceRepository):
         )
         return [self._analysis_from_row(row) for row in (data or [])]
 
+    @staticmethod
+    def _proposal_from_row(row: dict) -> DesignProposalRecord:
+        return DesignProposalRecord(**{key: row[key] for key in DesignProposalRecord.__dataclass_fields__})
+
+    def create_design_proposal(self, record: DesignProposalRecord) -> None:
+        self._client.table("design_improvement_proposals").insert(record.__dict__).execute()
+
+    def get_design_proposal(self, proposal_id: str) -> DesignProposalRecord | None:
+        data = self._client.table("design_improvement_proposals").select("*").eq("id", proposal_id).execute().data
+        return self._proposal_from_row(data[0]) if data else None
+
+    def list_design_proposals(self, experiment_id: str) -> list[DesignProposalRecord]:
+        data = self._client.table("design_improvement_proposals").select("*").eq("experiment_id", experiment_id).order("created_at").execute().data
+        return [self._proposal_from_row(row) for row in (data or [])]
+
+    def update_design_proposal_status(self, proposal_id: str, status: str) -> None:
+        self._client.table("design_improvement_proposals").update({"status":status,"updated_at":_ts()}).eq("id", proposal_id).execute()
+
+    @staticmethod
+    def _iteration_from_row(row: dict) -> DesignIterationRecord:
+        return DesignIterationRecord(**{key: row[key] for key in DesignIterationRecord.__dataclass_fields__})
+
+    def create_design_iteration(self, record: DesignIterationRecord) -> None:
+        self._client.table("design_iterations").insert(record.__dict__).execute()
+
+    def get_design_iteration(self, iteration_id: str) -> DesignIterationRecord | None:
+        data = self._client.table("design_iterations").select("*").eq("id", iteration_id).execute().data
+        return self._iteration_from_row(data[0]) if data else None
+
+    def list_design_iterations(self, experiment_id: str) -> list[DesignIterationRecord]:
+        data = self._client.table("design_iterations").select("*").eq("experiment_id", experiment_id).order("created_at").execute().data
+        return [self._iteration_from_row(row) for row in (data or [])]
+
 
 class LocalSQLiteRepository(PersistenceRepository):
     """
@@ -1225,6 +1303,22 @@ class LocalSQLiteRepository(PersistenceRepository):
                 "CREATE INDEX IF NOT EXISTS idx_analyses_experiment "
                 "ON experiment_analyses(experiment_id, created_at, id)"
             )
+            conn.execute("""CREATE TABLE IF NOT EXISTS design_improvement_proposals (
+                id TEXT PRIMARY KEY, experiment_id TEXT NOT NULL, analysis_id TEXT NOT NULL,
+                user_id TEXT NOT NULL, status TEXT NOT NULL, modifications TEXT NOT NULL,
+                evidence TEXT NOT NULL, source_design_ids TEXT NOT NULL, expected_tradeoffs TEXT NOT NULL,
+                confidence_limitations TEXT NOT NULL, constraint_checks TEXT NOT NULL,
+                created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY(experiment_id) REFERENCES experiments(id) ON DELETE CASCADE,
+                FOREIGN KEY(analysis_id) REFERENCES experiment_analyses(id) ON DELETE CASCADE)""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_proposals_experiment ON design_improvement_proposals(experiment_id, created_at)")
+            conn.execute("""CREATE TABLE IF NOT EXISTS design_iterations (
+                id TEXT PRIMARY KEY, experiment_id TEXT NOT NULL, proposal_id TEXT NOT NULL UNIQUE,
+                user_id TEXT NOT NULL, parent_design_ids TEXT NOT NULL, child_design_ids TEXT NOT NULL,
+                status TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+                FOREIGN KEY(experiment_id) REFERENCES experiments(id) ON DELETE CASCADE,
+                FOREIGN KEY(proposal_id) REFERENCES design_improvement_proposals(id) ON DELETE CASCADE)""")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_iterations_experiment ON design_iterations(experiment_id, created_at)")
             conn.commit()
         finally:
             conn.close()
@@ -1898,6 +1992,64 @@ class LocalSQLiteRepository(PersistenceRepository):
         finally:
             conn.close()
         return [self._analysis_from_sqlite(row) for row in rows]
+
+    @staticmethod
+    def _proposal_from_sqlite(row: sqlite3.Row) -> DesignProposalRecord:
+        return DesignProposalRecord(id=row["id"],experiment_id=row["experiment_id"],analysis_id=row["analysis_id"],
+            user_id=row["user_id"],status=row["status"],modifications=json.loads(row["modifications"]),
+            evidence=json.loads(row["evidence"]),source_design_ids=json.loads(row["source_design_ids"]),
+            expected_tradeoffs=json.loads(row["expected_tradeoffs"]),confidence_limitations=json.loads(row["confidence_limitations"]),
+            constraint_checks=json.loads(row["constraint_checks"]),created_at=row["created_at"],updated_at=row["updated_at"])
+
+    def create_design_proposal(self, record: DesignProposalRecord) -> None:
+        conn=self._connect()
+        try:
+            conn.execute("INSERT INTO design_improvement_proposals VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (record.id,record.experiment_id,record.analysis_id,record.user_id,record.status,json.dumps(record.modifications),
+                 json.dumps(record.evidence),json.dumps(record.source_design_ids),json.dumps(record.expected_tradeoffs),
+                 json.dumps(record.confidence_limitations),json.dumps(record.constraint_checks),record.created_at,record.updated_at)); conn.commit()
+        finally: conn.close()
+
+    def get_design_proposal(self, proposal_id: str) -> DesignProposalRecord | None:
+        conn=self._connect()
+        try: row=conn.execute("SELECT * FROM design_improvement_proposals WHERE id=?",(proposal_id,)).fetchone()
+        finally: conn.close()
+        return self._proposal_from_sqlite(row) if row else None
+
+    def list_design_proposals(self, experiment_id: str) -> list[DesignProposalRecord]:
+        conn=self._connect()
+        try: rows=conn.execute("SELECT * FROM design_improvement_proposals WHERE experiment_id=? ORDER BY created_at,id",(experiment_id,)).fetchall()
+        finally: conn.close()
+        return [self._proposal_from_sqlite(row) for row in rows]
+
+    def update_design_proposal_status(self, proposal_id: str, status: str) -> None:
+        conn=self._connect()
+        try: conn.execute("UPDATE design_improvement_proposals SET status=?,updated_at=? WHERE id=?",(status,_ts(),proposal_id)); conn.commit()
+        finally: conn.close()
+
+    @staticmethod
+    def _iteration_from_sqlite(row: sqlite3.Row) -> DesignIterationRecord:
+        return DesignIterationRecord(id=row["id"],experiment_id=row["experiment_id"],proposal_id=row["proposal_id"],
+            user_id=row["user_id"],parent_design_ids=json.loads(row["parent_design_ids"]),child_design_ids=json.loads(row["child_design_ids"]),
+            status=row["status"],created_at=row["created_at"],updated_at=row["updated_at"])
+
+    def create_design_iteration(self, record: DesignIterationRecord) -> None:
+        conn=self._connect()
+        try: conn.execute("INSERT INTO design_iterations VALUES (?,?,?,?,?,?,?,?,?)",(record.id,record.experiment_id,record.proposal_id,
+            record.user_id,json.dumps(record.parent_design_ids),json.dumps(record.child_design_ids),record.status,record.created_at,record.updated_at)); conn.commit()
+        finally: conn.close()
+
+    def get_design_iteration(self, iteration_id: str) -> DesignIterationRecord | None:
+        conn=self._connect()
+        try: row=conn.execute("SELECT * FROM design_iterations WHERE id=?",(iteration_id,)).fetchone()
+        finally: conn.close()
+        return self._iteration_from_sqlite(row) if row else None
+
+    def list_design_iterations(self, experiment_id: str) -> list[DesignIterationRecord]:
+        conn=self._connect()
+        try: rows=conn.execute("SELECT * FROM design_iterations WHERE experiment_id=? ORDER BY created_at,id",(experiment_id,)).fetchall()
+        finally: conn.close()
+        return [self._iteration_from_sqlite(row) for row in rows]
 
 
 def default_local_db_path() -> str:
