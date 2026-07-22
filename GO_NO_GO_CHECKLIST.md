@@ -51,11 +51,12 @@ Redis/Celery, CI, or production validation.
 ## Validation required before merge or deployment
 
 - [ ] Review all Draft PR changes and obtain explicit merge approval.
-- [ ] Apply Migration 009 to a disposable/staging Supabase project.
+- [ ] Apply Migrations 001–010 to a disposable/staging Supabase project.
 - [ ] Run live Supabase repository, storage, RLS, field-result, and analysis round trips.
 - [ ] Validate Redis with separate Celery workers, including restart, retry, cancellation,
   concurrency, partial failure, and load behavior.
-- [ ] Obtain a successful remote CI run of the required backend suites.
+- [x] Obtain a successful remote CI run of the required backend suites. GitHub Actions run
+  `29950779579`: Ubuntu authoritative suite and Windows CadQuery clean-exit job passed.
 - [ ] Run final production-like Module 1 → Module 2 → Module 3 end-to-end validation.
 - [x] Reconcile local validation evidence with README and scientific capability documentation.
 
