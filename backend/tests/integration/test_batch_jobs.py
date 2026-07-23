@@ -246,3 +246,41 @@ def test_partial_failure_does_not_mark_all_variants_failed(monkeypatch):
     assert result["status"] == "partial_failure"
     assert result["completed_count"] == 2
     assert result["failed_count"] == 2
+
+
+def test_redelivery_resumes_from_durable_variant_checkpoint_without_duplicates():
+    """Model a late-ack task redelivery after variant zero was committed."""
+    from app.core.repository import get_repository
+    from app.module1_design.schemas import DesignParameters
+    from app.module1_design.tasks import run_batch_generation
+
+    repo = get_repository()
+    experiment_id = repo.create_experiment(user_id="user-redelivery", name="redelivery-test")
+    job_id = repo.create_job(
+        experiment_id=experiment_id,
+        user_id="user-redelivery",
+        job_type="design_batch",
+        requested_count=2,
+    )
+    kwargs = {
+        "job_id": job_id,
+        "experiment_id": experiment_id,
+        "user_id": "user-redelivery",
+        "base_params": DesignParameters(geometry_type="pyramid", height_m=50),
+        "vary_fields": ["height_m"],
+        "variation_range_pct": 0.1,
+    }
+
+    first_attempt = run_batch_generation(variation_count=1, **kwargs)
+    assert first_attempt["completed_count"] == 1
+
+    redelivered = run_batch_generation(variation_count=2, **kwargs)
+    assert redelivered["status"] == "completed"
+    assert redelivered["completed_count"] == 2
+
+    models = repo.list_design_models_for_experiment(experiment_id)
+    files = repo.list_design_files_for_experiment(experiment_id)
+    assert len(models) == 2
+    assert sorted(model.variation_index for model in models) == [0, 1]
+    assert len(files) == 4
+    assert len({file.object_key for file in files}) == 4

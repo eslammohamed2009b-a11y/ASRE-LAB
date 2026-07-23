@@ -38,11 +38,17 @@ try {
         $exitCode = $LASTEXITCODE
         throw "Failed to copy pytest configuration into the API container."
     }
+    docker compose cp docker-compose.yml api:/app/docker-compose.yml
+    if ($LASTEXITCODE -ne 0) {
+        $exitCode = $LASTEXITCODE
+        throw "Failed to copy Compose configuration into the API container."
+    }
 
     # Deterministic boundary suite covers durable transitions, cancellation,
     # idempotency, concurrency isolation, partial failure, and restart state.
     docker compose exec -T api python -m pytest -p no:cacheprovider `
       tests/unit/test_worker_release_gate_script.py `
+      tests/unit/test_worker_loss_recovery_script.py `
       tests/integration/test_batch_jobs.py `
       tests/integration/test_module2_simulations_api.py tests/e2e/test_batch_ownership_e2e.py -q
     $exitCode = $LASTEXITCODE
@@ -52,7 +58,7 @@ try {
         )
     }
     else {
-        Write-Output "Manual live check remains required: terminate the worker during a running job, restart it, and verify durable recovery/retry policy."
+        Write-Output "Worker/job container suite passed. Run validate_worker_loss_recovery.ps1 for the destructive SIGKILL/redelivery release probe."
     }
 }
 catch {

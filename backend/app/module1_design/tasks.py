@@ -17,12 +17,13 @@ synchronous function (`run_batch_generation`) so it can be:
 Eager-mode execution proves the task/queue plumbing and the real CadQuery
 generation path work end to end in-process. It is NOT proof that a
 separate Celery worker process consuming a real Redis broker works - that
-requires live infrastructure (Docker Compose: see `docker-compose.yml`)
-and is marked BLOCKED in this environment (no Docker/Redis installed).
+requires live infrastructure and is validated by
+`scripts/validate_worker_loss_recovery.ps1`.
 """
 from __future__ import annotations
 
 import logging
+import time
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +138,7 @@ def run_batch_generation(
     variation_count: int,
     vary_fields: list[str],
     variation_range_pct: float,
+    checkpoint_delay_seconds: float = 0,
 ) -> dict[str, Any]:
     """The real, synchronous batch-generation loop. Safe to call directly
     (tests) or from inside a Celery task (`generate_batch_task` below)."""
@@ -152,13 +154,41 @@ def run_batch_generation(
         # overwrite that terminal state with "running".
         return {"job_id": job_id, "status": "cancelled", "completed_count": 0, "failed_count": 0}
 
-    repo.update_job(job_id, status="running", started_at=_now_iso())
+    repo.update_job(job_id, status="running", started_at=job.started_at or _now_iso())
 
-    completed = 0
+    # A late-acknowledged task can be redelivered after abrupt worker loss.
+    # Treat a variation as committed only when its model and both artifacts are
+    # durable, then skip that checkpoint on redelivery.
+    existing_models = repo.list_design_models_for_experiment(experiment_id)
+    existing_files = repo.list_design_files_for_experiment(experiment_id)
+    file_count_by_model: dict[str, int] = {}
+    for design_file in existing_files:
+        if design_file.design_model_id:
+            file_count_by_model[design_file.design_model_id] = (
+                file_count_by_model.get(design_file.design_model_id, 0) + 1
+            )
+    completed_indices = {
+        model.variation_index
+        for model in existing_models
+        if model.generation_status == "completed"
+        and file_count_by_model.get(model.id, 0) == 2
+    }
+
+    completed = len(completed_indices)
+    # Failures are not durable checkpoints: a redelivery retries those
+    # variation indices and recomputes the attempt-local failure count.
     failed = 0
+    repo.update_job(
+        job_id,
+        completed_count=completed,
+        failed_count=0,
+        progress_percent=int(round(100 * completed / variation_count)) if variation_count else 100,
+    )
     cancelled = False
 
     for idx in range(variation_count):
+        if idx in completed_indices:
+            continue
         # Cooperative cancellation check between variants. Real mid-task
         # cancellation requires a live worker process polling this; in
         # Celery eager mode the whole task runs synchronously in the
@@ -187,6 +217,8 @@ def run_batch_generation(
 
         progress = int(round(100 * (completed + failed) / variation_count))
         repo.update_job(job_id, completed_count=completed, failed_count=failed, progress_percent=progress)
+        if checkpoint_delay_seconds > 0:
+            time.sleep(checkpoint_delay_seconds)
 
     if cancelled:
         final_status = "cancelled"
@@ -230,6 +262,7 @@ def generate_batch_task(
     variation_count: int,
     vary_fields: list[str],
     variation_range_pct: float,
+    checkpoint_delay_seconds: float = 0,
 ) -> dict[str, Any]:
     try:
         params = DesignParameters(**base_params)
@@ -241,6 +274,7 @@ def generate_batch_task(
             variation_count=variation_count,
             vary_fields=vary_fields,
             variation_range_pct=variation_range_pct,
+            checkpoint_delay_seconds=checkpoint_delay_seconds,
         )
     except Exception as exc:
         # Never leak a raw stack trace to a client polling job status - the
