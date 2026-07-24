@@ -15,6 +15,7 @@ class Settings(BaseSettings):
     CELERY_BROKER_URL: str = "redis://localhost:6379/0"
     CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
     CELERY_TASK_ALWAYS_EAGER: bool = False
+    CELERY_BROKER_VISIBILITY_TIMEOUT: int = 3600
 
     APPLICATION_VERSION: str = "1.0.0"
 

@@ -20,6 +20,9 @@
   unsupported / planned) is tracked honestly in the status table below and
   in [GO_NO_GO_CHECKLIST.md](GO_NO_GO_CHECKLIST.md) — public visibility must
   never be read as an implied claim that every listed feature is complete.
+- The frozen backend HTTP contract for downstream frontend work is documented in
+  [docs/BACKEND_API_CONTRACT.md](docs/BACKEND_API_CONTRACT.md) and enforced by
+  `backend/openapi-contract.json` plus a regression test.
 
 ## Honest capability status
 
@@ -35,11 +38,15 @@ result. **Planned** = not yet built.
 | Module 1 — parametric CAD generation (real CadQuery/OCP kernel) | Validated locally | Real STEP/STL generation is covered by integration tests and real-HTTP E2E tests; files are persisted through `FileStorage`, not exposed as raw server paths. |
 | Module 1 — ownership-isolated jobs and files | Validated locally | Persisted job/status/result APIs and file downloads fail closed with 404 across users. Real-HTTP E2E evidence includes checksum/size verification and a process restart against the same SQLite database and storage root. |
 | Local backend test suite | Validated | Unit, integration, E2E, and benchmark marker suites pass in the pinned Python 3.11.15 / real-CadQuery environment. Current counts are recorded in `GO_NO_GO_CHECKLIST.md`. |
-| Remote CI (GitHub Actions) | **Blocked — unknown cause** | Latest inspected run `29708734759` ended `startup_failure` in the same second it was created, with zero jobs and empty billable timing. GitHub returned no explicit cause. No billing/account-hold theory is treated as confirmed; remote tests have not run. |
+| Remote CI (GitHub Actions) | Validated | Backend CI run `29950779579` passed on Ubuntu (install, compile, frozen OpenAPI contract, migrations/fresh schema, complete backend suite) and Windows (real CadQuery STEP/STL clean-process-exit regression). Supabase Preview was skipped and remains separate blocked evidence. |
 | Module 2 — thermal solver | Implemented, not externally validated | Real finite-difference steady-state solver (no fabricated values), executed in benchmark tests against analytical/grid-convergence checks locally. Not run against live production infrastructure. |
 | Module 2 — structural solver | Validated locally | Real 1D linear bar and Euler–Bernoulli cantilever finite-element solvers are benchmarked against analytical solutions. This is not 2D/3D arbitrary-CAD FEA. |
 | Module 2 — modal solver | Validated locally | Real SDOF frequency and 1D cantilever generalized eigenvalue calculations are benchmarked analytically. SDOF is scalar-only; beam mode shapes are persisted. |
-| Module 2 — CFD / acoustic / electromagnetic / coupled solvers | Unsupported or planned | CFD is an explicitly labelled empirical prototype and is not available through the authoritative API. Acoustic, electromagnetic, and coupled solvers are not implemented. |
+| Module 2 — bounded acoustic | Analytically validated locally | Real 1D frequency-domain Helmholtz duct solve with pressure amplitude/phase fields. It is not arbitrary-room or 3D acoustics. |
+| Module 2 — bounded electrostatic | Analytically validated locally | Real 2D rectangular-grid Laplace/Poisson solve with potential and electric-field components. It is not an electromagnetic-wave solver. |
+| Module 2 — bounded CFD | Analytically validated locally | Real fully developed laminar channel-flow finite-difference solve, validated against plane Poiseuille flow. It is not turbulence, external aerodynamics, arbitrary-CAD, or industrial CFD. |
+| Thermal → structural coupling | Validated locally | One-way sequential steady linear coupling maps the persisted mean 1D temperature to explicit structural thermal strain; compatible 1D models only. |
+| Reviewable Module 3 → Module 1 feedback | Validated locally | Persisted evidence-linked proposals require explicit acceptance before Module 1 generation and preserve parent/child iteration lineage. Proposed outcomes are not guarantees. |
 | Scientific field results | Validated locally | Genuine thermal, structural, and beam-modal arrays are stored as bounded compressed NPZ artifacts with checksums, reproducibility hashes, safe keys, owner-scoped metadata, and integrity-checked loading. |
 | Module 3 — deterministic engineering intelligence | Validated locally | Persisted datasets feed descriptive statistics, Pearson/Spearman association, first-order standardized linear sensitivity estimates, Pareto analysis, transparent ranking, and evidence-linked recommendations. Correlation is not causation and regression is not Sobol/global sensitivity. |
 | Integrated Module 1 → 2 → 3 pipeline | Validated locally | Uses authoritative persisted designs, unified real solver jobs/fields, and persisted deterministic analysis. Thermal and structural runs are disclosed 1D comparison scenarios, not arbitrary-CAD mesh simulation or inferred service loading. |
@@ -78,8 +85,9 @@ If you do not use GitHub CLI:
 ## 3) Database migrations
 
 Apply every numbered migration in `database/migrations/` in ascending order. The current
-authoritative sequence is `001` through `009`; do not stop at Migration 003. Migration 009
-adds unified solver-result provenance and owner-scoped persisted experiment analyses.
+authoritative sequence is `001` through `010`; do not stop at Migration 003. Migration 009
+adds unified solver-result provenance and owner-scoped analyses; Migration 010 adds reviewable
+design proposals and persistent iteration lineage.
 
 See `database/migrations/README.md`. The legacy `database/schema.sql` and
 `database/supabase_schema.sql` files are deprecated and must not be applied.

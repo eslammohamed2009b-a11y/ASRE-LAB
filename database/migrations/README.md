@@ -40,6 +40,9 @@ replaced with a deprecation notice pointing here.
    reference material properties with source/valid-range, mirroring
    `app/module2_simulation/materials.py`; seeded via this migration). No
    dependency on the simulation tables.
+8. `008_simulation_field_results.sql` — bounded, owner-scoped NPZ field-artifact metadata.
+9. `009_experiment_analyses.sql` — solver provenance columns and persisted Module 3 analyses.
+10. `010_design_feedback_iterations.sql` — reviewable proposals and parent/child iteration lineage.
 
 Each file is idempotent (`create table if not exists`, `create index if
 not exists`, `drop policy/constraint if exists` before recreating) and
@@ -58,6 +61,9 @@ psql "$DATABASE_URL" -f database/migrations/004_simulation_jobs.sql
 psql "$DATABASE_URL" -f database/migrations/005_simulation_inputs.sql
 psql "$DATABASE_URL" -f database/migrations/006_simulation_results.sql
 psql "$DATABASE_URL" -f database/migrations/007_material_library.sql
+psql "$DATABASE_URL" -f database/migrations/008_simulation_field_results.sql
+psql "$DATABASE_URL" -f database/migrations/009_experiment_analyses.sql
+psql "$DATABASE_URL" -f database/migrations/010_design_feedback_iterations.sql
 ```
 
 **These migrations have NOT been applied to any live Supabase project in

@@ -142,9 +142,10 @@ def list_solvers(family: SolverFamily | None = None) -> list[CapabilityEntry]
 def is_available(solver_id: str) -> bool                        # True only if implementation_status == REAL
 def require_available(solver_id: str) -> CapabilityEntry        # raises UnsupportedCapabilityError otherwise
 ```
-Currently registered `solver_id`s: `thermal_conduction_v1`, `structural_linear_1d_v1`,
-`modal_eigen_1d_v1` (all `implementation_status=REAL`), `cfd_wind_drag_v1` (`PROTOTYPE`),
-`wave_acoustic_v0`, `electromagnetic_v0`, `coupled_multiphysics_v0` (all `PLANNED`, zero implementation).
+Currently registered real solver IDs include `thermal_conduction_v1`, `structural_linear_1d_v1`,
+`modal_eigen_1d_v1`, `acoustic_duct_1d_v1`, `electrostatic_rectangular_2d_v1`, and
+`cfd_laminar_channel_2d_v1`. `coupled_multiphysics_v0` remains planned because the implemented
+thermal-to-structural capability is an explicitly one-way sequential workflow, not a bidirectional solver.
 A separate legacy concept, `SOLVER_VALIDATION_STATUS` dict, still gates `/api/simulate/run` and only
 allows `analysis_type="thermal"`.
 
@@ -523,15 +524,14 @@ active driver of the real deployment; do not assume it reflects production.
 ## 24. Backward-compatibility requirements
 
 - The legacy `/api/simulate/*` router and its schemas/solver (`BaseSolver`, `ThermalSolver`,
-  `SimulationRunRequest`/`Response`) **must keep working unmodified** — the integrated `/api/pipeline/*`
-  flow depends on them today. Do not remove or change their signatures when adding new unified
+  `SimulationRunRequest`/`Response`) remain a deprecated compatibility surface. The authoritative
+  `/api/pipeline/*` flow uses `EngineeringSolver`; do not reconnect it to the legacy path. Add unified
   (`EngineeringSolver`) solvers.
 - New solver families must be added as new `SOLVER_REGISTRY` entries + new `EngineeringSolver` subclasses
   under `/api/simulations`, following the existing `implementation_status`/`validation_status` honesty
   convention: **never** register a formula-only estimator as `implementation_status=REAL`, and never
-  describe a closed-form/empirical estimate as a "field solver" (see the existing `cfd_wind_drag_v1`
-  entry for the correct way to represent this: `PROTOTYPE`, empirical governing equation, explicit
-  known-limitations statement that no flow field is solved).
+  describe a closed-form/empirical estimate as a "field solver". The bounded channel solver is real
+  only within its declared fully developed laminar parallel-plate scope.
 - **Known pre-existing bug, not to be silently "fixed" as a side effect of an unrelated task, but should
   be flagged/ticketed:** `app/core/persistence.py`'s `PersistenceService` (used only by the legacy
   `/api/pipeline/*` flow via `pipeline_service.py`) inserts into `experiments` using columns `owner_id`,

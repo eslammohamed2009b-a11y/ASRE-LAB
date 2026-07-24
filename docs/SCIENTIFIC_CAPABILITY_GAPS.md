@@ -23,10 +23,10 @@ multiphysics below.
 | **Thermal** | `ThermalConductionSolver` (`solvers/thermal_solver.py`), `solver_id=thermal_conduction_v1`, `implementation_status=REAL` | Steady-state heat conduction: `k * ∇²T + q = 0` | Finite-difference (uniform cubic grid, 3D mode) / finite-difference rod discretization (1D mode) | 1D (2-500 nodes) and 3D (uniform cubic grid, 5-40 nodes/edge) | `tests/unit/test_thermal_solver_benchmark.py` (3D zero-source -> ambient analytical limit); `tests/integration/test_thermal_solver_v2_benchmark.py` (1D Dirichlet-Dirichlet linear profile, 1D Neumann-Dirichlet linear profile); `tests/integration/test_solver_field_integration.py` (Big Batch 2: field persists correctly) | Validated (against analytical solutions) | Steady-state only (no transient/time-dependent conduction); `convection_coefficient_w_m2k` boundary condition is declared in the schema but not implemented by any solver; 3D mode requires a uniform cubic grid — arbitrary CAD-imported meshes are not consumed | Transient conduction (time-stepping); convection boundary condition; non-cubic/arbitrary 3D mesh ingestion | Add a convection (Robin) boundary condition to the existing steady-state 3D solver, benchmarked against a known fin/plate analytical convection solution, before attempting transient conduction |
 | **Structural** | `StructuralLinearSolver` (`solvers/structural_solver.py`), `solver_id=structural_linear_1d_v1`, `implementation_status=REAL` | Linear-elastic 1D bar (`K = EA/L * [[1,-1],[-1,1]]`) and Euler-Bernoulli cantilever beam (cubic Hermite stiffness), global assembly + Dirichlet elimination `K*u=F` | Direct linear FE solve (single bar/beam element chain) | 1D only (single straight prismatic bar or cantilever beam, 1-500 elements) | `tests/integration/test_structural_solver_benchmark.py` (axial bar vs. analytical; cantilever beam tip deflection vs. analytical); `tests/integration/test_solver_field_integration.py` (Big Batch 2: field persists correctly) | Validated (against analytical solutions) | 1D bar/beam elements only — no plates, shells, solid 3D elements, or frames; linear-elastic only (no plasticity/buckling); single fixed support at one end only, not configurable; element stress is only calculated (and persisted) for the axial-bar mode — the cantilever-beam mode persists displacement only, no stress field | 2D/3D solid or shell FEA; multi-support configurations; nonlinear/plastic material behavior; buckling analysis; beam-mode stress recovery | Extend to a simple 2D frame (multiple bar/beam elements with arbitrary connectivity and support locations) before attempting solids/shells |
 | **Modal / vibration** | `ModalSolver` (`solvers/modal_solver.py`), `solver_id=modal_eigen_1d_v1`, `implementation_status=REAL` | SDOF mass-spring (`ωₙ = sqrt(k/m)`); generalized eigenvalue problem `K*φ = ω²*M*φ` (consistent mass/stiffness beam matrices) | Direct eigenvalue solve (SDOF closed form) or generalized eigensolver (beam FE matrices) | 1D only (SDOF, or single cantilever beam, 1-200 elements) | `tests/integration/test_modal_solver_benchmark.py` (SDOF vs. analytical frequency; cantilever beam first mode vs. analytical); `tests/integration/test_solver_field_integration.py` (Big Batch 2: field persists correctly) | Validated (against analytical solutions) | Only first N natural frequencies of a single SDOF/cantilever beam — no arbitrary 3D modal analysis; undamped only (no damping model); **SDOF mode is scalar-only by design: it has no spatial eigenvector to persist, because a single-DOF mass-spring idealization has no discretized geometry to compute a mode shape over** — this must never be described as producing a mode-shape field; the cantilever-beam mode's normalized eigenvectors (from `scipy.linalg.eigh`) are persisted as a real mode-shape field, not a mesh export | Damped modal analysis; multi-DOF/2D-3D modal analysis; mesh-exportable mode shapes | Add damping (proportional/Rayleigh) to the existing 1D beam eigensolver, benchmarked against a known damped SDOF analytical solution |
-| **CFD / wind** | `cfd_wind_drag_v1` registry entry only — **no dedicated field-solver class exists**; `solvers/cfd_solver.py` implements only a bulk empirical drag estimate, `implementation_status=PROTOTYPE` | Empirical drag equation: `F_d = 0.5 * ρ * v² * C_d * A` (not a solved flow field) | None — closed-form empirical formula, geometry-lookup `C_d` | None (no spatial discretization) | None | Not applicable (no numerical method to benchmark) | **Not real CFD**: no Navier-Stokes solve, no mesh, no flow field, no turbulence model. Explicitly rejected by the API as an "available" capability — surfaced only under an "unsupported"/"planned" classification. Unchanged by Big Batch 2. | A real coupled RANS/LES solver (e.g. OpenFOAM integration) or a validated, published, benchmarked reduced-order wind-load model | Before any field solver: integrate a single validated reduced-order model (e.g. a published wind-tunnel-correlated drag/pressure model for one simple bluff-body shape) with an explicit benchmark reference, still labeled empirical, not "CFD" |
-| **Wave / acoustic** | `wave_acoustic_v0` registry entry only, `implementation_status=PLANNED` | Planned: linear acoustic wave equation / Helmholtz equation — **not implemented** | None | None | None | Not applicable | No solver exists at all. Unchanged by Big Batch 2. | Everything: boundary-element or FEM Helmholtz/wave solver (e.g. FEniCSx acoustics, or a BEM library) | Smallest defensible: a 1D Helmholtz solver for a single duct/tube resonance, benchmarked against the known closed-form resonant-frequency solution, following the exact `EngineeringSolver` template used by `thermal_conduction_v1` |
-| **Electromagnetic** | `electromagnetic_v0` registry entry only, `implementation_status=PLANNED` | Planned: Maxwell's equations / magnetostatics — **not implemented** | None | None | None | Not applicable | No solver exists at all. Unchanged by Big Batch 2. | Everything: FDTD/FEM electromagnetic solver (e.g. MEEP or FEniCSx electromagnetics) | Smallest defensible: a 1D magnetostatic solenoid/simple magnetic-circuit solver benchmarked against a known analytical B-field solution |
-| **Coupled multiphysics** | `coupled_multiphysics_v0` registry entry only, `implementation_status=PLANNED` | Planned: two-way thermal-structural (thermoelastic) coupling — **not implemented** | None | None | None | Not applicable | No coupling exists; `thermal_conduction_v1` and `structural_linear_1d_v1` run fully independently today. Unchanged by Big Batch 2. | Pass `thermal_conduction_v1` temperature field as a thermal-strain load into `structural_linear_1d_v1` (one-way coupling first) | Smallest defensible: one-way thermal->structural coupling on the existing 1D bar (apply `α*ΔT*E` as an equivalent thermal load), benchmarked against the known analytical thermal-stress solution for a fully or partially restrained uniform bar |
+| **CFD / wind** | `cfd_laminar_channel_2d_v1`, `implementation_status=REAL` | Fully developed incompressible momentum `μ d²u/dy² = dp/dx`; continuity `∇·u=0` | Second-order finite difference/direct linear solve | 2D rectangular field representation of fully developed parallel-plate flow | Plane-Poiseuille profile, mass residual, and grid refinement | Analytically validated locally | Laminar `Re < 2000`; no inlet development, turbulence, compressibility, obstacles, external aerodynamics, arbitrary CAD, or industrial accuracy | General internal/external CFD | Add a validated bounded developing-channel case before broader geometry |
+| **Wave / acoustic** | `acoustic_duct_1d_v1`, `implementation_status=REAL` | Frequency-domain Helmholtz `d²p/dx² + k²p = 0` | Second-order complex finite difference/direct solve | Uniform straight 1D duct | Analytical quarter-sine pressure profile and resonance metric | Analytically validated locally | Lossless plane waves only; no arbitrary rooms/CAD, radiation, higher modes, or nonlinear acoustics | Losses and higher-dimensional domains | Add a benchmarked lossy impedance termination |
+| **Electrostatic** | `electrostatic_rectangular_2d_v1`, `implementation_status=REAL` | Poisson `∇²V=-ρ/ε`; `E=-∇V` | Five-point finite difference/Gauss-Seidel | Uniform 2D rectangle | Linear parallel-plate potential and constant field | Analytically validated locally | Electrostatic only; constant permittivity; no magnetic field, waves, interfaces, or arbitrary geometry | Broader electrostatics and full electromagnetics | Add a dielectric-interface benchmark before any time-dependent Maxwell work |
+| **Coupled multiphysics** | One-way workflow at `/api/couplings/thermal-structural`; the generic `coupled_multiphysics_v0` solver entry remains planned because no bidirectional solver exists | Steady heat conduction followed by linear thermal strain `ε_th=αΔT` | Sequential persisted solves; arithmetic-mean 1D temperature mapping | Compatible uniform 1D thermal/bar models only | Fully restrained bar stress `|σ|=EαΔT` | Analytically validated locally | One-way, sequential, steady, linear; no silent interpolation or bidirectional coupling | Spatial mapping and bidirectional coupling | Add conservative node-to-node mapping for matching 1D grids |
 | **Module 3 analytics** | See the dedicated "Module 3 — Engineering Intelligence (Big Batch 2)" section below for the current, accurate description. This row previously described Module 3 as clustering/correlation-only; that description was stale and has been replaced. | N/A (statistical/deterministic pattern discovery and decision support, not a physics solver) | See section below | N/A | See section below | See section below | See section below | See section below | See section below |
 
 ## Solver-result provenance and convergence metadata (Big Batch 2)
@@ -143,11 +143,10 @@ wiring).
 - The pre-existing `clustering.py` (K-Means) + `correlation.py` (Pearson-only matrix) +
   `synthesis.py` (optional Claude/LLM narrative) path under `/api/analyze/full-report` is unchanged
   by Big Batch 2 and remains unvalidated against a ground-truth dataset (no correctness benchmark).
-- No automated Module 3 → Module 1 feedback loop exists. The repaired forward pipeline reaches
-  persisted Module 3 analysis, but it does not turn a recommendation into a new reviewed design.
-- Migration 009 has not been applied against a live production Supabase instance as part of this
-  batch — Big Batch 2 is still Draft PR #1 (`codex/big-batch-solver-intelligence`), not merged into
-  `main`, and must not be treated as merged production code.
+- The reviewable feedback loop is implemented, but autonomous approval is intentionally prohibited;
+  a user must accept every proposal before Module 1 generates a child design.
+- Migrations 009 and 010 have not been applied against live staging or production Supabase as part
+  of this batch and must not be treated as externally validated.
 
 ## Summary of implementation_status across the registry
 
@@ -156,30 +155,27 @@ wiring).
 | `thermal_conduction_v1` | real | validated |
 | `structural_linear_1d_v1` | real | validated |
 | `modal_eigen_1d_v1` | real | validated |
-| `cfd_wind_drag_v1` | prototype | not_applicable |
-| `wave_acoustic_v0` | planned | not_applicable |
-| `electromagnetic_v0` | planned | not_applicable |
+| `cfd_laminar_channel_2d_v1` | real | validated |
+| `acoustic_duct_1d_v1` | real | validated |
+| `electrostatic_rectangular_2d_v1` | real | validated |
 | `coupled_multiphysics_v0` | planned | not_applicable |
 
-Three of seven registered solver families have a validated, real numerical solver. The remaining four
-(CFD, wave/acoustic, electromagnetic, coupled) have either an explicitly-labeled empirical estimator
-(CFD) or literally no implementation (wave/acoustic, EM, coupled) — this is a factual scope statement,
-not a recommendation to fill all four in one sprint.
+Six registered solver entries now have validated, real numerical methods. The generic coupled entry
+remains planned because the implemented thermal-to-structural capability is a separate, explicitly
+one-way sequential workflow rather than a bidirectional `EngineeringSolver`.
 
-## Backend completion status (post Big Batch 2)
+## Backend completion status (final-backend-completion draft)
 
-Big Batch 2 does not change backend completion in the following areas, which remain honestly
-unfinished or unvalidated:
+The following areas remain honestly unfinished or externally unvalidated:
 
-- CFD beyond the existing empirical/prototype drag estimate (no real flow-field solver).
-- Acoustic/wave solver (planned only, not implemented).
-- Electromagnetic solver (planned only, not implemented).
-- Coupled multiphysics (planned only, not implemented).
-- A complete, automated Module 3 → Module 1 feedback loop.
+- CFD beyond bounded fully developed laminar parallel-plate channel flow.
+- Acoustic simulation beyond a straight lossless 1D plane-wave duct.
+- Electromagnetics beyond bounded 2D electrostatics.
+- Coupling beyond one-way sequential steady linear thermal-to-structural mapping.
+- Autonomous design approval, which is intentionally not implemented.
 - Production Redis/Celery worker validation (not run as part of this batch).
 - Live external Supabase integration tests requiring real credentials (skip locally without them).
-- Production application of Migration 009 (schema change exists in the branch only).
+- Staging/production application of Migrations 009 and 010.
 - UI/frontend work, which is intentionally outside the current backend-completion plan.
 
-Big Batch 2 is still a **Draft PR (#1)** on `codex/big-batch-solver-intelligence` and must not be
-treated as merged production code.
+This work remains an unmerged draft branch and must not be treated as production code.

@@ -7,6 +7,8 @@ from fastapi.responses import JSONResponse
 
 from app.core.config import settings
 from app.pipeline_router import router as pipeline_router
+from app.module2_simulation.coupling_router import router as coupling_router
+from app.module3_analysis.feedback_router import router as feedback_router
 from app.module1_design.router import router as module1_router
 from app.module1_design.jobs_router import router as module1_jobs_router
 from app.module2_simulation.router import router as module2_router
@@ -40,6 +42,8 @@ app.include_router(module2_router)
 app.include_router(module2_simulations_router)
 app.include_router(module3_router)
 app.include_router(pipeline_router)
+app.include_router(coupling_router)
+app.include_router(feedback_router)
 
 
 @app.on_event("startup")

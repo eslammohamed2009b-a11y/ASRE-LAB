@@ -194,21 +194,28 @@ class StructuralLinearSolver(EngineeringSolver):
                 break
             except materials.MaterialPropertyNotFoundError:
                 continue
-        return {"elastic_modulus_pa": elastic_modulus.value, "strength": strength}
+        expansion = None
+        try:
+            expansion = materials.get_property(request.material.name, "thermal_expansion").value
+        except materials.MaterialPropertyNotFoundError:
+            pass
+        return {"elastic_modulus_pa": elastic_modulus.value, "strength": strength, "thermal_expansion_1_k": expansion}
 
     def validate_boundary_conditions(self, request: SimulationCreateRequest) -> None:
         bc = request.boundary_conditions
         has_axial = bc.axial_load_n is not None
         has_transverse = bc.transverse_load_n is not None
-        if has_axial == has_transverse:
+        has_thermal = bc.thermal_delta_temperature_c is not None
+        if sum((has_axial, has_transverse, has_thermal)) != 1:
             raise SolverValidationError(
-                "structural solve requires exactly one of boundary_conditions.axial_load_n "
-                "(bar mode) or boundary_conditions.transverse_load_n (cantilever beam mode)"
+                "structural solve requires exactly one axial, transverse, or thermal load"
             )
         if has_transverse and request.geometry.moment_of_inertia_m4 is None:
             raise SolverValidationError(
                 "cantilever beam mode requires geometry.moment_of_inertia_m4"
             )
+        if has_thermal and bc.thermal_restraint not in {"free", "fully_restrained"}:
+            raise SolverValidationError("thermal_restraint must be 'free' or 'fully_restrained'")
 
     def prepare_model(self, request: SimulationCreateRequest, material_properties: dict[str, Any]) -> dict[str, Any]:
         return {
@@ -216,6 +223,7 @@ class StructuralLinearSolver(EngineeringSolver):
             "boundary_conditions": request.boundary_conditions,
             "elastic_modulus_pa": material_properties["elastic_modulus_pa"],
             "strength": material_properties["strength"],
+            "thermal_expansion_1_k": material_properties["thermal_expansion_1_k"],
         }
 
     def generate_or_import_mesh(self, request: SimulationCreateRequest, model: dict[str, Any]) -> None:
@@ -227,7 +235,24 @@ class StructuralLinearSolver(EngineeringSolver):
         bc = model["boundary_conditions"]
         num_elements = geometry.num_elements or 10
 
-        if bc.axial_load_n is not None:
+        if bc.thermal_delta_temperature_c is not None:
+            alpha = bc.thermal_expansion_coefficient_1_k or model["thermal_expansion_1_k"]
+            if alpha is None:
+                raise SolverValidationError("material has no thermal expansion coefficient")
+            n_nodes = num_elements + 1
+            thermal_strain = alpha * bc.thermal_delta_temperature_c
+            if bc.thermal_restraint == "free":
+                displacements = np.linspace(0.0, thermal_strain * geometry.length_m, n_nodes)
+                stresses = np.zeros(num_elements)
+                reaction = 0.0
+            else:
+                displacements = np.zeros(n_nodes)
+                stresses = np.full(num_elements, -model["elastic_modulus_pa"] * thermal_strain)
+                reaction = -float(stresses[0] * geometry.cross_section_area_m2)
+            raw = {"mode":"axial_bar","displacements_m":displacements,"element_stress_pa":stresses,
+                   "reaction_force_n":reaction,"elastic_modulus_pa":model["elastic_modulus_pa"],"residual":0.0,
+                   "thermal_strain":thermal_strain,"thermal_restraint":bc.thermal_restraint}
+        elif bc.axial_load_n is not None:
             raw = _solve_axial_bar(
                 num_elements=num_elements,
                 length_m=geometry.length_m,

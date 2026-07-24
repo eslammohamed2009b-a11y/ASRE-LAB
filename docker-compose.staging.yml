@@ -1,0 +1,21 @@
+services:
+  api:
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?staging SUPABASE_URL is required}
+      SUPABASE_KEY: ${SUPABASE_KEY:?staging SUPABASE_KEY is required}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-design-files}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?staging JWT_SECRET_KEY is required}
+      CELERY_BROKER_VISIBILITY_TIMEOUT: "10"
+      ALLOWED_ORIGINS: "[]"
+      LOCAL_PERSISTENCE_DB_PATH: ""
+      LOCAL_STORAGE_ROOT: ""
+
+  worker:
+    environment:
+      SUPABASE_URL: ${SUPABASE_URL:?staging SUPABASE_URL is required}
+      SUPABASE_KEY: ${SUPABASE_KEY:?staging SUPABASE_KEY is required}
+      SUPABASE_STORAGE_BUCKET: ${SUPABASE_STORAGE_BUCKET:-design-files}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?staging JWT_SECRET_KEY is required}
+      CELERY_BROKER_VISIBILITY_TIMEOUT: "10"
+      LOCAL_PERSISTENCE_DB_PATH: ""
+      LOCAL_STORAGE_ROOT: ""

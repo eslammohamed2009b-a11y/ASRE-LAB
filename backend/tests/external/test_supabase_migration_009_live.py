@@ -81,6 +81,23 @@ def test_migration_009_schema_persistence_and_owner_rls() -> None:
         assert client_a_fresh.table("experiment_analyses").select("id").eq("id", analysis_id).execute().data
         assert client_b.table("experiment_analyses").select("id").eq("id", analysis_id).execute().data == []
 
+        proposal_id = str(uuid.uuid4())
+        proposal = {
+            "id": proposal_id, "experiment_id": experiment_id, "analysis_id": analysis_id,
+            "user_id": owner_a, "status": "generated",
+            "modifications": [{"parameter": "height_m", "from": 10, "to": 10.5}],
+            "evidence": [{"analysis_id": analysis_id}], "source_design_ids": [],
+            "expected_tradeoffs": [], "confidence_limitations": ["not guaranteed"],
+            "constraint_checks": {"height_m": {"within_bounds": True}},
+        }
+        assert client_a.table("design_improvement_proposals").insert(proposal).execute().data[0]["id"] == proposal_id
+        assert client_a_fresh.table("design_improvement_proposals").select("id").eq("id", proposal_id).execute().data
+        assert client_b.table("design_improvement_proposals").select("id").eq("id", proposal_id).execute().data == []
+        with pytest.raises(APIError):
+            client_b.table("design_improvement_proposals").insert(
+                {**proposal, "id": str(uuid.uuid4()), "user_id": owner_a}
+            ).execute()
+
         with pytest.raises(APIError):
             client_b.table("experiment_analyses").insert(
                 {**record, "id": str(uuid.uuid4()), "user_id": owner_a}
