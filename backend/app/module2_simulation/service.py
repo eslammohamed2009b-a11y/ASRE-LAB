@@ -49,11 +49,17 @@ from app.module2_simulation.solvers.base_solver import EngineeringSolver  # noqa
 from app.module2_simulation.solvers.modal_solver import ModalSolver  # noqa: E402
 from app.module2_simulation.solvers.structural_solver import StructuralLinearSolver  # noqa: E402
 from app.module2_simulation.solvers.thermal_solver import ThermalConductionSolver  # noqa: E402
+from app.module2_simulation.solvers.acoustic_solver import AcousticDuctSolver  # noqa: E402
+from app.module2_simulation.solvers.electrostatic_solver import ElectrostaticRectangularSolver  # noqa: E402
+from app.module2_simulation.solvers.channel_flow_solver import LaminarChannelFlowSolver  # noqa: E402
 
 SOLVER_CLASSES: dict[str, type[EngineeringSolver]] = {
     "thermal_conduction_v1": ThermalConductionSolver,
     "structural_linear_1d_v1": StructuralLinearSolver,
     "modal_eigen_1d_v1": ModalSolver,
+    "acoustic_duct_1d_v1": AcousticDuctSolver,
+    "electrostatic_rectangular_2d_v1": ElectrostaticRectangularSolver,
+    "cfd_laminar_channel_2d_v1": LaminarChannelFlowSolver,
 }
 
 
@@ -195,6 +201,14 @@ def get_simulation_results_service(simulation_id: str, user_id: str) -> Simulati
             summary_metrics=result_record.summary_metrics,
             field_values=result_record.field_values,
             hotspot_node_ids=result_record.hotspot_node_ids,
+            status=result_record.status,
+            numerical_method=result_record.numerical_method,
+            residual_history=result_record.residual_history,
+            validation_metadata=result_record.validation_metadata,
+            elapsed_time_seconds=result_record.elapsed_time_seconds,
+            reproducibility_hash=result_record.reproducibility_hash,
+            source_design_id=result_record.source_design_id,
+            source_simulation_id=simulation_id,
         )
 
     base = _to_job_response(job)

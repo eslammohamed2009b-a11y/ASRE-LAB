@@ -50,6 +50,17 @@ class MaterialPropertyNotFoundError(Exception):
 # generic member of each material class, not a certified batch/mill-test
 # result. See valid_range + notes for the acknowledged variability.
 MATERIAL_LIBRARY: dict[str, dict[str, MaterialProperty]] = {
+    "air": {
+        "density": MaterialProperty(1.204, "kg/m3", "Dry air at 20 degC and 1 atm", (1.15, 1.30)),
+        "speed_of_sound": MaterialProperty(343.0, "m/s", "Dry air at 20 degC", (330.0, 350.0)),
+        "dynamic_viscosity": MaterialProperty(1.81e-5, "Pa*s", "Dry air at 20 degC", (1.7e-5, 1.9e-5)),
+        "permittivity": MaterialProperty(8.8541878128e-12, "F/m", "Vacuum/air approximation"),
+    },
+    "water": {
+        "density": MaterialProperty(998.2, "kg/m3", "Liquid water at 20 degC", (995.0, 1000.0)),
+        "dynamic_viscosity": MaterialProperty(1.002e-3, "Pa*s", "Liquid water at 20 degC", (0.8e-3, 1.2e-3)),
+        "permittivity": MaterialProperty(7.08e-10, "F/m", "Approximate static permittivity at 20 degC"),
+    },
     "concrete": {
         "density": MaterialProperty(2400, "kg/m3", "ASCE/engineering handbook typical value", (2200, 2600)),
         "thermal_conductivity": MaterialProperty(1.7, "W/(m*K)", "ASHRAE Fundamentals typical value", (0.8, 2.0)),
@@ -69,6 +80,7 @@ MATERIAL_LIBRARY: dict[str, dict[str, MaterialProperty]] = {
         "elastic_modulus": MaterialProperty(200e9, "Pa", "ASM Handbook (structural steel)", (190e9, 210e9)),
         "yield_strength": MaterialProperty(250e6, "Pa", "ASTM A36 minimum yield strength", (250e6, 400e6)),
         "poisson_ratio": MaterialProperty(0.3, "dimensionless", "ASM Handbook (structural steel)", (0.27, 0.30)),
+        "thermal_expansion": MaterialProperty(12e-6, "1/K", "ASM Handbook typical carbon steel", (10e-6, 14e-6)),
     },
     "aluminum": {
         "density": MaterialProperty(2700, "kg/m3", "ASM Handbook (6061-T6)", (2650, 2750)),
@@ -76,6 +88,7 @@ MATERIAL_LIBRARY: dict[str, dict[str, MaterialProperty]] = {
         "elastic_modulus": MaterialProperty(68.9e9, "Pa", "ASM Handbook (6061-T6)", (68e9, 70e9)),
         "yield_strength": MaterialProperty(276e6, "Pa", "ASM Handbook (6061-T6)", (240e6, 280e6)),
         "poisson_ratio": MaterialProperty(0.33, "dimensionless", "ASM Handbook (6061-T6)", (0.32, 0.35)),
+        "thermal_expansion": MaterialProperty(23.6e-6, "1/K", "ASM Handbook (6061-T6)", (22e-6, 24.5e-6)),
     },
     "granite": {
         "density": MaterialProperty(2700, "kg/m3", "Engineering handbook typical value (igneous rock)", (2600, 2800)),

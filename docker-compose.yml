@@ -8,10 +8,12 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_BROKER_VISIBILITY_TIMEOUT: ${CELERY_BROKER_VISIBILITY_TIMEOUT:-3600}
       LOCAL_PERSISTENCE_DB_PATH: /data/asre_lab.db
       LOCAL_STORAGE_ROOT: /data/design-files
     volumes:
-      - design-files:/data/design-files
+      # API and worker must share both the durable SQLite repository and files.
+      - design-files:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -23,10 +25,11 @@ services:
     environment:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/1
+      CELERY_BROKER_VISIBILITY_TIMEOUT: ${CELERY_BROKER_VISIBILITY_TIMEOUT:-3600}
       LOCAL_PERSISTENCE_DB_PATH: /data/asre_lab.db
       LOCAL_STORAGE_ROOT: /data/design-files
     volumes:
-      - design-files:/data/design-files
+      - design-files:/data
     depends_on:
       redis:
         condition: service_healthy

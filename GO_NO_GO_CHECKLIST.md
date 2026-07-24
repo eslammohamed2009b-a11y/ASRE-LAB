@@ -1,392 +1,89 @@
-# ASRE-LAB Final Go/No-Go Checklist
+# ASRE-LAB Backend Go/No-Go Checklist
 
-This checklist defines objective acceptance gates for final project sign-off.
-Status values per item:
-- `GO`: Requirement is implemented, verified, and documented.
-- `NO-GO`: Requirement is missing, incomplete, or unverified.
+Current consolidated status for the Big Batch 2 draft branch. Historical snapshots were
+removed because they described superseded code and produced contradictory capability claims.
 
-## Latest Snapshot (2026-07-19, Module 1 production completion)
+## Release gate
 
-- **Module 1 schema/storage: `GO` locally / `NO-GO` for live Supabase**
-  - Authoritative migrations are now ordered under `database/migrations/`
-    (`001_initial_schema.sql`, `002_design_files.sql`,
-    `003_job_tracking.sql`). Legacy full-schema files are deprecated.
-  - `FileStorage` has local and Supabase adapters. Server-built object keys,
-    traversal rejection, atomic local writes, checksums, duplicate-name
-    isolation, and restart durability are covered by unit tests.
-  - No Supabase credentials are available. Repository/storage external tests
-    are **3 skipped**, not passing; migrations were not applied to a live
-    project in this session.
-- **2) Module 1 async batch jobs: `GO` for application logic / `NO-GO` for
-  production queue transport and load**
-  - Persisted job creation/status/results, owner-only access, progress,
-    partial failure, cancellation, idempotency keys, batch-size limits,
-    per-user queued/running limits, safe terminal errors, and explicit
-    no-retry + task time-limit policy are implemented.
-  - Integration/E2E execution uses `CELERY_TASK_ALWAYS_EAGER=true`; this is
-    synchronous in-process proof and is **not** evidence of Redis plus a
-    separate worker. `docker-compose.yml` provides API + worker + Redis with
-    shared persistence/storage, but Docker/Redis are unavailable locally and
-    no 100-job load test was run.
-- **5) Module 1 ownership isolation: `GO` locally**
-  - A real-HTTP test starts uvicorn, authenticates User A, submits a two-design
-    batch, verifies persisted status/results and real STEP/STL sizes/checksums,
-    downloads the STL, restarts uvicorn against the same SQLite/storage paths,
-    and verifies retrieval still works. User B receives 404 for User A's job,
-    results, and file.
-- **Local test evidence: `GO`**
-  - `pytest -m "unit or integration or e2e or benchmark" -q`:
-    **57 passed, 3 deselected, 0 failed** in 20.39s (24 unit, 26 integration,
-    5 E2E, 2 benchmark), Python 3.11.15 with real CadQuery 2.4.0/OCP.
-  - `pytest -m external -q`: **3 skipped, 0 passed** because live Supabase
-    credentials are absent.
-- **Remote CI: `BLOCKED — UNKNOWN GITHUB STARTUP FAILURE`**
-  - Latest inspected run `29708734759` has `conclusion: startup_failure`,
-    identical created/updated timestamps, zero jobs, and empty billable
-    timing. GitHub returned no explicit root-cause message; check-suite reads
-    returned HTTP 503 during diagnosis. A billing/account hold is therefore
-    **not confirmed and is not claimed**.
-  - Required user action: inspect the run and account/billing notices in the
-    GitHub web UI; if no explicit notice appears, contact GitHub Support with
-    run ID `29708734759` and ask why hosted-runner provisioning stops before
-    job creation. Do not repeatedly retrigger until GitHub identifies or
-    clears the startup failure.
+The backend is **NO-GO for production merge/deployment** until every external-infrastructure
+item below is validated. Local implementation evidence does not substitute for live Supabase,
+Redis/Celery, CI, or production validation.
 
-**Updated overall result: `NO-GO` for final production sign-off.** Module 1
-application behavior is locally validated, but live Supabase, real
-Redis/Celery worker execution, remote CI, and the checklist's broader Module
-2/3 gates remain unvalidated or out of scope.
+## Implemented and locally testable
 
-## Latest Snapshot (2026-07-20, Module 2 unified solver architecture)
+- [x] FastAPI authentication and owner-scoped API behavior.
+- [x] Parametric CadQuery generation with STEP/STL storage contracts.
+- [x] Durable experiments, designs, jobs, simulation inputs/results, field metadata, and analyses.
+- [x] SQLite and Supabase repository adapters use the shared `PersistenceRepository` contract.
+- [x] Real bounded thermal, structural, and modal methods documented in
+  `docs/SCIENTIFIC_CAPABILITY_GAPS.md`.
+- [x] Genuine solver fields use bounded NPZ artifacts, integrity checks, safe keys, and
+  owner-scoped retrieval.
+- [x] Deterministic Module 3 dataset construction, descriptive statistics, association,
+  first-order standardized regression, Pareto analysis, ranking, and evidence-linked advice.
+- [x] The authoritative `/api/pipeline` forward path persists designs, executes unified real
+  thermal/structural reference scenarios and field artifacts, then persists Module 3 analysis.
+- [x] Unsupported wind/CFD requests fail without an empirical or fabricated fallback.
+- [x] Legacy `/api/simulate/*` is deprecated and isolated from the authoritative pipeline.
+- [x] Bounded 1D acoustic Helmholtz, 2D electrostatic Poisson, and fully developed laminar
+  channel-flow solvers produce genuine persisted fields and pass analytical benchmarks.
+- [x] One-way sequential steady linear thermal-to-structural coupling persists both stages,
+  mapping evidence, provenance, and partial-failure state.
+- [x] Reviewable improvement proposals require explicit acceptance before Module 1 execution and
+  persist proposal state plus parent/child iteration lineage.
+- [x] Backend OpenAPI contract frozen at version 1.0.0 with a deterministic snapshot and
+  regression test; all 40 paths, authentication, legacy deprecation, and core response types audited.
 
-- **Phase 1 Item 1 (real physics solvers): `GO` for thermal/structural/modal
-  1D+3D families / `NO-GO` for CFD/wave/electromagnetic/coupled**
-  - A single capability registry (`app/module2_simulation/solver_registry.py`
-    `SOLVER_REGISTRY`) is now the one source of truth for what each solver
-    family can do; the API (`POST /api/simulations`) refuses to run any
-    solver whose `implementation_status` is not `real`, so a prototype or
-    planned solver can never return a fabricated result.
-  - Three solvers are real, numerically validated implementations (not
-    scaffolds): `thermal_conduction_v1` (1D direct finite-difference +
-    legacy 3D Gauss-Seidel), `structural_linear_1d_v1` (2-node axial bar +
-    cubic-Hermite Euler-Bernoulli beam FEA), `modal_eigen_1d_v1` (SDOF
-    closed form + `scipy.linalg.eigh` generalized eigenvalue beam solve).
-  - Benchmark evidence (all in `backend/tests/integration/`, executed against
-    the real solver code, not mocks):
+## Scientific scope gates
 
-    | Solver | Case | Reference value | Numerical result | Rel. error | Tolerance | Result |
-    |---|---|---|---|---|---|---|
-    | Thermal | 1D Dirichlet-Dirichlet slab | Linear profile `T(x)=T0+(T1-T0)x/L` | matches to abs 1e-8 | ~1e-14 | abs 1e-8 | PASS |
-    | Thermal | 1D prescribed-flux-Dirichlet | `T(x)=T_L+(q/k)(L-x)` | matches to abs 1e-6 | ~1e-9 | abs 1e-6 | PASS |
-    | Structural | Axial bar tip displacement/stress | `PL/(EA)`, `P/A` | matches | ~1e-10 | rel 1e-6 | PASS |
-    | Structural | Cantilever beam tip deflection | `PL^3/(3EI)` | matches | ~1e-14 (exact for cubic Hermite) | rel 1e-6 | PASS |
-    | Modal | SDOF natural frequency | `sqrt(k/m)/(2*pi)` | matches | 0 (closed form) | rel 1e-9 | PASS |
-    | Modal | Cantilever beam 1st mode | `(1.875104)^2/(2*pi*L^2)*sqrt(EI/(rho*A))` | matches | ~2.4e-7 | rel 1e-4 | PASS |
+- [x] Correlation is labelled association and never causation.
+- [x] Standardized regression is labelled a first-order linear sensitivity estimate, not Sobol,
+  global, or causal sensitivity.
+- [x] SDOF modal analysis remains scalar-only.
+- [x] Pipeline thermal/structural inputs are disclosed comparison scenarios, not inferred service
+  conditions or arbitrary-CAD mesh simulations.
+- [x] Bounded laminar channel-flow field solver; broader CFD remains unsupported.
+- [x] Bounded 1D acoustic duct solver; arbitrary room/3D wave simulation remains unsupported.
+- [x] Bounded 2D electrostatic solver; electromagnetic waves remain unsupported.
+- [x] One-way thermal-to-structural coupling; bidirectional/full coupling remains unsupported.
+- [x] Human-reviewed Module 3 → Module 1 iteration; autonomous approval remains prohibited.
 
-  - Async job orchestration (`/api/simulations` REST surface) adds
-    idempotency-key replay, per-user concurrent-job rate limiting,
-    owner-only fail-closed 404s, and durable persistence
-    (`simulation_jobs`/`simulation_inputs`/`simulation_results`,
-    migrations `004`-`007`) — mirroring the Module 1 async batch job pattern.
-  - The pre-existing legacy `/api/simulate/*` endpoints and
-    `app.pipeline_service` integration are unchanged and still pass their
-    original tests; the new architecture was added alongside, not in place
-    of, the legacy code.
-  - Local test evidence: `pytest -m "unit or integration or e2e or benchmark" -q`
-    **70 passed, 3 deselected, 0 failed** (24 unit, 33 integration, 8
-    benchmark, 5 E2E) — up from the prior 57-test baseline, with zero
-    regressions. `pytest -m external -q`: **3 skipped**, unchanged (no live
-    Supabase credentials). `app.openapi()` generates successfully (24
-    routes). `git diff --check` and a secret-pattern scan of all changed
-    files are both clean.
-  - Remaining gap against Phase 1 Item 1: CFD (wind/drag), wave/acoustic,
-    electromagnetic, and coupled multiphysics solvers remain registered as
-    `prototype`/`planned` only — the registry documents this honestly and
-    the API rejects requests for them rather than approximating a result.
+## Validation required before merge or deployment
 
-## Phase 1: Physics Core Reinforcement (Module 2 Focus)
+- [ ] Review all Draft PR changes and obtain explicit merge approval.
+- [ ] Apply Migrations 001–010 to a disposable/staging Supabase project.
+- [ ] Run live Supabase repository, storage, RLS, field-result, and analysis round trips.
+- [ ] Validate Redis with separate Celery workers, including restart, retry, cancellation,
+  concurrency, partial failure, and load behavior.
+- [x] Obtain a successful remote CI run of the required backend suites. GitHub Actions run
+  `29950779579`: Ubuntu authoritative suite and Windows CadQuery clean-exit job passed.
+- [ ] Run final production-like Module 1 → Module 2 → Module 3 end-to-end validation.
+- [x] Reconcile local validation evidence with README and scientific capability documentation.
 
-### 1) Replace scaffold solvers with real physics solver
-- Scope:
-  - Replace simplified logic in `backend/app/module2_simulation/solvers/thermal_solver.py`
-  - Use a real FEA/FVM stack (e.g., FEniCSx, SfePy, or equivalent production-grade solver)
-  - Implement governing equation solving and numerical boundary-condition handling
-- Acceptance criteria:
-  - Thermal results are generated from numerical solver outputs, not fixed/synthetic values
-  - Solver accepts mesh, material, and boundary conditions with validation
-  - Reproducible run given same inputs (within numeric tolerance)
-  - Benchmark case validated against known reference
-- Evidence required:
-  - Solver module commit
-  - Validation notebook/report
-  - API sample response with real field values
-- Gate:
-  - GO only if all criteria and evidence are complete
+## Current local validation evidence (2026-07-22)
 
-### 2) Job queue for simulation workloads
-- Scope:
-  - Introduce background job system (Celery + Redis recommended)
-  - Move long-running design/simulation tasks off request thread
-  - Add job status endpoints and failure handling
-- Acceptance criteria:
-  - API returns `job_id` for async runs
-  - Supports 100 parallel jobs without API timeout collapse
-  - Retries and terminal-failure states are visible (`queued/running/succeeded/failed`)
-  - Resource limits and worker concurrency are configurable
-- Evidence required:
-  - Queue configuration files
-  - Load test report for 100-job run
-  - Job lifecycle API examples
-- Gate:
-  - GO only if load test passes and failure paths are observable
+- Combined unit/integration/E2E/benchmark selection: **108 passed, 14 deselected**; real process
+  exit code 0.
+- Complete backend suite: **118 passed, 4 skipped**; real process exit code 0.
+- The four external Supabase tests skipped because live credentials are unavailable; these are
+  blocked evidence, never passing evidence.
+- The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4
+  dependency set's NLopt and CasADi imports. The pinned CadQuery 2.8/OCP 7.9 dependency set plus
+  the Windows DLL bootstrap exits cleanly after STEP/STL generation. A subprocess regression test
+  now requires a genuine zero process exit code, so a post-summary native crash cannot be mistaken
+  for passing evidence.
 
-## Phase 2: Integration and Verification
+## Test commands
 
-### 3) Full persistence integration with Supabase
-- Scope:
-  - Persist outputs of Module 1, Module 2, and Module 3
-  - Store metadata + artifacts references for reproducibility
-  - Link records to experiment and owner
-- Acceptance criteria:
-  - Every pipeline run creates traceable records in DB
-  - Can reconstruct a previous run from DB records only
-  - Data model includes versioning/timestamps
-  - No orphan records under normal failure conditions
-- Evidence required:
-  - Migration/schema files
-  - End-to-end run showing persisted records
-  - Re-run script proving reproducibility
-- Gate:
-  - GO only if reproducibility replay is successful
+From `backend/` in the pinned Python 3.11 environment:
 
-### 4) Automated tests for critical pipeline
-- Scope:
-  - Add `pytest` coverage for Module1->Module2->Module3 critical path
-  - Include success/failure and edge-case scenarios
-- Acceptance criteria:
-  - Unit tests for each module contract
-  - Integration tests for `/api/pipeline/run`
-  - Regression tests for deterministic fallback paths
-  - CI test job blocks merge on failure
-- Evidence required:
-  - `tests/` suite
-  - CI logs showing passing pipeline
-  - Coverage summary for critical modules
-- Gate:
-  - GO only if CI is green and critical scenarios pass
+```text
+python -m pytest tests/unit/test_pipeline_persistence.py \
+  tests/integration/test_solver_field_integration.py \
+  tests/integration/test_analysis_api.py -q
+python -m pytest -m "unit or integration or benchmark or e2e" -q
+python -m pytest -m external -q
+./scripts/validate_supabase_release_gate.ps1
+```
 
-## Phase 3: Security and Production Hardening
-
-### 5) API security and per-user isolation
-- Scope:
-  - JWT authentication via FastAPI dependencies
-  - Ownership checks on experiments and outputs
-  - Enforce access boundaries per user
-- Acceptance criteria:
-  - Unauthorized requests rejected (401/403)
-  - Cross-user data access blocked
-  - Auth context propagated to DB writes and reads
-  - Secrets managed via env and deployment secrets
-- Evidence required:
-  - Auth middleware/dependencies
-  - Security test cases
-  - Example blocked cross-user request
-- Gate:
-  - GO only if isolation tests pass
-
-### 6) Final API documentation quality
-- Scope:
-  - Ensure OpenAPI/Swagger reflects real contracts
-  - Add concise endpoint descriptions and examples
-- Acceptance criteria:
-  - Every endpoint has request/response schema and examples
-  - Error models documented for major failure modes
-  - Pipeline and async job lifecycle documented end-to-end
-- Evidence required:
-  - OpenAPI spec snapshot
-  - API docs review checklist
-- Gate:
-  - GO only if docs are complete and match implementation
-
-## Global Final Sign-off Rule
-Project is `FINAL GO` only if all six gates above are `GO`.
-If any gate remains `NO-GO`, the project remains in pre-production status.
-
-## Latest Snapshot (2026-07-19, licensing + CI validation + durable persistence session)
-
-> This section supersedes the "Current Snapshot" below for gates 3 and 5
-> only (durable persistence/ownership work done this session). Gates 1, 2,
-> 6 are unchanged from the prior snapshot, kept further down for
-> traceability.
-
-- **3) Full persistence/replayability: `NO-GO` (upgraded from a hard
-  blocker to code-complete-but-externally-unverified)**
-  - Done: `app/core/repository.py` — a `PersistenceRepository` interface
-    with a `SupabaseRepository` production adapter and a
-    `LocalSQLiteRepository` deterministic adapter backed by a real on-disk
-    SQLite file. New `database/schema.sql` migration adds a `design_files`
-    table (id, design_model_id, experiment_id, user_id, file_format,
-    storage_path, file_size_bytes, checksum, created_at) with RLS.
-    Restart-durability and multi-instance state sharing are proven with
-    real unit tests (a fresh repository object reads data written by a
-    prior, discarded one, over the same file).
-  - Missing: no live Supabase project is connected in this environment
-    (confirmed via repeated secret scans — no `.env`, only placeholders in
-    `.env.example`). `tests/external/test_supabase_repository_live.py`
-    exists and is correctly marked `@pytest.mark.external` +
-    `skipif(no credentials)` — it is **skipped, not passing** in this
-    session. This remains `NO-GO` until it is actually executed against a
-    real project.
-- **5) JWT auth and ownership isolation: `NO-GO` (materially strengthened)**
-  - Done: the in-process `ownership_store.py` (disclosed non-durable dict)
-    was **removed** and replaced by the durable repository above.
-    `export_stl` now validates `design_id` as a real UUID before any
-    lookup (malformed ids fail closed with 404, same as unknown/foreign
-    ids — no format oracle), recomputes the served path from the
-    validated id and checks it resolves inside the known export
-    directory (path-traversal defense), and sets an explicit
-    `model/stl` media type. New integration tests cover: user A can
-    download their own file, user B cannot (404), unknown id (404),
-    malformed/non-uuid id (404), a path-traversal-shaped id (404), and
-    ownership surviving a fresh repository object (restart simulation).
-  - Missing: still no direct enumeration/brute-force-rate-limit test; RLS
-    policies exist in `design_files`/`experiments` migrations but are
-    defense-in-depth only (the backend uses a single shared Supabase
-    client without per-request auth binding, documented explicitly in
-    `app/core/repository.py`) — the real enforcement is the application-
-    layer ownership check, which is what is tested.
-- **Remote CI status**: `.github/workflows/deploy.yml`'s `test-backend`
-  job was updated to also run `pytest -m benchmark` and `pytest -m e2e`
-  (previously only `unit`+`integration`), so it now exercises the same
-  31-test suite validated locally. `gh auth login` was completed this
-  session (device flow), and the workflow was triggered via
-  `gh workflow run` — the resulting run
-  (https://github.com/eslammohamed2009b-a11y/ASRE-LAB/actions/runs/29708262236)
-  ended with `status: completed`, `conclusion: startup_failure`, and zero
-  jobs were ever scheduled (`.../jobs` returns `total_count: 0`).
-  `repos/.../actions/permissions` confirms Actions are enabled
-  (`allowed_actions: all`) for the repository, so this is not a
-  disabled-Actions or workflow-syntax problem — it is consistent with a
-  GitHub-side hold on hosted-runner provisioning for a brand-new account
-  (a documented GitHub behavior). **This is reported as `BLOCKED`, not
-  passing** — no CI run has been observed to actually execute the test
-  suite remotely yet.
-- **Licensing**: `GO`. Root `LICENSE` (proprietary, source-available, all
-  rights reserved), `README.md` proprietary notice + Repository Status
-  section, `frontend/package.json` set to `"license": "UNLICENSED"`.
-- **Local test suite**: **31 passed**, 0 failed (7 unit, 18 integration, 4
-  e2e, 2 benchmark), plus 1 `external` test correctly skipped/BLOCKED —
-  re-run fresh in this session from `backend/.venv311` (Python 3.11.15,
-  real CadQuery 2.4.0/OCP 7.7.2, no stub).
-
-## Current Snapshot (2026-07-19, updated after REAL CadQuery kernel validation)
-
-> The evidence below supersedes the prior "Local Test Execution Evidence"
-> section (Python 3.14 + CadQuery stub), which is **no longer valid proof**
-> per the explicit instruction that stub-based passes must never count as
-> CAD evidence. That evidence is preserved further down for historical
-> traceability only, clearly marked as superseded.
-
-- **1) Real physics solver: `NO-GO`**
-  - Done: `thermal_solver.py` rewritten as a real numerical steady-state 3D
-    heat-equation solver (Gauss-Seidel finite-difference, material-based
-    conductivity lookup, hotspot detection).
-  - Missing: `structural_solver.py` and `cfd_solver.py` are still
-    simplified/placeholder. No benchmark-vs-reference validation report
-    exists for any solver yet. Not addressed in this session (Module 1
-    was the explicit scope).
-- **2) Job queue/async orchestration: `NO-GO`**
-  - Done: Celery app + Redis broker config, async submit/status endpoints.
-  - Missing: no live Redis/Celery worker run, no 100-parallel-job load
-    test. Not addressed in this session.
-- **3) Full persistence/replayability: `NO-GO`**
-  - Done: `PersistenceService` wired into `pipeline_service.py`.
-  - Missing: no live Supabase project connected in this session to prove
-    end-to-end write + replay. Not addressed in this session.
-- **4) Automated critical-path testing: `GO` (local, real-kernel) / `NO-GO` (remote CI unverified)**
-  - Done: full suite restructured into `unit` / `integration` / `e2e`
-    pytest markers (`backend/pytest.ini`). **Executed locally against the
-    real CadQuery 2.4.0 + OCP native kernel on Python 3.11.15** — see
-    "Real CadQuery Kernel Validation Evidence" below. Result: **14 passed**
-    (2 unit — stubbed, business-logic only; 8 integration — real geometry,
-    real STEP/STL export, re-import + bounding-box verification, parameter
-    sensitivity; 4 e2e — real live `uvicorn` process driven over real HTTP
-    with a real JWT).
-  - Still missing: no cross-user ownership isolation test, no
-    simulation-solver validation tests, no persistence/replay integration
-    tests. `.github/workflows/deploy.yml` was updated to use the same
-    Python 3.11.15 pin and to run `unit`+`integration` marker sets, but
-    **no remote GitHub Actions run has been observed in this session** —
-    that remains the authoritative CI-parity check.
-- **5) JWT auth and ownership isolation: `NO-GO`**
-  - Done: JWT dependency enforced on all routers; 401-without-token test
-    passes (now in `tests/integration/`, real app, real kernel).
-  - Missing: no cross-user ownership isolation test (user A vs user B),
-    no direct-ID-enumeration test. Not addressed in this session.
-- **6) Final API docs completeness: `NO-GO`**
-  - Done: summaries/descriptions on routers; e2e test confirms
-    `/openapi.json` is served and includes `/api/design/generate-single`.
-  - Missing: no exported OpenAPI snapshot file, no documented error
-    models, no docs review checklist artifact.
-
-Overall status: `NO-GO` for final production sign-off. Gate 4 now has real,
-real-CAD-kernel executed evidence (a first for this project). Gates 1, 2, 3,
-5, 6 remain code-complete-but-unverified or partially implemented and were
-outside this session's explicit scope (Module 1 environment + CAD proof).
-
-## Real CadQuery Kernel Validation Evidence (this session — supersedes all prior CAD evidence)
-
-- **Environment**: Python 3.11.15 installed via `uv python install 3.11`
-  (standalone build, no admin rights). Clean venv created with
-  `uv venv --python 3.11 .venv311` in `backend/`. Exact pins from
-  `requirements.txt` installed with `uv pip install -r requirements.txt
-  --python .venv311\Scripts\python.exe` — all 87 packages installed at
-  their exact pinned versions, **zero version changes**, including
-  `cadquery==2.4.0` and `cadquery-ocp==7.7.2`.
-- **Local-only DLL workaround**: on this Windows machine, `C:\Windows\System32`
-  is missing `vcruntime140.dll` / `vcruntime140_1.dll` / `msvcp140.dll`
-  system-wide, which broke `nlopt`'s native extension (a transitive
-  CadQuery dependency). Fixed by copying already-present, legitimate
-  copies of those DLLs (from the uv-managed Python 3.11 install and from
-  numpy/pandas' own vendored copies) into `.venv311/Lib/site-packages/nlopt/`
-  — a local, reversible, non-admin fix. **This is a Windows-local-dev-only
-  workaround**: it is not committed to git (`.venv311/` is gitignored), and
-  it is not required on Linux (GitHub Actions `ubuntu-latest` runners and
-  Render's Linux buildpack do not exhibit this issue — manylinux wheels
-  bundle or dynamically link their own runtime).
-- **Kernel import proof**: `python -c "import cadquery as cq; ..."` →
-  `cadquery version: 2.4.0` / `bbox 1.0 1.0 1.0` for a real `Workplane().box(1,1,1)`.
-- **Test evidence** (`backend/pytest.ini` markers `unit`/`integration`/`e2e`):
-  - `pytest -m unit -q` → `2 passed` (stubbed `cadquery`, business-logic only;
-    NOT proof of real CAD).
-  - `pytest -m integration -q` → `8 passed` (real pyramid/tower/bridge
-    generation, real STEP+STL export with non-trivial file sizes, STEP
-    re-import via `cq.importers.importStep` with bounding-box assertions,
-    and a parameter-sensitivity test proving different `height_m` inputs
-    produce measurably different geometry/output bytes).
-  - `pytest -m e2e -q` → `4 passed` (real `uvicorn app.main:app` subprocess,
-    real HTTP via `httpx` — not `TestClient` — against `/health`,
-    `/openapi.json`, and `/api/design/generate-single` with a real minted
-    JWT; also confirms 401 without a token).
-  - `pytest -q` (all categories together) → **14 passed**, no interference
-    between the unit stub and the integration/e2e real-kernel tests.
-- **Reproducibility artifacts added**: `backend/requirements.lock.txt`
-  (full resolved dependency set via `uv pip freeze`), `backend/.python-version`
-  (`3.11.15`), `backend/render.yaml` now sets `PYTHON_VERSION=3.11.15`,
-  `.github/workflows/deploy.yml` now pins `python-version: '3.11.15'` and
-  runs `pytest -m unit` then `pytest -m integration` as separate CI steps.
-- **Not yet done**: no remote GitHub Actions run has been triggered/observed
-  with these changes; e2e tests are not yet included in the CI workflow.
-
-## [SUPERSEDED] Prior Local Test Execution Evidence (Python 3.14 + CadQuery stub)
-
-> Kept only for historical traceability. Per explicit instruction, a passing
-> test using the CadQuery stub must never be counted as proof of real CAD
-> functionality — the section above is the authoritative evidence.
-
-- Command: `python -m pytest -q` run from `backend/` using the local
-  Python 3.14 interpreter.
-- Result: `4 passed, 1 warning in 0.13s`.
-- This run used unpinned dependency versions and a stubbed `cadquery`
-  module — it proved routing/auth/pipeline logic only, never the real CAD
-  kernel.
+External tests that skip for missing credentials are **blocked/skipped**, never passing evidence.

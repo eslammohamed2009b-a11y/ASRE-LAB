@@ -24,6 +24,8 @@ from app.module2_simulation.schemas import (
 )
 from app.module2_simulation.schemas import SimulationCreateRequest as _SimulationCreateRequest
 from app.module2_simulation.solvers.base_solver import SolverValidationError
+from app.module2_simulation.field_results import persist_field_result
+from app.core.storage import get_storage
 
 logger = _logging.getLogger(__name__)
 
@@ -42,6 +44,9 @@ def run_simulation_job(
     numerical_settings: dict[str, Any],
     experiment_id: str | None = None,
     design_id: str | None = None,
+    *,
+    repository=None,
+    storage=None,
 ) -> dict[str, Any]:
     """The real, synchronous solve for a persisted `simulation_jobs` row.
     Safe to call directly (tests) or from inside a Celery task
@@ -50,7 +55,7 @@ def run_simulation_job(
     triple-callable pattern."""
     from app.module2_simulation.service import SOLVER_CLASSES  # local import avoids an import cycle
 
-    repo = get_repository()
+    repo = repository or get_repository()
     job = repo.get_simulation_job(simulation_id)
     if job is None:
         raise ValueError(f"Unknown simulation_id: {simulation_id}")
@@ -75,7 +80,8 @@ def run_simulation_job(
 
     solver_cls = SOLVER_CLASSES[solver_id]
     try:
-        result = solver_cls().run(request)
+        result, numerical_fields = solver_cls().run_with_fields(request)
+        result.source_simulation_id = simulation_id
     except SolverValidationError as exc:
         repo.update_simulation_job(
             simulation_id,
@@ -102,6 +108,37 @@ def run_simulation_job(
 
     from app.core.config import settings as _settings
 
+    field_records = []
+    try:
+        storage = storage or get_storage()
+        for numerical_field in numerical_fields:
+            field_records.append(persist_field_result(
+                repository=repo, storage=storage, user_id=job.user_id,
+                experiment_id=experiment_id or "unassigned", simulation_id=simulation_id,
+                variable_name=numerical_field.variable_name, unit=numerical_field.unit,
+                axes=numerical_field.axes, values=numerical_field.values,
+                solver_id=result.solver_id, solver_version=result.solver_version,
+                grid_metadata={
+                    **numerical_field.grid_metadata,
+                    "assumptions": result.assumptions,
+                    "warnings": result.warnings,
+                    "convergence": result.convergence.model_dump(),
+                },
+            ))
+    except Exception:
+        logger.error("Scientific field persistence failed for simulation %s", simulation_id, exc_info=True)
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="field_persistence_error",
+            safe_error_message="Scalar results completed, but one or more field artifacts could not be persisted.",
+            finished_at=_now_iso(),
+        )
+
+    persisted_status = (
+        "partial_failure"
+        if repo.get_simulation_job(simulation_id).status == "partial_failure"
+        else "completed"
+    )
     repo.record_simulation_result(
         SimulationResultRecord(
             simulation_id=simulation_id,
@@ -117,11 +154,24 @@ def run_simulation_job(
             summary_metrics=result.summary_metrics,
             field_values=result.field_values,
             hotspot_node_ids=result.hotspot_node_ids,
+            result_object_keys=[record.storage_object_key for record in field_records],
             application_version=_settings.APPLICATION_VERSION,
+            status=persisted_status,
+            numerical_method=result.numerical_method,
+            residual_history=result.residual_history,
+            validation_metadata=result.validation_metadata,
+            elapsed_time_seconds=result.elapsed_time_seconds,
+            reproducibility_hash=result.reproducibility_hash,
+            source_design_id=design_id,
         )
     )
-    repo.update_simulation_job(simulation_id, status="completed", progress_percent=100, finished_at=_now_iso())
-    return {"simulation_id": simulation_id, "status": "completed"}
+    latest = repo.get_simulation_job(simulation_id)
+    if latest.status != "partial_failure":
+        repo.update_simulation_job(simulation_id, status="completed", progress_percent=100, finished_at=_now_iso())
+        status = "completed"
+    else:
+        status = "partial_failure"
+    return {"simulation_id": simulation_id, "status": status, "field_result_count": len(field_records)}
 
 
 @celery_app.task(name="module2.run_simulation_job_task", max_retries=0)

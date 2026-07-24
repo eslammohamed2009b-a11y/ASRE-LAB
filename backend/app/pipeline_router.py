@@ -25,7 +25,14 @@ class PipelineRunRequest(BaseModel):
     analyses: list[AnalysisType] = Field(default_factory=lambda: [AnalysisType.THERMAL, AnalysisType.STRUCTURAL])
 
 
-@router.post("/run", summary="Run full research pipeline synchronously")
+@router.post(
+    "/run",
+    summary="Run the authoritative research pipeline synchronously",
+    description=(
+        "Persists CAD variants, executes the unified real thermal/structural reference "
+        "scenarios with field artifacts, then persists deterministic Module 3 analysis."
+    ),
+)
 def run_pipeline(payload: PipelineRunRequest, current_user: dict = Depends(get_current_user)) -> dict:
     return run_pipeline_flow(
         prompt=payload.prompt,
@@ -35,7 +42,7 @@ def run_pipeline(payload: PipelineRunRequest, current_user: dict = Depends(get_c
     )
 
 
-@router.post("/run-async", summary="Run full research pipeline asynchronously")
+@router.post("/run-async", summary="Queue the authoritative research pipeline")
 def run_pipeline_async(payload: PipelineRunRequest, current_user: dict = Depends(get_current_user)) -> dict:
     job_id, experiment_id = create_pipeline_job(
         payload.prompt, payload.variation_count, payload.analyses, current_user["id"]

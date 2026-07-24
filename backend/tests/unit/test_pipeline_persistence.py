@@ -6,7 +6,8 @@ import pytest
 
 from app import pipeline_service
 from app.core.repository import LocalSQLiteRepository, SupabaseRepository
-from app.module2_simulation.schemas import AnalysisType, SimulationRunResponse
+from app.core.storage import LocalFileStorage
+from app.module2_simulation.schemas import AnalysisType
 
 pytestmark = pytest.mark.unit
 
@@ -25,7 +26,7 @@ def _design(design_id: str) -> dict:
     }
 
 
-def _configure_pipeline(monkeypatch, db_path, designs=None, simulate=None):
+def _configure_pipeline(monkeypatch, db_path, designs=None):
     monkeypatch.setattr(
         pipeline_service, "get_repository", lambda: LocalSQLiteRepository(db_path)
     )
@@ -35,16 +36,16 @@ def _configure_pipeline(monkeypatch, db_path, designs=None, simulate=None):
         lambda request: designs if designs is not None else [_design("design-1")],
     )
     monkeypatch.setattr(
+        pipeline_service, "get_storage", lambda: LocalFileStorage(db_path.parent / "objects")
+    )
+    monkeypatch.setattr(
         pipeline_service,
-        "run_simulation_service",
-        simulate
-        or (lambda request: SimulationRunResponse(
-            analysis_type=request.analysis_type.value,
-            design_id=request.design_id,
-            summary_metrics={"max_temperature_c": 25.0},
-            field_values=[25.0],
-            hotspot_node_ids=[0],
-        )),
+        "persist_generated_design",
+        lambda **kwargs: kwargs["repo"].create_design_model(
+            kwargs["experiment_id"], kwargs["user_id"],
+            kwargs["params"].geometry_type.value, kwargs["result"]["params"],
+            {"length": "m", "angle": "deg"}, kwargs["variation_index"],
+        ),
     )
 
 
@@ -81,22 +82,23 @@ def test_partial_failure_preserves_successful_design_and_simulation(monkeypatch,
     db_path = tmp_path / "pipeline.sqlite3"
     calls = 0
 
-    def simulate(request):
+    original_run = pipeline_service.run_simulation_job
+
+    def simulate(**kwargs):
         nonlocal calls
         calls += 1
         if calls == 2:
-            raise RuntimeError("solver exploded")
-        return SimulationRunResponse(
-            analysis_type="thermal",
-            design_id=request.design_id,
-            summary_metrics={"max_temperature_c": 42.0},
-            field_values=[42.0],
-            hotspot_node_ids=[0],
-        )
+            kwargs["repository"].update_simulation_job(
+                kwargs["simulation_id"], status="failed", progress_percent=100,
+                error_code="test_failure", safe_error_message="Injected failure",
+            )
+            return {"simulation_id": kwargs["simulation_id"], "status": "failed"}
+        return original_run(**kwargs)
 
     _configure_pipeline(
-        monkeypatch, db_path, designs=[_design("design-1"), _design("design-2")], simulate=simulate
+        monkeypatch, db_path, designs=[_design("design-1"), _design("design-2")]
     )
+    monkeypatch.setattr(pipeline_service, "run_simulation_job", simulate)
     result = pipeline_service.run_pipeline_flow(
         "tower 100 m", 2, [AnalysisType.THERMAL], "owner-a"
     )
@@ -120,7 +122,9 @@ def test_partial_failure_preserves_successful_design_and_simulation(monkeypatch,
             result for row in rows if (result := reloaded.get_simulation_result(row["id"])) is not None
         )
     assert len(successful_results) == 1
-    assert successful_results[0].summary_metrics == {"max_temperature_c": 42.0}
+    assert successful_results[0].solver_id == "thermal_conduction_v1"
+    assert successful_results[0].numerical_method
+    assert len(reloaded.list_field_results(successful_results[0].simulation_id)) == 1
 
 
 def test_pipeline_cancellation_is_owner_only_and_durable(monkeypatch, tmp_path):
@@ -145,6 +149,9 @@ def test_completed_pipeline_state_survives_repository_reload(monkeypatch, tmp_pa
     )
 
     assert result["status"] == "completed"
+    assert result["analysis_id"]
+    assert result["analysis"]["analysis_type"] == "engineering_intelligence"
+    assert "not inferred service conditions" in result["reference_scenarios"]["thermal"]
     reloaded = LocalSQLiteRepository(db_path).get_job(result["job_id"])
     assert reloaded.status == "completed"
     assert reloaded.progress_percent == 100
@@ -190,3 +197,21 @@ def test_pipeline_never_uses_stale_columns_or_simulation_metrics():
     source = inspect.getsource(pipeline_service)
     assert "app.core.persistence" not in source
     assert "simulation_metrics" not in source
+    assert "run_simulation_service" not in source
+    assert "cluster_designs" not in source
+    assert "synthesize_report" not in source
+
+
+def test_pipeline_rejects_unsupported_family_without_empirical_fallback(monkeypatch, tmp_path):
+    db_path = tmp_path / "pipeline.sqlite3"
+    _configure_pipeline(monkeypatch, db_path)
+
+    result = pipeline_service.run_pipeline_flow(
+        "tower 100 m", 1, [AnalysisType.WIND_LOAD], "owner-a"
+    )
+
+    assert result["status"] == "failed"
+    assert result["skipped_analyses"] == ["wind_load"]
+    assert result["analysis_id"] is None
+    repo = LocalSQLiteRepository(db_path)
+    assert repo.list_simulation_jobs_for_experiment(result["experiment_id"]) == []
