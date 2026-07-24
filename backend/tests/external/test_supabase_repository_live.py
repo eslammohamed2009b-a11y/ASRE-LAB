@@ -22,7 +22,15 @@ import pytest
 
 pytestmark = pytest.mark.external
 
-_HAS_LIVE_SUPABASE = bool(os.environ.get("SUPABASE_URL")) and bool(os.environ.get("SUPABASE_KEY"))
+_HAS_LIVE_SUPABASE = all(
+    os.environ.get(name)
+    for name in (
+        "SUPABASE_URL",
+        "SUPABASE_KEY",
+        "SUPABASE_TEST_USER_A_ID",
+        "SUPABASE_TEST_USER_B_ID",
+    )
+)
 
 skip_reason = (
     "BLOCKED: no live Supabase credentials (SUPABASE_URL/SUPABASE_KEY) configured "
@@ -38,8 +46,12 @@ def test_supabase_repository_create_read_isolate_cleanup():
     assert persistence_service.enabled, "Supabase client did not initialize despite configured credentials"
     repo = SupabaseRepository(persistence_service.client)
 
-    owner_a = f"external-test-user-a-{uuid.uuid4()}"
-    owner_b = f"external-test-user-b-{uuid.uuid4()}"
+    owner_a = str(uuid.UUID(os.environ["SUPABASE_TEST_USER_A_ID"]))
+    owner_b = str(uuid.UUID(os.environ["SUPABASE_TEST_USER_B_ID"]))
+
+    persistence_service.client.table("profiles").upsert(
+        {"id": owner_a, "full_name": "ASRE repository release user A"}
+    ).execute()
 
     experiment_id = repo.create_experiment(user_id=owner_a, name="external repository test")
     assert experiment_id
