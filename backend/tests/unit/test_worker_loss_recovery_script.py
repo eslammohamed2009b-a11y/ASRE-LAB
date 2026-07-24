@@ -43,3 +43,9 @@ def test_probe_kills_active_worker_restarts_and_checks_duplicates():
     assert "unique_file_ids" in script
     assert "unique_object_keys" in script
     assert '$env:CELERY_BROKER_VISIBILITY_TIMEOUT = "10"' in script
+
+
+def test_probe_accepts_real_staging_auth_uuid_without_weakening_local_fallback():
+    probe = (BACKEND / "scripts/worker_loss_probe.py").read_text(encoding="utf-8")
+
+    assert 'os.environ.get("SUPABASE_TEST_USER_A_ID", "worker-loss-release-probe")' in probe
