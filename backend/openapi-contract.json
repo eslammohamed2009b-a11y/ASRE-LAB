@@ -1,12 +1,14 @@
 {
-  "contract_version": "1.0.0",
-  "openapi_sha256": "9ae46cc5b5e05dba7f87606f140acebb7035fb0c2b0b0e121e5db99b3a4ce279",
-  "path_count": 40,
+  "contract_version": "2.0.0-foundation",
+  "openapi_sha256": "3c882ca6375b023124ea849f8b9ad1a5d3280751012d171a938d2121aa47b4a3",
+  "path_count": 42,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
   "iteration_states": ["planned", "completed", "failed"],
   "required_paths": [
+    "/api/v2/evidence",
+    "/api/v2/evidence/{record_id}",
     "/api/analyze/experiments/{experiment_id}",
     "/api/analyze/{analysis_id}",
     "/api/couplings/thermal-structural",

@@ -14,6 +14,7 @@ from app.module1_design.jobs_router import router as module1_jobs_router
 from app.module2_simulation.router import router as module2_router
 from app.module2_simulation.router import simulations_router as module2_simulations_router
 from app.module3_analysis.router import router as module3_router
+from app.v2.router import router as v2_router
 
 logger = logging.getLogger("asre_lab")
 
@@ -44,6 +45,7 @@ app.include_router(module3_router)
 app.include_router(pipeline_router)
 app.include_router(coupling_router)
 app.include_router(feedback_router)
+app.include_router(v2_router)
 
 
 @app.on_event("startup")
