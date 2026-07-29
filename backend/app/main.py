@@ -17,6 +17,7 @@ from app.module3_analysis.router import router as module3_router
 from app.v2.router import router as v2_router
 from app.v2.scientific_router import router as scientific_v2_router
 from app.v2.execution_router import router as execution_v2_router
+from app.v2.decision_output_router import router as decision_output_v2_router
 
 logger = logging.getLogger("asre_lab")
 
@@ -50,6 +51,7 @@ app.include_router(feedback_router)
 app.include_router(v2_router)
 app.include_router(scientific_v2_router)
 app.include_router(execution_v2_router)
+app.include_router(decision_output_v2_router)
 
 
 @app.on_event("startup")
