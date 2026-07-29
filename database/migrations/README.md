@@ -43,6 +43,10 @@ replaced with a deprecation notice pointing here.
 8. `008_simulation_field_results.sql` — bounded, owner-scoped NPZ field-artifact metadata.
 9. `009_experiment_analyses.sql` — solver provenance columns and persisted Module 3 analyses.
 10. `010_design_feedback_iterations.sql` — reviewable proposals and parent/child iteration lineage.
+11. `011_backend_v2_foundation.sql` — owner-scoped Backend V2 evidence records.
+12. `012_api_role_and_private_storage.sql` — grants Supabase API roles access
+    to the RLS-protected application schema and provisions the private
+    `design-files` artifact bucket.
 
 Each file is idempotent (`create table if not exists`, `create index if
 not exists`, `drop policy/constraint if exists` before recreating) and
@@ -64,6 +68,8 @@ psql "$DATABASE_URL" -f database/migrations/007_material_library.sql
 psql "$DATABASE_URL" -f database/migrations/008_simulation_field_results.sql
 psql "$DATABASE_URL" -f database/migrations/009_experiment_analyses.sql
 psql "$DATABASE_URL" -f database/migrations/010_design_feedback_iterations.sql
+psql "$DATABASE_URL" -f database/migrations/011_backend_v2_foundation.sql
+psql "$DATABASE_URL" -f database/migrations/012_api_role_and_private_storage.sql
 ```
 
 **These migrations have NOT been applied to any live Supabase project in
@@ -73,6 +79,10 @@ environment (confirmed via repeated secret scans — see
 correct, but "written" is not the same claim as "applied and verified
 against a real project" — that remains BLOCKED until real credentials are
 available; see `backend/tests/external/`.
+
+The complete sequence through migration 012 has been applied and validated
+against a disposable local Supabase CLI stack. This is local release evidence,
+not a claim about any hosted or production project.
 
 ## Design notes
 
