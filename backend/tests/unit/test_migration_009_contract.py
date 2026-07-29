@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 def test_ordered_migrations_and_supabase_mirrors_are_identical() -> None:
     authoritative = ROOT / "database" / "migrations"
     mirrored = ROOT / "backend" / "supabase" / "migrations"
-    expected = [f"{index:03d}" for index in range(1, 11)]
+    expected = [f"{index:03d}" for index in range(1, 13)]
     files = sorted(authoritative.glob("[0-9][0-9][0-9]_*.sql"))
     assert [path.name[:3] for path in files] == expected
 
