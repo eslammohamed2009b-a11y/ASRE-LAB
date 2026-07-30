@@ -561,14 +561,14 @@ practical.
 
 ## 19. Frontend Technical Constraints
 
-The existing frontend is intentionally minimal:
+The integrated frontend retains the repository's original technical constraints:
 
 - Next.js 14.2 App Router (`frontend/app`), React 18, strict TypeScript 5.9.
 - Plain global CSS; no component library or Tailwind.
 - Supabase JS 2.54.
 - Three.js, React Three Fiber, and Drei are already present.
-- Only a placeholder landing page exists; there is no API client, auth provider,
-  route guard, form system, state layer, chart library, or test setup.
+- The App Router now includes public/authenticated routes, a bearer-token API client,
+  a Supabase session provider, route protection, workflow forms, and test setup.
 
 Use Server Components for public static content and Client Components only for auth,
 forms, polling, charts, and viewers. Create one typed API client that injects the
@@ -628,11 +628,12 @@ them.
 
 ## 21. Codex Frontend Integration Handoff
 
-- Frozen manifest: `backend/openapi-contract.json`, 82 paths, SHA-256
-  `80e283bf5fa9b1ba74de7141abf3fa1047181b2f48ff115f09c1388d3bcd379d`.
+- Frozen manifest: `backend/openapi-contract.json`, 85 paths / 91 operations, SHA-256
+  `fe5e3c4c9d7ee49808adb0b2df5b9a2d31d136f67f6d5b7c3a2d2649ee4dddc9`.
 - Authentication: Supabase obtains a JWT; every `/api/*` request sends
-  `Authorization: Bearer <access_token>`. FastAPI validates HS256 and uses `sub` as the
-  owner ID. `/health` and `/version` are public.
+  `Authorization: Bearer <access_token>`. FastAPI validates current Supabase ES256
+  tokens through its JWKS endpoint and retains HS256 compatibility, then uses `sub`
+  as the owner ID. `/health` and `/version` are public.
 - API base: `NEXT_PUBLIC_FASTAPI_API_URL`; reject missing configuration at startup.
 - Route groups: design/jobs, simulations/fields, analysis/pipeline/coupling/feedback,
   V2 evidence/scientific/execution/decisions/reasoning/reports.
@@ -665,39 +666,59 @@ restart reconstruction; two-user denial; and every documented limitation.
 
 ## 22. Frontend Definition of Done
 
-- [ ] All supported public and application pages in this dossier are implemented.
-- [ ] API-gap pages are honestly limited or hidden; no speculative production action.
-- [ ] No dead buttons, fake production data, unsupported solver, or fake metrics.
-- [ ] Supabase sign-up/sign-in/sign-out/session refresh works.
-- [ ] Protected routes and bearer-token API calls work.
+- [x] All supported public and application pages in this dossier are implemented.
+- [x] API-gap pages are honestly limited or hidden; no speculative production action.
+- [x] No dead buttons, fake production data, unsupported solver, or fake metrics.
+- [x] Supabase sign-up/sign-in/sign-out/session refresh works.
+- [x] Protected routes and bearer-token API calls work.
 - [ ] Every form uses solver/schema-aware frontend validation and backend validation.
-- [ ] Jobs can be monitored and reconstructed by durable ID.
-- [ ] Cancel, retry, resume, idempotency, stale polling, and ambiguous network handling work.
+- [x] Jobs can be monitored and reconstructed by durable ID.
+- [x] Cancel, retry, resume, idempotency, stale polling, and ambiguous network handling work.
 - [ ] Results remain solver-specific with correct units and partial-failure handling.
 - [ ] Scientific assumptions, findings, warnings, benchmarks, convergence, confidence,
       limitations, and evidence links are visible.
 - [ ] Objectives, constraints, feasibility, sensitivity, Pareto, ranking,
       recommendation, and human actions work.
 - [ ] Simple, Engineering, and Research AI Reasoning work without chain-of-thought claims.
-- [ ] Report preview and PDF/JSON/CSV downloads work.
+- [x] Report preview and PDF/JSON/CSV downloads work.
 - [ ] NPZ and STL downloads work; STEP/ZIP controls remain disabled until routes exist.
-- [ ] Artifacts remain private; two-user ownership isolation passes.
+- [x] Artifacts remain private; two-user ownership isolation passes.
 - [ ] Reproduction, comparison, bundle metadata, and lineage work within API limits.
 - [ ] Desktop, tablet, and minimum mobile behaviors pass.
 - [ ] Keyboard, focus, contrast, semantic, screen-reader, chart-table, form-announcement,
       and reduced-motion checks pass.
-- [ ] Component, client, accessibility, contract, and end-to-end tests pass.
-- [ ] Frozen OpenAPI consistency and backend contract tests pass.
-- [ ] Final validation uses real Auth, RLS, storage, API, Redis, separate worker,
+- [x] Component, client, accessibility, contract, and end-to-end tests pass.
+- [x] Frozen OpenAPI consistency and backend contract tests pass.
+- [x] Final validation uses real Auth, RLS, storage, API, Redis, separate worker,
       persistence, CadQuery, solvers, reports, and downloads.
-- [ ] Production environment variables, CORS, hosting, monitoring, and rollback are documented.
+- [x] Production environment variables, CORS, hosting, monitoring, and rollback are documented.
 
 ## Verified Limitations and Non-Speculative Boundaries
 
+### Frontend integration status
+
+Resolved in the frontend integration:
+
+- Supabase email/password session flows and protected application shell.
+- Server-authoritative account provisioning and permanent Founding User ordinal.
+- Owner-scoped collections for manifests/runs, attempts, decisions, reasoning,
+  and reports, plus an authenticated dashboard aggregation.
+- Resource opening, solver capability loading, scientific validation, durable
+  execution polling, Scientific Trust, human decision actions, and private report
+  exports.
+
+Still intentionally limited:
+
+- No generic project or standalone study CRUD API.
+- No collaboration, account settings, billing, public sharing, WebSocket/SSE,
+  generic STEP download, or reproducibility-ZIP download.
+- One-way thermal-structural analysis remains its existing specialized coupling
+  route; planned `coupled_multiphysics_v0` remains unavailable.
+
 1. No standalone experiment/project create, list, update, or delete API exists.
-2. No collection/list endpoint exists for V2 manifests, attempts, decisions, reasoning
-   events, or reports; detail retrieval requires a known ID.
-3. No global job-history endpoint exists.
+2. Owner-scoped collection endpoints exist for V2 manifests/runs, attempts, decisions,
+   reasoning events, and reports.
+3. Execution runs provide the supported owner-scoped job-history view.
 4. No generic private artifact download endpoint exists.
 5. Report download formats are PDF, JSON, and CSV only.
 6. NPZ has an explicit field download route; legacy design export is STL-specific.
@@ -707,7 +728,7 @@ restart reconstruction; two-user denial; and every documented limitation.
    implemented.
 9. API polling is required; no WebSocket or server-sent-event route exists.
 10. Account/profile settings and collaboration/sharing APIs do not exist.
-11. The frontend is currently a placeholder and has no auth or API integration code.
+11. Account editing, collaboration, billing, and public sharing remain unavailable.
 12. Planned `coupled_multiphysics_v0` is not runnable. Only the bounded one-way
     thermal-structural workflow is supported.
 

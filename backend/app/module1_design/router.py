@@ -133,6 +133,7 @@ def generate_single(payload: PromptRequest, current_user: dict = Depends(get_cur
         )
     return GenerateSingleResponse(
         design_id=result["design_id"],
+        experiment_id=experiment_id,
         params=result["params"],
         stl_object_key=build_object_key(current_user["id"], experiment_id, result["design_id"], f"{result['design_id']}.stl"),
         step_object_key=build_object_key(current_user["id"], experiment_id, result["design_id"], f"{result['design_id']}.step"),

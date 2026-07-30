@@ -1,7 +1,7 @@
 {
-  "contract_version": "2.0.0-foundation",
-  "openapi_sha256": "80e283bf5fa9b1ba74de7141abf3fa1047181b2f48ff115f09c1388d3bcd379d",
-  "path_count": 82,
+  "contract_version": "2.1.0-frontend-integration",
+  "openapi_sha256": "fe5e3c4c9d7ee49808adb0b2df5b9a2d31d136f67f6d5b7c3a2d2649ee4dddc9",
+  "path_count": 85,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
@@ -9,6 +9,8 @@
   "required_paths": [
     "/api/v2/evidence",
     "/api/v2/evidence/{record_id}",
+    "/api/v2/account/me",
+    "/api/v2/dashboard",
     "/api/v2/scientific/solvers",
     "/api/v2/scientific/solvers/{solver_id}",
     "/api/v2/scientific/solvers/{solver_id}/validate",
@@ -28,6 +30,7 @@
     "/api/v2/execution/manifests/{manifest_id}/artifacts",
     "/api/v2/execution/manifests/{manifest_id}/attempts",
     "/api/v2/execution/attempts/{attempt_id}",
+    "/api/v2/execution/attempts",
     "/api/v2/execution/attempts/{attempt_id}/history",
     "/api/v2/execution/attempts/{attempt_id}/cancel",
     "/api/v2/execution/attempts/{attempt_id}/retry",

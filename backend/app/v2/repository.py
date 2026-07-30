@@ -57,3 +57,24 @@ class EvidenceRepository:
             if isinstance(item["payload"],str):item["payload"]=json.loads(item["payload"])
             result.append(item)
         return result
+
+    def list_page(self,user_id,record_type,limit=20,offset=0):
+        if self.client:
+            rows=(self.client.table("engineering_evidence_records").select("*")
+                .eq("user_id",user_id).eq("record_type",record_type)
+                .order("created_at",desc=True).order("id",desc=True)
+                .range(offset,offset+limit-1).execute().data)
+        else:
+            with sqlite3.connect(self.path) as db:
+                db.row_factory=sqlite3.Row
+                rows=[dict(x) for x in db.execute(
+                    """select * from engineering_evidence_records
+                    where user_id=? and record_type=?
+                    order by created_at desc,id desc limit ? offset ?""",
+                    (user_id,record_type,limit,offset))]
+        result=[]
+        for row in rows:
+            item=dict(row)
+            if isinstance(item["payload"],str):item["payload"]=json.loads(item["payload"])
+            result.append(item)
+        return result

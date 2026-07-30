@@ -11,6 +11,9 @@ services:
       CELERY_BROKER_VISIBILITY_TIMEOUT: ${CELERY_BROKER_VISIBILITY_TIMEOUT:-3600}
       LOCAL_PERSISTENCE_DB_PATH: /data/asre_lab.db
       LOCAL_STORAGE_ROOT: /data/design-files
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_KEY: ${SUPABASE_KEY:-}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
     volumes:
       # API and worker must share both the durable SQLite repository and files.
       - design-files:/data
@@ -28,6 +31,9 @@ services:
       CELERY_BROKER_VISIBILITY_TIMEOUT: ${CELERY_BROKER_VISIBILITY_TIMEOUT:-3600}
       LOCAL_PERSISTENCE_DB_PATH: /data/asre_lab.db
       LOCAL_STORAGE_ROOT: /data/design-files
+      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_KEY: ${SUPABASE_KEY:-}
+      SUPABASE_JWT_SECRET: ${SUPABASE_JWT_SECRET:-}
     volumes:
       - design-files:/data
     depends_on:
@@ -37,6 +43,8 @@ services:
   redis:
     image: redis:7.4-alpine
     command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
     volumes:
       - redis-data:/data
     healthcheck:

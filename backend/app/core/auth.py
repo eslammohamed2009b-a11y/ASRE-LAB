@@ -1,8 +1,11 @@
+import json
+from functools import lru_cache
 from typing import Any
+from urllib.request import urlopen
 
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
-from jose import JWTError, jwt
+from jose import JWTError, jwk, jwt
 
 from app.core.config import settings
 
@@ -19,11 +22,36 @@ def _jwt_secret() -> str:
     return secret
 
 
+@lru_cache(maxsize=4)
+def _supabase_signing_key(kid: str) -> bytes:
+    if not settings.SUPABASE_URL:
+        raise JWTError("Supabase URL is not configured")
+    with urlopen(  # noqa: S310 - URL is the operator-configured Supabase origin.
+        f"{settings.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json",
+        timeout=5,
+    ) as response:
+        keys = json.load(response).get("keys", [])
+    match = next((key for key in keys if key.get("kid") == kid), None)
+    if match is None:
+        raise JWTError("Supabase signing key was not found")
+    return jwk.construct(match, algorithm=match["alg"]).to_pem()
+
+
 def decode_token(token: str) -> dict[str, Any]:
     try:
-        payload = jwt.decode(token, _jwt_secret(), algorithms=[settings.JWT_ALGORITHM])
+        header = jwt.get_unverified_header(token)
+        algorithm = header.get("alg")
+        if algorithm == "ES256":
+            payload = jwt.decode(
+                token,
+                _supabase_signing_key(header.get("kid", "")),
+                algorithms=["ES256"],
+                audience="authenticated",
+            )
+        else:
+            payload = jwt.decode(token, _jwt_secret(), algorithms=[settings.JWT_ALGORITHM])
         return payload
-    except JWTError as exc:
+    except (JWTError, OSError, ValueError) as exc:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or expired token",

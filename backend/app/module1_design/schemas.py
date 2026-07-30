@@ -94,6 +94,7 @@ class ParseResponse(BaseModel):
 
 class GenerateSingleResponse(BaseModel):
     design_id: str
+    experiment_id: str
     params: dict
     # Object keys inside the FileStorage abstraction (app.core.storage), NOT
     # raw filesystem paths - the client downloads the actual bytes via the
