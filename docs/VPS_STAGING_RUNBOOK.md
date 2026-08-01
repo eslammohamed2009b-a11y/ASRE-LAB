@@ -7,7 +7,9 @@ managed database, Auth, and private artifact store.
 
 `Caddy` is the only public service. It terminates TLS and routes the app host
 to Next.js and the API host to FastAPI. Redis, API, worker, and frontend have
-no host ports and communicate only over the private Compose network.
+no host ports and communicate only over the private Compose network. The
+network permits required outbound DNS/HTTPS access to Supabase; it does not
+publish those services to the host.
 
 ## Host preparation
 
