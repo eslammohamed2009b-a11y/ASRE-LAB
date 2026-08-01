@@ -1,2 +1,3 @@
 import {AppShell} from "@/components/app-shell";
-export default function ProtectedLayout({children}:{children:React.ReactNode}){return <AppShell>{children}</AppShell>}
+import {AuthProvider} from "@/components/auth-provider";
+export default function ProtectedLayout({children}:{children:React.ReactNode}){return <AuthProvider><AppShell>{children}</AppShell></AuthProvider>}
