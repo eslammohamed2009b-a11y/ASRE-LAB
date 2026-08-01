@@ -16,7 +16,9 @@ secrets, database URLs, Redis URLs, or test-user passwords to the frontend.
 The backend requires its existing Supabase service-role configuration, JWT
 verification secret, explicit CORS origins, PostgreSQL-backed Supabase project,
 private storage bucket, Redis broker/result backend, and a separate Celery worker.
-See `backend/.env.example` and the root `.env.example`; never commit `.env`.
+See `backend/.env.example`, the root `.env.example`, and
+[`PRODUCTION_CONFIGURATION.md`](PRODUCTION_CONFIGURATION.md); never commit
+`.env`.
 
 ## Local development
 

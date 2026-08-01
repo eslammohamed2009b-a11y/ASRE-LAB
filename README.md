@@ -137,19 +137,25 @@ Vercel (frontend):
 - NEXT_PUBLIC_SUPABASE_URL
 - NEXT_PUBLIC_SUPABASE_ANON_KEY
 
-Render (backend):
+Backend API and worker:
 
-- APP_ENV
-- APP_DEBUG
+- ENV
+- DEBUG
 - SUPABASE_URL
 - SUPABASE_KEY
 - SUPABASE_JWT_SECRET
-- DATABASE_URL
-- CORS_ALLOWED_ORIGINS
+- ALLOWED_ORIGINS
 - JWT_SECRET_KEY
 - JWT_ALGORITHM
-- ACCESS_TOKEN_EXPIRE_MINUTES
+- CELERY_BROKER_URL
+- CELERY_RESULT_BACKEND
+- CELERY_BROKER_VISIBILITY_TIMEOUT
+- SUPABASE_STORAGE_BUCKET
 
 Reference template:
 
 - .env.example
+
+See [production configuration](docs/PRODUCTION_CONFIGURATION.md) for the
+required service topology and exact production start commands. A production
+process rejects local SQLite/filesystem and default localhost-Redis fallbacks.
