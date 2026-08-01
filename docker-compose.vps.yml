@@ -1,0 +1,118 @@
+services:
+  caddy:
+    image: caddy:2.11.4-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      ASRE_APP_DOMAIN: ${ASRE_APP_DOMAIN:?ASRE_APP_DOMAIN is required}
+      ASRE_API_DOMAIN: ${ASRE_API_DOMAIN:?ASRE_API_DOMAIN is required}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "caddy", "validate", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    networks: [edge, internal]
+    security_opt: [no-new-privileges:true]
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_FASTAPI_API_URL: ${NEXT_PUBLIC_FASTAPI_API_URL:?NEXT_PUBLIC_FASTAPI_API_URL is required}
+        NEXT_PUBLIC_SUPABASE_URL: ${NEXT_PUBLIC_SUPABASE_URL:?NEXT_PUBLIC_SUPABASE_URL is required}
+        NEXT_PUBLIC_SUPABASE_ANON_KEY: ${NEXT_PUBLIC_SUPABASE_ANON_KEY:?NEXT_PUBLIC_SUPABASE_ANON_KEY is required}
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "node -e \"fetch('http://127.0.0.1:3000').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))\""]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    networks: [internal]
+    security_opt: [no-new-privileges:true]
+
+  api:
+    build:
+      context: ./backend
+    env_file: ./deploy/vps.env
+    environment:
+      ENV: production
+      DEBUG: "false"
+      PORT: "8000"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      LOCAL_PERSISTENCE_DB_PATH: ""
+      LOCAL_STORAGE_ROOT: ""
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8000/health', timeout=3).status == 200"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 45s
+    networks: [internal]
+    security_opt: [no-new-privileges:true]
+
+  worker:
+    build:
+      context: ./backend
+    command: celery -A app.core.celery_app.celery_app worker --loglevel=info --concurrency=2
+    env_file: ./deploy/vps.env
+    environment:
+      ENV: production
+      DEBUG: "false"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      LOCAL_PERSISTENCE_DB_PATH: ""
+      LOCAL_STORAGE_ROOT: ""
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; from app.core.celery_app import celery_app; assert celery_app.control.ping(destination=[f'celery@{socket.gethostname()}'], timeout=3)"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 45s
+    networks: [internal]
+    security_opt: [no-new-privileges:true]
+
+  redis:
+    image: redis:7.4-alpine
+    command: redis-server --appendonly yes --appendfsync everysec --save 60 1000
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 6
+    networks: [internal]
+    security_opt: [no-new-privileges:true]
+
+networks:
+  edge:
+  internal:
+
+volumes:
+  caddy_data:
+  caddy_config:
+  redis_data:

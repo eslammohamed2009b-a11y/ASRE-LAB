@@ -41,6 +41,9 @@ e2e_run.log
 node_modules/
 frontend/.next/
 frontend/out/
+frontend/test-results/
+frontend/playwright-report/
+frontend/tsconfig.tsbuildinfo
 
 # --- Supabase CLI local/generated files (config.toml and migrations are
 #     intentionally tracked; these are only created locally by `supabase

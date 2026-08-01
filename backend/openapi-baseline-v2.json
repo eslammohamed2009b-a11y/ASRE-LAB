@@ -1,0 +1,7185 @@
+{
+  "components": {
+    "schemas": {
+      "ActionRequest": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "comment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Comment"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ActionRequest",
+        "type": "object"
+      },
+      "AdvisorRequest": {
+        "properties": {
+          "model_type": {
+            "minLength": 2,
+            "title": "Model Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model_type"
+        ],
+        "title": "AdvisorRequest",
+        "type": "object"
+      },
+      "AdvisorResponse": {
+        "properties": {
+          "recommended": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Recommended",
+            "type": "array"
+          },
+          "supported": {
+            "description": "Subset of `recommended` that has a validated numerical solver today (currently only 'thermal'). The rest are advisory/planned only.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommended"
+        ],
+        "title": "AdvisorResponse",
+        "type": "object"
+      },
+      "AnalysisCreateRequest": {
+        "properties": {
+          "correlation_method": {
+            "default": "both",
+            "enum": [
+              "pearson",
+              "spearman",
+              "both"
+            ],
+            "title": "Correlation Method",
+            "type": "string"
+          },
+          "include_nonconverged": {
+            "default": false,
+            "title": "Include Nonconverged",
+            "type": "boolean"
+          },
+          "objectives": {
+            "items": {
+              "$ref": "#/components/schemas/ObjectiveSpec"
+            },
+            "maxItems": 16,
+            "title": "Objectives",
+            "type": "array"
+          },
+          "sensitivity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SensitivitySpec"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "AnalysisCreateRequest",
+        "type": "object"
+      },
+      "AnalysisRequest": {
+        "properties": {
+          "constraints": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "designs": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Designs",
+            "type": "array"
+          },
+          "objectives": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Objectives",
+            "type": "array"
+          }
+        },
+        "required": [
+          "designs",
+          "objectives"
+        ],
+        "title": "AnalysisRequest",
+        "type": "object"
+      },
+      "AnalysisResponse": {
+        "properties": {
+          "analysis_type": {
+            "title": "Analysis Type",
+            "type": "string"
+          },
+          "configuration": {
+            "title": "Configuration",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "data_quality": {
+            "title": "Data Quality",
+            "type": "object"
+          },
+          "dataset_hash": {
+            "title": "Dataset Hash",
+            "type": "string"
+          },
+          "engine_version": {
+            "title": "Engine Version",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reproducibility_hash": {
+            "title": "Reproducibility Hash",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "source_design_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Design Ids",
+            "type": "array"
+          },
+          "source_simulation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Simulation Ids",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_id",
+          "analysis_type",
+          "status",
+          "dataset_hash",
+          "configuration",
+          "result",
+          "warnings",
+          "source_design_ids",
+          "source_simulation_ids",
+          "data_quality",
+          "engine_version",
+          "reproducibility_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AnalysisResponse",
+        "type": "object"
+      },
+      "AnalysisType": {
+        "enum": [
+          "thermal",
+          "structural",
+          "wind_load"
+        ],
+        "title": "AnalysisType",
+        "type": "string"
+      },
+      "AttemptRequest": {
+        "properties": {
+          "idempotency_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Idempotency Key"
+          }
+        },
+        "title": "AttemptRequest",
+        "type": "object"
+      },
+      "BatchGenerateRequest": {
+        "properties": {
+          "base_params": {
+            "$ref": "#/components/schemas/DesignParameters"
+          },
+          "variation_count": {
+            "default": 10,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Variation Count",
+            "type": "integer"
+          },
+          "variation_range_pct": {
+            "default": 0.2,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Variation Range Pct",
+            "type": "number"
+          },
+          "vary_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Vary Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_params"
+        ],
+        "title": "BatchGenerateRequest",
+        "type": "object"
+      },
+      "BatchGenerateResponse": {
+        "properties": {
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "experiment_id",
+          "status"
+        ],
+        "title": "BatchGenerateResponse",
+        "type": "object"
+      },
+      "BenchmarkRequest": {
+        "properties": {
+          "computed_result": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Result"
+          },
+          "inputs": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Inputs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "inputs"
+        ],
+        "title": "BenchmarkRequest",
+        "type": "object"
+      },
+      "BoundaryConditions": {
+        "properties": {
+          "acoustic_left_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acoustic Left Boundary"
+          },
+          "acoustic_right_boundary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Acoustic Right Boundary"
+          },
+          "ambient_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ambient Temperature C"
+          },
+          "axial_load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Axial Load N"
+          },
+          "charge_density_c_m3": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Charge Density C M3"
+          },
+          "convection_coefficient_w_m2k": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convection Coefficient W M2K"
+          },
+          "heat_flux_w_m2": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heat Flux W M2"
+          },
+          "heat_source_w_m3": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Heat Source W M3"
+          },
+          "inlet_mean_velocity_m_s": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Inlet Mean Velocity M S"
+          },
+          "point_mass_kg": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Point Mass Kg"
+          },
+          "potential_bottom_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Bottom V"
+          },
+          "potential_gradient_x_v_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Gradient X V M"
+          },
+          "potential_left_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Left V"
+          },
+          "potential_right_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Right V"
+          },
+          "potential_top_v": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Potential Top V"
+          },
+          "prescribed_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prescribed Temperature C"
+          },
+          "pressure_gradient_pa_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pressure Gradient Pa M"
+          },
+          "source_frequency_hz": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Frequency Hz"
+          },
+          "source_pressure_pa": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Pressure Pa"
+          },
+          "spring_stiffness_n_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Spring Stiffness N M"
+          },
+          "thermal_delta_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thermal Delta Temperature C"
+          },
+          "thermal_expansion_coefficient_1_k": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thermal Expansion Coefficient 1 K"
+          },
+          "thermal_restraint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Thermal Restraint"
+          },
+          "transverse_load_n": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Transverse Load N"
+          }
+        },
+        "title": "BoundaryConditions",
+        "type": "object"
+      },
+      "CapabilitiesResponse": {
+        "properties": {
+          "solvers": {
+            "items": {
+              "$ref": "#/components/schemas/CapabilityEntry"
+            },
+            "title": "Solvers",
+            "type": "array"
+          }
+        },
+        "required": [
+          "solvers"
+        ],
+        "title": "CapabilitiesResponse",
+        "type": "object"
+      },
+      "CapabilityEntry": {
+        "properties": {
+          "benchmark_references": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Benchmark References",
+            "type": "array"
+          },
+          "family": {
+            "$ref": "#/components/schemas/SolverFamily"
+          },
+          "geometry_limitations": {
+            "title": "Geometry Limitations",
+            "type": "string"
+          },
+          "governing_equations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Governing Equations",
+            "type": "array"
+          },
+          "implementation_status": {
+            "$ref": "#/components/schemas/ImplementationStatus"
+          },
+          "known_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Known Limitations",
+            "type": "array"
+          },
+          "output_metrics": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Output Metrics",
+            "type": "array"
+          },
+          "required_inputs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Required Inputs",
+            "type": "array"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          },
+          "supported_boundary_conditions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Boundary Conditions",
+            "type": "array"
+          },
+          "supported_dimensions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Dimensions",
+            "type": "array"
+          },
+          "supported_materials": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Supported Materials",
+            "type": "array"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/ValidationStatus"
+          },
+          "version": {
+            "title": "Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "solver_id",
+          "family",
+          "version",
+          "implementation_status",
+          "validation_status",
+          "governing_equations",
+          "supported_dimensions",
+          "geometry_limitations",
+          "supported_materials",
+          "supported_boundary_conditions",
+          "required_inputs",
+          "output_metrics",
+          "known_limitations",
+          "benchmark_references"
+        ],
+        "title": "CapabilityEntry",
+        "type": "object"
+      },
+      "CheckpointRequest": {
+        "properties": {
+          "artifacts": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Artifacts",
+            "type": "array"
+          },
+          "state": {
+            "title": "State",
+            "type": "object"
+          }
+        },
+        "required": [
+          "state"
+        ],
+        "title": "CheckpointRequest",
+        "type": "object"
+      },
+      "CloneRequest": {
+        "properties": {
+          "changes": {
+            "title": "Changes",
+            "type": "object"
+          }
+        },
+        "required": [
+          "changes"
+        ],
+        "title": "CloneRequest",
+        "type": "object"
+      },
+      "ComparisonRequest": {
+        "properties": {
+          "other_manifest_id": {
+            "title": "Other Manifest Id",
+            "type": "string"
+          },
+          "tolerances": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Tolerances",
+            "type": "object"
+          }
+        },
+        "required": [
+          "other_manifest_id"
+        ],
+        "title": "ComparisonRequest",
+        "type": "object"
+      },
+      "ConvergenceRequest": {
+        "properties": {
+          "configurations": {
+            "items": {
+              "type": "object"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Configurations",
+            "type": "array"
+          },
+          "threshold": {
+            "default": 0.02,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Threshold",
+            "type": "number"
+          },
+          "values": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 3,
+            "minItems": 3,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "values"
+        ],
+        "title": "ConvergenceRequest",
+        "type": "object"
+      },
+      "ConvergenceStatus": {
+        "properties": {
+          "converged": {
+            "title": "Converged",
+            "type": "boolean"
+          },
+          "iterations": {
+            "title": "Iterations",
+            "type": "integer"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "tolerance": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tolerance"
+          }
+        },
+        "required": [
+          "converged",
+          "iterations"
+        ],
+        "title": "ConvergenceStatus",
+        "type": "object"
+      },
+      "CoordinateAxis": {
+        "properties": {
+          "name": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "unit": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Unit",
+            "type": "string"
+          },
+          "values": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 2000,
+            "minItems": 1,
+            "title": "Values",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "unit",
+          "values"
+        ],
+        "title": "CoordinateAxis",
+        "type": "object"
+      },
+      "DecisionRequest": {
+        "properties": {
+          "constraints": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "designs": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Designs",
+            "type": "array"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "objectives": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Objectives",
+            "type": "array"
+          },
+          "sensitivity_spec": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sensitivity Spec"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "designs",
+          "objectives"
+        ],
+        "title": "DecisionRequest",
+        "type": "object"
+      },
+      "DesignParameters": {
+        "description": "Structured JSON object produced by the LLM function-calling step.\nAny field left blank by the user is filled from the internal\nknowledge base defaults in `resolve_defaults()`.",
+        "properties": {
+          "base_length_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Length M"
+          },
+          "geometry_type": {
+            "$ref": "#/components/schemas/GeometryType"
+          },
+          "height_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height M"
+          },
+          "material": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MaterialType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "slope_angle_deg": {
+            "anyOf": [
+              {
+                "maximum": 90.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Slope Angle Deg"
+          },
+          "wall_thickness_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wall Thickness M"
+          }
+        },
+        "required": [
+          "geometry_type"
+        ],
+        "title": "DesignParameters",
+        "type": "object"
+      },
+      "DesignResult": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Metrics",
+            "type": "object"
+          },
+          "params": {
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "design_id",
+          "params",
+          "metrics"
+        ],
+        "title": "DesignResult",
+        "type": "object"
+      },
+      "DesignVariationRequest": {
+        "description": "A batch request to generate N variations around a base design.",
+        "properties": {
+          "base_params": {
+            "$ref": "#/components/schemas/DesignParameters"
+          },
+          "variation_count": {
+            "default": 100,
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Variation Count",
+            "type": "integer"
+          },
+          "variation_range_pct": {
+            "default": 0.2,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Variation Range Pct",
+            "type": "number"
+          },
+          "vary_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Vary Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "base_params"
+        ],
+        "title": "DesignVariationRequest",
+        "type": "object"
+      },
+      "DoeRequest": {
+        "properties": {
+          "discrete_options": {
+            "additionalProperties": {
+              "items": {},
+              "type": "array"
+            },
+            "title": "Discrete Options",
+            "type": "object"
+          },
+          "parameter_ranges": {
+            "additionalProperties": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Ranges",
+            "type": "object"
+          },
+          "sample_count": {
+            "title": "Sample Count",
+            "type": "integer"
+          },
+          "seed": {
+            "title": "Seed",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "parameter_ranges",
+          "sample_count",
+          "seed"
+        ],
+        "title": "DoeRequest",
+        "type": "object"
+      },
+      "EvidenceCreate": {
+        "additionalProperties": false,
+        "properties": {
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "parent_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Record Id"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "record_type": {
+            "enum": [
+              "scientific_trust",
+              "run_manifest",
+              "engineering_decision",
+              "job_attempt",
+              "reasoning_event",
+              "research_report"
+            ],
+            "title": "Record Type",
+            "type": "string"
+          },
+          "simulation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation Id"
+          },
+          "status": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_type",
+          "status",
+          "payload"
+        ],
+        "title": "EvidenceCreate",
+        "type": "object"
+      },
+      "EvidenceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_record_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Record Id"
+          },
+          "payload": {
+            "title": "Payload",
+            "type": "object"
+          },
+          "payload_checksum": {
+            "title": "Payload Checksum",
+            "type": "string"
+          },
+          "record_type": {
+            "enum": [
+              "scientific_trust",
+              "run_manifest",
+              "engineering_decision",
+              "job_attempt",
+              "reasoning_event",
+              "research_report"
+            ],
+            "title": "Record Type",
+            "type": "string"
+          },
+          "schema_version": {
+            "title": "Schema Version",
+            "type": "string"
+          },
+          "simulation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation Id"
+          },
+          "status": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "record_type",
+          "status",
+          "payload",
+          "id",
+          "schema_version",
+          "payload_checksum",
+          "created_at"
+        ],
+        "title": "EvidenceResponse",
+        "type": "object"
+      },
+      "FeasibilityRequest": {
+        "properties": {
+          "constraints": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Constraints",
+            "type": "array"
+          },
+          "design": {
+            "title": "Design",
+            "type": "object"
+          }
+        },
+        "required": [
+          "design",
+          "constraints"
+        ],
+        "title": "FeasibilityRequest",
+        "type": "object"
+      },
+      "FieldResultMetadataResponse": {
+        "properties": {
+          "array_shape": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Array Shape",
+            "type": "array"
+          },
+          "axes": {
+            "items": {
+              "$ref": "#/components/schemas/CoordinateAxis"
+            },
+            "title": "Axes",
+            "type": "array"
+          },
+          "byte_size": {
+            "title": "Byte Size",
+            "type": "integer"
+          },
+          "checksum_sha256": {
+            "title": "Checksum Sha256",
+            "type": "string"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "dimensions": {
+            "maximum": 4.0,
+            "minimum": 1.0,
+            "title": "Dimensions",
+            "type": "integer"
+          },
+          "format": {
+            "title": "Format",
+            "type": "string"
+          },
+          "format_version": {
+            "title": "Format Version",
+            "type": "string"
+          },
+          "grid_metadata": {
+            "title": "Grid Metadata",
+            "type": "object"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "maximum": {
+            "title": "Maximum",
+            "type": "number"
+          },
+          "mean": {
+            "title": "Mean",
+            "type": "number"
+          },
+          "minimum": {
+            "title": "Minimum",
+            "type": "number"
+          },
+          "preview": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Preview",
+            "type": "array"
+          },
+          "reproducibility_hash": {
+            "title": "Reproducibility Hash",
+            "type": "string"
+          },
+          "simulation_id": {
+            "title": "Simulation Id",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "variable_name": {
+            "title": "Variable Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "simulation_id",
+          "variable_name",
+          "unit",
+          "format",
+          "format_version",
+          "dimensions",
+          "axes",
+          "array_shape",
+          "grid_metadata",
+          "checksum_sha256",
+          "byte_size",
+          "minimum",
+          "maximum",
+          "mean",
+          "preview",
+          "reproducibility_hash",
+          "created_at"
+        ],
+        "title": "FieldResultMetadataResponse",
+        "type": "object"
+      },
+      "FullReportRequest": {
+        "properties": {
+          "design_results": {
+            "items": {
+              "$ref": "#/components/schemas/DesignResult"
+            },
+            "title": "Design Results",
+            "type": "array"
+          },
+          "n_clusters": {
+            "default": 4,
+            "maximum": 20.0,
+            "minimum": 1.0,
+            "title": "N Clusters",
+            "type": "integer"
+          }
+        },
+        "title": "FullReportRequest",
+        "type": "object"
+      },
+      "FullReportResponse": {
+        "properties": {
+          "clusters": {
+            "title": "Clusters",
+            "type": "object"
+          },
+          "correlation": {
+            "title": "Correlation",
+            "type": "object"
+          },
+          "insights": {
+            "title": "Insights",
+            "type": "object"
+          }
+        },
+        "required": [
+          "clusters",
+          "correlation",
+          "insights"
+        ],
+        "title": "FullReportResponse",
+        "type": "object"
+      },
+      "GenerateSingleResponse": {
+        "properties": {
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "params": {
+            "title": "Params",
+            "type": "object"
+          },
+          "step_object_key": {
+            "title": "Step Object Key",
+            "type": "string"
+          },
+          "stl_object_key": {
+            "title": "Stl Object Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_id",
+          "params",
+          "stl_object_key",
+          "step_object_key"
+        ],
+        "title": "GenerateSingleResponse",
+        "type": "object"
+      },
+      "Geometry": {
+        "description": "Minimal geometry description a solver needs. `dimension` gates which\nsolvers may even attempt the request (see each solver's\n`supported_dimensions` in the registry).",
+        "properties": {
+          "cross_section_area_m2": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cross Section Area M2"
+          },
+          "dimension": {
+            "description": "'1d', '2d', or '3d' - must match a solver's supported_dimensions",
+            "title": "Dimension",
+            "type": "string"
+          },
+          "grid_resolution": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grid Resolution"
+          },
+          "grid_resolution_y": {
+            "anyOf": [
+              {
+                "maximum": 60.0,
+                "minimum": 5.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grid Resolution Y"
+          },
+          "height_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Height M"
+          },
+          "length_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Length M"
+          },
+          "moment_of_inertia_m4": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Moment Of Inertia M4"
+          },
+          "num_elements": {
+            "anyOf": [
+              {
+                "maximum": 500.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Num Elements"
+          },
+          "width_m": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Width M"
+          }
+        },
+        "required": [
+          "dimension"
+        ],
+        "title": "Geometry",
+        "type": "object"
+      },
+      "GeometryType": {
+        "enum": [
+          "pyramid",
+          "bridge",
+          "tower",
+          "arch",
+          "dome"
+        ],
+        "title": "GeometryType",
+        "type": "string"
+      },
+      "HTTPValidationError": {
+        "properties": {
+          "detail": {
+            "items": {
+              "$ref": "#/components/schemas/ValidationError"
+            },
+            "title": "Detail",
+            "type": "array"
+          }
+        },
+        "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "ImplementationStatus": {
+        "enum": [
+          "real",
+          "prototype",
+          "planned"
+        ],
+        "title": "ImplementationStatus",
+        "type": "string"
+      },
+      "InitialConditions": {
+        "properties": {
+          "initial_displacement_m": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Displacement M"
+          },
+          "initial_temperature_c": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Temperature C"
+          },
+          "initial_velocity_m_s": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Velocity M S"
+          }
+        },
+        "title": "InitialConditions",
+        "type": "object"
+      },
+      "Inputs": {
+        "properties": {
+          "inputs": {
+            "title": "Inputs",
+            "type": "object"
+          }
+        },
+        "required": [
+          "inputs"
+        ],
+        "title": "Inputs",
+        "type": "object"
+      },
+      "ItemsRequest": {
+        "properties": {
+          "items": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "ItemsRequest",
+        "type": "object"
+      },
+      "IterationResponse": {
+        "properties": {
+          "child_design_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Child Design Ids",
+            "type": "array"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "parent_design_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parent Design Ids",
+            "type": "array"
+          },
+          "proposal_id": {
+            "title": "Proposal Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "planned",
+              "completed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_id",
+          "proposal_id",
+          "user_id",
+          "parent_design_ids",
+          "child_design_ids",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IterationResponse",
+        "type": "object"
+      },
+      "JobDesignFileSummary": {
+        "properties": {
+          "checksum_sha256": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checksum Sha256"
+          },
+          "design_file_id": {
+            "title": "Design File Id",
+            "type": "string"
+          },
+          "file_format": {
+            "title": "File Format",
+            "type": "string"
+          },
+          "file_size_bytes": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "File Size Bytes"
+          },
+          "media_type": {
+            "title": "Media Type",
+            "type": "string"
+          },
+          "object_key": {
+            "title": "Object Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "design_file_id",
+          "file_format",
+          "object_key",
+          "file_size_bytes",
+          "checksum_sha256",
+          "media_type"
+        ],
+        "title": "JobDesignFileSummary",
+        "type": "object"
+      },
+      "JobDesignSummary": {
+        "properties": {
+          "design_model_id": {
+            "title": "Design Model Id",
+            "type": "string"
+          },
+          "files": {
+            "items": {
+              "$ref": "#/components/schemas/JobDesignFileSummary"
+            },
+            "title": "Files",
+            "type": "array"
+          },
+          "generation_status": {
+            "title": "Generation Status",
+            "type": "string"
+          },
+          "geometry_family": {
+            "title": "Geometry Family",
+            "type": "string"
+          },
+          "parameters": {
+            "title": "Parameters",
+            "type": "object"
+          },
+          "variation_index": {
+            "title": "Variation Index",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "design_model_id",
+          "variation_index",
+          "geometry_family",
+          "parameters",
+          "generation_status",
+          "files"
+        ],
+        "title": "JobDesignSummary",
+        "type": "object"
+      },
+      "JobResultsResponse": {
+        "properties": {
+          "designs": {
+            "items": {
+              "$ref": "#/components/schemas/JobDesignSummary"
+            },
+            "title": "Designs",
+            "type": "array"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "status",
+          "designs"
+        ],
+        "title": "JobResultsResponse",
+        "type": "object"
+      },
+      "JobStatusResponse": {
+        "properties": {
+          "completed_count": {
+            "title": "Completed Count",
+            "type": "integer"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "failed_count": {
+            "title": "Failed Count",
+            "type": "integer"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "progress_percent": {
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "requested_count": {
+            "title": "Requested Count",
+            "type": "integer"
+          },
+          "safe_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Error Message"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "experiment_id",
+          "status",
+          "requested_count",
+          "completed_count",
+          "failed_count",
+          "progress_percent",
+          "created_at"
+        ],
+        "title": "JobStatusResponse",
+        "type": "object"
+      },
+      "ManifestRequest": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "object"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ManifestRequest",
+        "type": "object"
+      },
+      "MaterialSelection": {
+        "properties": {
+          "name": {
+            "minLength": 2,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "MaterialSelection",
+        "type": "object"
+      },
+      "MaterialType": {
+        "enum": [
+          "limestone",
+          "granite",
+          "concrete",
+          "steel",
+          "aluminum"
+        ],
+        "title": "MaterialType",
+        "type": "string"
+      },
+      "NumericalSettings": {
+        "properties": {
+          "max_iterations": {
+            "default": 300,
+            "maximum": 5000.0,
+            "minimum": 1.0,
+            "title": "Max Iterations",
+            "type": "integer"
+          },
+          "tolerance": {
+            "default": 1e-05,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1.0,
+            "title": "Tolerance",
+            "type": "number"
+          }
+        },
+        "title": "NumericalSettings",
+        "type": "object"
+      },
+      "ObjectiveSpec": {
+        "properties": {
+          "column": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Column",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "minimize",
+              "maximize"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1.0,
+            "exclusiveMinimum": 0.0,
+            "maximum": 1000.0,
+            "title": "Weight",
+            "type": "number"
+          }
+        },
+        "required": [
+          "column",
+          "direction"
+        ],
+        "title": "ObjectiveSpec",
+        "type": "object"
+      },
+      "ParseResponse": {
+        "properties": {
+          "params": {
+            "$ref": "#/components/schemas/DesignParameters"
+          }
+        },
+        "required": [
+          "params"
+        ],
+        "title": "ParseResponse",
+        "type": "object"
+      },
+      "PipelineRunRequest": {
+        "properties": {
+          "analyses": {
+            "items": {
+              "$ref": "#/components/schemas/AnalysisType"
+            },
+            "title": "Analyses",
+            "type": "array"
+          },
+          "prompt": {
+            "minLength": 3,
+            "title": "Prompt",
+            "type": "string"
+          },
+          "variation_count": {
+            "default": 10,
+            "maximum": 100.0,
+            "minimum": 1.0,
+            "title": "Variation Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "PipelineRunRequest",
+        "type": "object"
+      },
+      "PromptRequest": {
+        "properties": {
+          "prompt": {
+            "minLength": 3,
+            "title": "Prompt",
+            "type": "string"
+          }
+        },
+        "required": [
+          "prompt"
+        ],
+        "title": "PromptRequest",
+        "type": "object"
+      },
+      "ProposalRequest": {
+        "properties": {
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "parameter_bounds": {
+            "additionalProperties": {
+              "maxItems": 2,
+              "minItems": 2,
+              "prefixItems": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "number"
+                }
+              ],
+              "type": "array"
+            },
+            "title": "Parameter Bounds",
+            "type": "object"
+          },
+          "source_design_id": {
+            "title": "Source Design Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "analysis_id",
+          "source_design_id",
+          "parameter_bounds"
+        ],
+        "title": "ProposalRequest",
+        "type": "object"
+      },
+      "ProposalResponse": {
+        "properties": {
+          "analysis_id": {
+            "title": "Analysis Id",
+            "type": "string"
+          },
+          "confidence_limitations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Confidence Limitations",
+            "type": "array"
+          },
+          "constraint_checks": {
+            "title": "Constraint Checks",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "evidence": {
+            "items": {},
+            "title": "Evidence",
+            "type": "array"
+          },
+          "expected_tradeoffs": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Expected Tradeoffs",
+            "type": "array"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "modifications": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Modifications",
+            "type": "array"
+          },
+          "source_design_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Design Ids",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "generated",
+              "accepted",
+              "rejected",
+              "superseded",
+              "executed",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_id",
+          "analysis_id",
+          "user_id",
+          "status",
+          "modifications",
+          "evidence",
+          "source_design_ids",
+          "expected_tradeoffs",
+          "confidence_limitations",
+          "constraint_checks",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ProposalResponse",
+        "type": "object"
+      },
+      "ReasoningRequest": {
+        "properties": {
+          "context": {
+            "title": "Context",
+            "type": "object"
+          },
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "string"
+          },
+          "stage": {
+            "title": "Stage",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "stage",
+          "level",
+          "evidence_ids"
+        ],
+        "title": "ReasoningRequest",
+        "type": "object"
+      },
+      "RecommendRequest": {
+        "properties": {
+          "geometry_category": {
+            "minLength": 2,
+            "title": "Geometry Category",
+            "type": "string"
+          },
+          "research_objective": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Research Objective"
+          }
+        },
+        "required": [
+          "geometry_category"
+        ],
+        "title": "RecommendRequest",
+        "type": "object"
+      },
+      "RecommendResponse": {
+        "properties": {
+          "recommendations": {
+            "items": {
+              "$ref": "#/components/schemas/Recommendation"
+            },
+            "title": "Recommendations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "recommendations"
+        ],
+        "title": "RecommendResponse",
+        "type": "object"
+      },
+      "Recommendation": {
+        "properties": {
+          "family": {
+            "$ref": "#/components/schemas/SolverFamily"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/RecommendationStatus"
+          }
+        },
+        "required": [
+          "solver_id",
+          "family",
+          "status",
+          "rationale"
+        ],
+        "title": "Recommendation",
+        "type": "object"
+      },
+      "RecommendationStatus": {
+        "enum": [
+          "available",
+          "experimental",
+          "unsupported",
+          "planned"
+        ],
+        "title": "RecommendationStatus",
+        "type": "string"
+      },
+      "ReportRequest": {
+        "properties": {
+          "evidence_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Evidence Ids",
+            "type": "array"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "title",
+          "evidence_ids"
+        ],
+        "title": "ReportRequest",
+        "type": "object"
+      },
+      "ReproduceRequest": {
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "ReproduceRequest",
+        "type": "object"
+      },
+      "RetryRequest": {
+        "properties": {
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "idempotency_key"
+        ],
+        "title": "RetryRequest",
+        "type": "object"
+      },
+      "SensitivityRequest": {
+        "properties": {
+          "designs": {
+            "items": {
+              "type": "object"
+            },
+            "title": "Designs",
+            "type": "array"
+          },
+          "method": {
+            "default": "both",
+            "title": "Method",
+            "type": "string"
+          },
+          "parameters": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Parameters",
+            "type": "array"
+          },
+          "target": {
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "designs",
+          "parameters",
+          "target"
+        ],
+        "title": "SensitivityRequest",
+        "type": "object"
+      },
+      "SensitivitySpec": {
+        "properties": {
+          "features": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "minItems": 1,
+            "title": "Features",
+            "type": "array"
+          },
+          "target": {
+            "maxLength": 160,
+            "minLength": 1,
+            "title": "Target",
+            "type": "string"
+          }
+        },
+        "required": [
+          "target",
+          "features"
+        ],
+        "title": "SensitivitySpec",
+        "type": "object"
+      },
+      "SimulationCreateRequest": {
+        "properties": {
+          "boundary_conditions": {
+            "$ref": "#/components/schemas/BoundaryConditions"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Design Id"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "geometry": {
+            "$ref": "#/components/schemas/Geometry"
+          },
+          "initial_conditions": {
+            "$ref": "#/components/schemas/InitialConditions"
+          },
+          "material": {
+            "$ref": "#/components/schemas/MaterialSelection"
+          },
+          "numerical_settings": {
+            "$ref": "#/components/schemas/NumericalSettings"
+          },
+          "solver_id": {
+            "minLength": 2,
+            "title": "Solver Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "solver_id",
+          "material",
+          "geometry"
+        ],
+        "title": "SimulationCreateRequest",
+        "type": "object"
+      },
+      "SimulationJobResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Design Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "progress_percent": {
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "safe_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Error Message"
+          },
+          "simulation_id": {
+            "title": "Simulation Id",
+            "type": "string"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SimulationStatus"
+          }
+        },
+        "required": [
+          "simulation_id",
+          "experiment_id",
+          "design_id",
+          "solver_id",
+          "status",
+          "progress_percent",
+          "created_at"
+        ],
+        "title": "SimulationJobResponse",
+        "type": "object"
+      },
+      "SimulationResultPayload": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "convergence": {
+            "$ref": "#/components/schemas/ConvergenceStatus"
+          },
+          "elapsed_time_seconds": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Elapsed Time Seconds"
+          },
+          "field_values": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Field Values",
+            "type": "array"
+          },
+          "governing_equations": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Governing Equations",
+            "type": "array"
+          },
+          "hotspot_node_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hotspot Node Ids",
+            "type": "array"
+          },
+          "numerical_method": {
+            "default": "",
+            "title": "Numerical Method",
+            "type": "string"
+          },
+          "reproducibility_hash": {
+            "default": "",
+            "title": "Reproducibility Hash",
+            "type": "string"
+          },
+          "residual_history": {
+            "items": {
+              "type": "number"
+            },
+            "maxItems": 5000,
+            "title": "Residual History",
+            "type": "array"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          },
+          "solver_version": {
+            "title": "Solver Version",
+            "type": "string"
+          },
+          "source_design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Design Id"
+          },
+          "source_simulation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Source Simulation Id"
+          },
+          "status": {
+            "default": "completed",
+            "title": "Status",
+            "type": "string"
+          },
+          "summary_metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Summary Metrics",
+            "type": "object"
+          },
+          "validation_metadata": {
+            "title": "Validation Metadata",
+            "type": "object"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "solver_id",
+          "solver_version",
+          "governing_equations",
+          "assumptions",
+          "warnings",
+          "convergence",
+          "summary_metrics",
+          "field_values",
+          "hotspot_node_ids"
+        ],
+        "title": "SimulationResultPayload",
+        "type": "object"
+      },
+      "SimulationResultsResponse": {
+        "properties": {
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "design_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Design Id"
+          },
+          "error_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Error Code"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "progress_percent": {
+            "title": "Progress Percent",
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SimulationResultPayload"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "safe_error_message": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Safe Error Message"
+          },
+          "simulation_id": {
+            "title": "Simulation Id",
+            "type": "string"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/SimulationStatus"
+          }
+        },
+        "required": [
+          "simulation_id",
+          "experiment_id",
+          "design_id",
+          "solver_id",
+          "status",
+          "progress_percent",
+          "created_at"
+        ],
+        "title": "SimulationResultsResponse",
+        "type": "object"
+      },
+      "SimulationRunRequest": {
+        "properties": {
+          "analysis_type": {
+            "$ref": "#/components/schemas/AnalysisType"
+          },
+          "boundary_conditions": {
+            "title": "Boundary Conditions",
+            "type": "object"
+          },
+          "design_id": {
+            "default": "unknown",
+            "title": "Design Id",
+            "type": "string"
+          },
+          "geometry_type": {
+            "default": "tower",
+            "title": "Geometry Type",
+            "type": "string"
+          },
+          "material": {
+            "default": "concrete",
+            "title": "Material",
+            "type": "string"
+          }
+        },
+        "required": [
+          "analysis_type"
+        ],
+        "title": "SimulationRunRequest",
+        "type": "object"
+      },
+      "SimulationRunResponse": {
+        "properties": {
+          "analysis_type": {
+            "title": "Analysis Type",
+            "type": "string"
+          },
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "field_values": {
+            "items": {
+              "type": "number"
+            },
+            "title": "Field Values",
+            "type": "array"
+          },
+          "hotspot_node_ids": {
+            "items": {
+              "type": "integer"
+            },
+            "title": "Hotspot Node Ids",
+            "type": "array"
+          },
+          "summary_metrics": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Summary Metrics",
+            "type": "object"
+          }
+        },
+        "required": [
+          "analysis_type",
+          "design_id",
+          "summary_metrics",
+          "field_values",
+          "hotspot_node_ids"
+        ],
+        "title": "SimulationRunResponse",
+        "type": "object"
+      },
+      "SimulationStatus": {
+        "enum": [
+          "queued",
+          "running",
+          "completed",
+          "partial_failure",
+          "failed",
+          "cancelled"
+        ],
+        "title": "SimulationStatus",
+        "type": "string"
+      },
+      "SolverFamily": {
+        "enum": [
+          "thermal",
+          "structural",
+          "modal",
+          "cfd",
+          "wave_acoustic",
+          "electromagnetic",
+          "coupled"
+        ],
+        "title": "SolverFamily",
+        "type": "string"
+      },
+      "StartRunRequest": {
+        "properties": {
+          "data": {
+            "title": "Data",
+            "type": "object"
+          },
+          "idempotency_key": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Idempotency Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "data",
+          "idempotency_key"
+        ],
+        "title": "StartRunRequest",
+        "type": "object"
+      },
+      "ThermalStructuralCouplingRequest": {
+        "properties": {
+          "cross_section_area_m2": {
+            "exclusiveMinimum": 0.0,
+            "title": "Cross Section Area M2",
+            "type": "number"
+          },
+          "design_id": {
+            "title": "Design Id",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "hot_end_temperature_c": {
+            "title": "Hot End Temperature C",
+            "type": "number"
+          },
+          "length_m": {
+            "exclusiveMinimum": 0.0,
+            "title": "Length M",
+            "type": "number"
+          },
+          "material": {
+            "default": "steel",
+            "title": "Material",
+            "type": "string"
+          },
+          "num_elements": {
+            "default": 20,
+            "maximum": 200.0,
+            "minimum": 2.0,
+            "title": "Num Elements",
+            "type": "integer"
+          },
+          "reference_temperature_c": {
+            "default": 20.0,
+            "title": "Reference Temperature C",
+            "type": "number"
+          },
+          "restraint": {
+            "default": "fully_restrained",
+            "title": "Restraint",
+            "type": "string"
+          }
+        },
+        "required": [
+          "experiment_id",
+          "design_id",
+          "length_m",
+          "cross_section_area_m2",
+          "hot_end_temperature_c"
+        ],
+        "title": "ThermalStructuralCouplingRequest",
+        "type": "object"
+      },
+      "ThermalStructuralCouplingResponse": {
+        "properties": {
+          "analysis_type": {
+            "title": "Analysis Type",
+            "type": "string"
+          },
+          "configuration": {
+            "title": "Configuration",
+            "type": "object"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "experiment_id": {
+            "title": "Experiment Id",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "reproducibility_hash": {
+            "title": "Reproducibility Hash",
+            "type": "string"
+          },
+          "result": {
+            "title": "Result",
+            "type": "object"
+          },
+          "source_design_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Design Ids",
+            "type": "array"
+          },
+          "source_simulation_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Simulation Ids",
+            "type": "array"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "user_id": {
+            "title": "User Id",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "experiment_id",
+          "user_id",
+          "analysis_type",
+          "status",
+          "configuration",
+          "result",
+          "warnings",
+          "source_design_ids",
+          "source_simulation_ids",
+          "reproducibility_hash",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ThermalStructuralCouplingResponse",
+        "type": "object"
+      },
+      "TrustRequest": {
+        "properties": {
+          "benchmark_inputs": {
+            "additionalProperties": {
+              "type": "number"
+            },
+            "title": "Benchmark Inputs",
+            "type": "object"
+          },
+          "computed_result": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Computed Result"
+          },
+          "convergence_values": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "number"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Convergence Values"
+          },
+          "experiment_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Experiment Id"
+          },
+          "inputs": {
+            "title": "Inputs",
+            "type": "object"
+          },
+          "simulation_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Simulation Id"
+          },
+          "solver_id": {
+            "title": "Solver Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "solver_id",
+          "inputs",
+          "benchmark_inputs"
+        ],
+        "title": "TrustRequest",
+        "type": "object"
+      },
+      "ValidationError": {
+        "properties": {
+          "loc": {
+            "items": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "integer"
+                }
+              ]
+            },
+            "title": "Location",
+            "type": "array"
+          },
+          "msg": {
+            "title": "Message",
+            "type": "string"
+          },
+          "type": {
+            "title": "Error Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "loc",
+          "msg",
+          "type"
+        ],
+        "title": "ValidationError",
+        "type": "object"
+      },
+      "ValidationStatus": {
+        "enum": [
+          "validated",
+          "partially_validated",
+          "unvalidated",
+          "not_applicable"
+        ],
+        "title": "ValidationStatus",
+        "type": "string"
+      }
+    },
+    "securitySchemes": {
+      "OAuth2PasswordBearer": {
+        "flows": {
+          "password": {
+            "scopes": {},
+            "tokenUrl": "/auth/token"
+          }
+        },
+        "type": "oauth2"
+      }
+    }
+  },
+  "info": {
+    "contact": {
+      "email": "research@asre-lab.local",
+      "name": "ASRE-LAB Engineering"
+    },
+    "description": "Autonomous Smart Reverse Engineering Laboratory \u2014 computational backend",
+    "license": {
+      "name": "Proprietary Source-Available License",
+      "url": "https://github.com/eslammohamed2009b-a11y/ASRE-LAB/blob/main/LICENSE"
+    },
+    "title": "ASRE-Lab Engine",
+    "version": "1.0.0"
+  },
+  "openapi": "3.1.0",
+  "paths": {
+    "/api/analyze/experiments/{experiment_id}": {
+      "get": {
+        "operationId": "list_experiment_analyses_api_analyze_experiments__experiment_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/AnalysisResponse"
+                  },
+                  "title": "Response List Experiment Analyses Api Analyze Experiments  Experiment Id  Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List persisted analyses for an experiment",
+        "tags": [
+          "Module 3 - Analytical Pattern Discovery"
+        ]
+      },
+      "post": {
+        "operationId": "create_experiment_analysis_api_analyze_experiments__experiment_id__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Run and persist deterministic engineering intelligence",
+        "tags": [
+          "Module 3 - Analytical Pattern Discovery"
+        ]
+      }
+    },
+    "/api/analyze/full-report": {
+      "post": {
+        "description": "Runs clustering, correlation, and synthesis over simulation output data.",
+        "operationId": "full_report_api_analyze_full_report_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FullReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FullReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate analytical full report",
+        "tags": [
+          "Module 3 - Analytical Pattern Discovery"
+        ]
+      }
+    },
+    "/api/analyze/{analysis_id}": {
+      "get": {
+        "operationId": "get_analysis_api_analyze__analysis_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AnalysisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retrieve one persisted analysis",
+        "tags": [
+          "Module 3 - Analytical Pattern Discovery"
+        ]
+      }
+    },
+    "/api/analyze/{analysis_id}/results/{section}": {
+      "get": {
+        "operationId": "get_analysis_section_api_analyze__analysis_id__results__section__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "analysis_id",
+            "required": true,
+            "schema": {
+              "title": "Analysis Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "section",
+            "required": true,
+            "schema": {
+              "enum": [
+                "data_quality",
+                "descriptive_statistics",
+                "correlations",
+                "sensitivity",
+                "pareto",
+                "ranking",
+                "recommendations"
+              ],
+              "title": "Section",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Analysis Section Api Analyze  Analysis Id  Results  Section  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retrieve one bounded analysis result section",
+        "tags": [
+          "Module 3 - Analytical Pattern Discovery"
+        ]
+      }
+    },
+    "/api/couplings/thermal-structural": {
+      "post": {
+        "operationId": "create_coupling_api_couplings_thermal_structural_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ThermalStructuralCouplingRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThermalStructuralCouplingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Coupling",
+        "tags": [
+          "Module 2 - Coupled Analysis"
+        ]
+      }
+    },
+    "/api/couplings/{coupling_id}": {
+      "get": {
+        "operationId": "retrieve_coupling_api_couplings__coupling_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "coupling_id",
+            "required": true,
+            "schema": {
+              "title": "Coupling Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ThermalStructuralCouplingResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retrieve Coupling",
+        "tags": [
+          "Module 2 - Coupled Analysis"
+        ]
+      }
+    },
+    "/api/design-feedback/experiments/{experiment_id}/iterations": {
+      "get": {
+        "operationId": "iterations_api_design_feedback_experiments__experiment_id__iterations_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/IterationResponse"
+                  },
+                  "title": "Response Iterations Api Design Feedback Experiments  Experiment Id  Iterations Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Iterations",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/experiments/{experiment_id}/proposals": {
+      "get": {
+        "operationId": "listing_api_design_feedback_experiments__experiment_id__proposals_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "experiment_id",
+            "required": true,
+            "schema": {
+              "title": "Experiment Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ProposalResponse"
+                  },
+                  "title": "Response Listing Api Design Feedback Experiments  Experiment Id  Proposals Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Listing",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/proposals": {
+      "post": {
+        "operationId": "create_api_design_feedback_proposals_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ProposalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/proposals/{proposal_id}": {
+      "get": {
+        "operationId": "retrieve_api_design_feedback_proposals__proposal_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retrieve",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/proposals/{proposal_id}/accept": {
+      "post": {
+        "operationId": "accept_api_design_feedback_proposals__proposal_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Accept",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/proposals/{proposal_id}/execute": {
+      "post": {
+        "operationId": "execute_api_design_feedback_proposals__proposal_id__execute_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IterationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Execute",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design-feedback/proposals/{proposal_id}/reject": {
+      "post": {
+        "operationId": "reject_api_design_feedback_proposals__proposal_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "proposal_id",
+            "required": true,
+            "schema": {
+              "title": "Proposal Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ProposalResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reject",
+        "tags": [
+          "Module 3 - Reviewable Design Feedback"
+        ]
+      }
+    },
+    "/api/design/export/{design_id}": {
+      "get": {
+        "description": "Returns STL file by design id, streamed through the FileStorage abstraction.",
+        "operationId": "export_stl_api_design_export__design_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "design_id",
+            "required": true,
+            "schema": {
+              "title": "Design Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Download generated STL",
+        "tags": [
+          "Module 1 - Design Accelerator"
+        ]
+      }
+    },
+    "/api/design/generate-batch": {
+      "post": {
+        "description": "Creates an experiment + a persisted generation_jobs record and dispatches the batch to Celery. Returns immediately with a job_id for polling via /api/jobs/{job_id}.",
+        "operationId": "generate_batch_api_design_generate_batch_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BatchGenerateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BatchGenerateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Queue an async batch design generation job",
+        "tags": [
+          "Module 1 - Design Accelerator"
+        ]
+      }
+    },
+    "/api/design/generate-matrix": {
+      "post": {
+        "description": "Builds multiple design variations using process-based parallel generation.",
+        "operationId": "generate_matrix_api_design_generate_matrix_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DesignVariationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate design matrix in parallel",
+        "tags": [
+          "Module 1 - Design Accelerator"
+        ]
+      }
+    },
+    "/api/design/generate-single": {
+      "post": {
+        "description": "Parses the prompt and exports STL/STEP files for one design, durably stored via FileStorage.",
+        "operationId": "generate_single_api_design_generate_single_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerateSingleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate a single parametric model",
+        "tags": [
+          "Module 1 - Design Accelerator"
+        ]
+      }
+    },
+    "/api/design/parse": {
+      "post": {
+        "description": "Converts user prompt into validated engineering parameters with defaults.",
+        "operationId": "parse_prompt_api_design_parse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PromptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ParseResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Parse natural language into design parameters",
+        "tags": [
+          "Module 1 - Design Accelerator"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}": {
+      "get": {
+        "description": "Returns the persisted status/progress of a generation job. Owner-only.",
+        "operationId": "get_job_status_api_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get async batch job status",
+        "tags": [
+          "Module 1 - Async Jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/cancel": {
+      "post": {
+        "description": "Cooperative cancellation: marks the job 'cancelled' if it has not already reached a terminal state. A worker already processing a variant checks this flag between variants and stops early; already-completed variants and their files are kept, not rolled back.",
+        "operationId": "cancel_job_api_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Cancel an async batch job",
+        "tags": [
+          "Module 1 - Async Jobs"
+        ]
+      }
+    },
+    "/api/jobs/{job_id}/results": {
+      "get": {
+        "description": "Returns every design_model + its design_files generated so far for this job's experiment. Owner-only.",
+        "operationId": "get_job_results_api_jobs__job_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/JobResultsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get persisted results of an async batch job",
+        "tags": [
+          "Module 1 - Async Jobs"
+        ]
+      }
+    },
+    "/api/pipeline/jobs/{job_id}": {
+      "get": {
+        "operationId": "get_pipeline_job_status_api_pipeline_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Pipeline Job Status Api Pipeline Jobs  Job Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get durable pipeline job status",
+        "tags": [
+          "Integrated Research Pipeline"
+        ]
+      }
+    },
+    "/api/pipeline/jobs/{job_id}/cancel": {
+      "post": {
+        "operationId": "cancel_pipeline_job_api_pipeline_jobs__job_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Cancel Pipeline Job Api Pipeline Jobs  Job Id  Cancel Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Cancel a queued or running pipeline job",
+        "tags": [
+          "Integrated Research Pipeline"
+        ]
+      }
+    },
+    "/api/pipeline/run": {
+      "post": {
+        "description": "Persists CAD variants, executes the unified real thermal/structural reference scenarios with field artifacts, then persists deterministic Module 3 analysis.",
+        "operationId": "run_pipeline_api_pipeline_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Run Pipeline Api Pipeline Run Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Run the authoritative research pipeline synchronously",
+        "tags": [
+          "Integrated Research Pipeline"
+        ]
+      }
+    },
+    "/api/pipeline/run-async": {
+      "post": {
+        "operationId": "run_pipeline_async_api_pipeline_run_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PipelineRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Run Pipeline Async Api Pipeline Run Async Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Queue the authoritative research pipeline",
+        "tags": [
+          "Integrated Research Pipeline"
+        ]
+      }
+    },
+    "/api/simulate/advisor": {
+      "post": {
+        "deprecated": true,
+        "description": "Returns suggested simulation analyses based on geometry category.",
+        "operationId": "advisor_api_simulate_advisor_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AdvisorRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AdvisorResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Recommend analyses for model type",
+        "tags": [
+          "Module 2 - Legacy Simulation Compatibility"
+        ]
+      }
+    },
+    "/api/simulate/jobs/{job_id}": {
+      "get": {
+        "deprecated": true,
+        "description": "Returns queued/running/succeeded/failed and includes result or error.",
+        "operationId": "get_simulation_job_status_api_simulate_jobs__job_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "job_id",
+            "required": true,
+            "schema": {
+              "title": "Job Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Get Simulation Job Status Api Simulate Jobs  Job Id  Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get async simulation job status",
+        "tags": [
+          "Module 2 - Legacy Simulation Compatibility"
+        ]
+      }
+    },
+    "/api/simulate/run": {
+      "post": {
+        "deprecated": true,
+        "description": "Deprecated compatibility endpoint for the original thermal-only interface. Use /api/simulations for authoritative persisted solver execution.",
+        "operationId": "run_simulation_api_simulate_run_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationRunResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Run simulation synchronously",
+        "tags": [
+          "Module 2 - Legacy Simulation Compatibility"
+        ]
+      }
+    },
+    "/api/simulate/run-async": {
+      "post": {
+        "deprecated": true,
+        "description": "Enqueues simulation in Celery and returns job id.",
+        "operationId": "run_simulation_async_api_simulate_run_async_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "title": "Response Run Simulation Async Api Simulate Run Async Post",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Queue simulation asynchronously",
+        "tags": [
+          "Module 2 - Legacy Simulation Compatibility"
+        ]
+      }
+    },
+    "/api/simulations": {
+      "post": {
+        "description": "Validates the requested solver is 'real' (never accepts a request for a prototype/planned solver), persists a queued job + an immutable snapshot of its inputs, and dispatches the solve to Celery. Returns immediately with a simulation_id for polling.",
+        "operationId": "create_simulation_api_simulations_post",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SimulationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Queue a new simulation job",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/capabilities": {
+      "get": {
+        "description": "Single source of truth for what each solver family can and cannot do - governing equations, supported dimensions/materials/boundary conditions, known limitations, and benchmark test references. A solver's `implementation_status` here is always accurate: 'real' solvers are backed by a validated numerical method, 'prototype'/'planned' solvers have no validated result and this API refuses to return one for them (see POST /).",
+        "operationId": "get_capabilities_api_simulations_capabilities_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CapabilitiesResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List every registered solver's declared capabilities",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/recommend": {
+      "post": {
+        "description": "Registry-backed recommendations; each recommendation's status is derived directly from the capability registry, never hand-picked.",
+        "operationId": "recommend_api_simulations_recommend_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RecommendRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RecommendResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Recommend solvers for a geometry category",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}": {
+      "get": {
+        "description": "Returns the persisted status/progress of a simulation job. Owner-only.",
+        "operationId": "get_simulation_api_simulations__simulation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get simulation job status",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}/cancel": {
+      "post": {
+        "description": "Cooperative cancellation: marks the job 'cancelled' if not already in a terminal state. Owner-only.",
+        "operationId": "cancel_simulation_api_simulations__simulation_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationJobResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Cancel a simulation job",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}/fields": {
+      "get": {
+        "operationId": "list_simulation_fields_api_simulations__simulation_id__fields_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/FieldResultMetadataResponse"
+                  },
+                  "title": "Response List Simulation Fields Api Simulations  Simulation Id  Fields Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "List persisted scientific field artifacts",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}/fields/{field_result_id}": {
+      "get": {
+        "operationId": "get_simulation_field_api_simulations__simulation_id__fields__field_result_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "field_result_id",
+            "required": true,
+            "schema": {
+              "title": "Field Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/FieldResultMetadataResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get scientific field metadata",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}/fields/{field_result_id}/download": {
+      "get": {
+        "operationId": "download_simulation_field_api_simulations__simulation_id__fields__field_result_id__download_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "field_result_id",
+            "required": true,
+            "schema": {
+              "title": "Field Result Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Download an owner-protected compressed field artifact",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/simulations/{simulation_id}/results": {
+      "get": {
+        "description": "Returns the job status plus its persisted result payload (null until completed). Owner-only.",
+        "operationId": "get_simulation_results_api_simulations__simulation_id__results_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "simulation_id",
+            "required": true,
+            "schema": {
+              "title": "Simulation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SimulationResultsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get persisted simulation results",
+        "tags": [
+          "Module 2 - Multi-Physics Simulations"
+        ]
+      }
+    },
+    "/api/v2/decisions": {
+      "post": {
+        "operationId": "decision_api_v2_decisions_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecisionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Decision",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/analyse": {
+      "post": {
+        "operationId": "evaluate_decisions_api_v2_decisions_analyse_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AnalysisRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Evaluate Decisions",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/constraints/validate": {
+      "post": {
+        "operationId": "constraint_validation_api_v2_decisions_constraints_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Constraint Validation",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/doe": {
+      "post": {
+        "operationId": "doe_api_v2_decisions_doe_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DoeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Doe",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/feasibility": {
+      "post": {
+        "operationId": "evaluate_feasibility_api_v2_decisions_feasibility_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/FeasibilityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Evaluate Feasibility",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/objectives/validate": {
+      "post": {
+        "operationId": "objective_validation_api_v2_decisions_objectives_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ItemsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Objective Validation",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/sensitivity": {
+      "post": {
+        "operationId": "evaluate_sensitivity_api_v2_decisions_sensitivity_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SensitivityRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Evaluate Sensitivity",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/{id}": {
+      "get": {
+        "operationId": "get_decision_api_v2_decisions__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Decision",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/decisions/{id}/actions": {
+      "post": {
+        "operationId": "action_api_v2_decisions__id__actions_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Action",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/evidence": {
+      "post": {
+        "operationId": "create_api_v2_evidence_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/EvidenceCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create",
+        "tags": [
+          "Backend V2"
+        ]
+      }
+    },
+    "/api/v2/evidence/{record_id}": {
+      "get": {
+        "operationId": "get_api_v2_evidence__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/EvidenceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get",
+        "tags": [
+          "Backend V2"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}": {
+      "get": {
+        "operationId": "get_attempt_api_v2_execution_attempts__attempt_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}/cancel": {
+      "post": {
+        "operationId": "cancel_attempt_api_v2_execution_attempts__attempt_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Cancel Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}/checkpoint": {
+      "post": {
+        "operationId": "checkpoint_attempt_api_v2_execution_attempts__attempt_id__checkpoint_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CheckpointRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Checkpoint Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}/history": {
+      "get": {
+        "operationId": "attempt_history_api_v2_execution_attempts__attempt_id__history_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Attempt History",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}/resume": {
+      "post": {
+        "operationId": "resume_attempt_api_v2_execution_attempts__attempt_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Resume Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/attempts/{attempt_id}/retry": {
+      "post": {
+        "operationId": "retry_attempt_api_v2_execution_attempts__attempt_id__retry_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "attempt_id",
+            "required": true,
+            "schema": {
+              "title": "Attempt Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RetryRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Retry Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/failures/{category}": {
+      "get": {
+        "operationId": "failure_information_api_v2_execution_failures__category__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "category",
+            "required": true,
+            "schema": {
+              "title": "Category",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Failure Information",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests": {
+      "post": {
+        "operationId": "create_manifest_api_v2_execution_manifests_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ManifestRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}": {
+      "get": {
+        "operationId": "get_manifest_api_v2_execution_manifests__manifest_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/artifacts": {
+      "get": {
+        "operationId": "artifacts_api_v2_execution_manifests__manifest_id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Artifacts",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/attempts": {
+      "post": {
+        "operationId": "create_attempt_api_v2_execution_manifests__manifest_id__attempts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AttemptRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Attempt",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/bundle": {
+      "post": {
+        "operationId": "generate_bundle_api_v2_execution_manifests__manifest_id__bundle_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Generate Bundle",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/clone": {
+      "post": {
+        "operationId": "clone_manifest_api_v2_execution_manifests__manifest_id__clone_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CloneRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Clone Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/compare": {
+      "post": {
+        "operationId": "compare_manifest_api_v2_execution_manifests__manifest_id__compare_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ComparisonRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Compare Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/reproduce": {
+      "post": {
+        "operationId": "reproduce_manifest_api_v2_execution_manifests__manifest_id__reproduce_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReproduceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reproduce Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/manifests/{manifest_id}/seal": {
+      "post": {
+        "operationId": "seal_manifest_api_v2_execution_manifests__manifest_id__seal_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "manifest_id",
+            "required": true,
+            "schema": {
+              "title": "Manifest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Seal Manifest",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/policy": {
+      "get": {
+        "operationId": "policy_api_v2_execution_policy_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Policy",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/execution/runs": {
+      "post": {
+        "operationId": "start_run_api_v2_execution_runs_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/StartRunRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Start Run",
+        "tags": [
+          "Backend V2 - Reproducible Execution"
+        ]
+      }
+    },
+    "/api/v2/reasoning": {
+      "post": {
+        "operationId": "reasoning_api_v2_reasoning_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReasoningRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Reasoning",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/reasoning/{id}": {
+      "get": {
+        "operationId": "get_reasoning_api_v2_reasoning__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Reasoning",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/reports": {
+      "post": {
+        "operationId": "report_api_v2_reports_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Report",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/reports/{id}": {
+      "get": {
+        "operationId": "get_report_api_v2_reports__id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Report",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/reports/{id}/artifacts": {
+      "get": {
+        "operationId": "report_artifacts_api_v2_reports__id__artifacts_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Report Artifacts",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/reports/{id}/exports/{fmt}": {
+      "get": {
+        "operationId": "export_api_v2_reports__id__exports__fmt__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "title": "Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "fmt",
+            "required": true,
+            "schema": {
+              "title": "Fmt",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Export",
+        "tags": [
+          "Backend V2 - Decisions and Research"
+        ]
+      }
+    },
+    "/api/v2/scientific/solvers": {
+      "get": {
+        "operationId": "solvers_api_v2_scientific_solvers_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Solvers",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/solvers/{solver_id}": {
+      "get": {
+        "operationId": "solver_api_v2_scientific_solvers__solver_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solver_id",
+            "required": true,
+            "schema": {
+              "title": "Solver Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Solver",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/solvers/{solver_id}/benchmark": {
+      "post": {
+        "operationId": "execute_benchmark_api_v2_scientific_solvers__solver_id__benchmark_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solver_id",
+            "required": true,
+            "schema": {
+              "title": "Solver Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/BenchmarkRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Execute Benchmark",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/solvers/{solver_id}/convergence": {
+      "post": {
+        "operationId": "execute_convergence_api_v2_scientific_solvers__solver_id__convergence_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solver_id",
+            "required": true,
+            "schema": {
+              "title": "Solver Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ConvergenceRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Execute Convergence",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/solvers/{solver_id}/validate": {
+      "post": {
+        "operationId": "validate_inputs_api_v2_scientific_solvers__solver_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "solver_id",
+            "required": true,
+            "schema": {
+              "title": "Solver Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Inputs"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Validate Inputs",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/trust": {
+      "post": {
+        "operationId": "create_trust_api_v2_scientific_trust_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TrustRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Create Trust",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/api/v2/scientific/trust/{record_id}": {
+      "get": {
+        "operationId": "get_trust_api_v2_scientific_trust__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "OAuth2PasswordBearer": []
+          }
+        ],
+        "summary": "Get Trust",
+        "tags": [
+          "Backend V2 - Scientific Trust"
+        ]
+      }
+    },
+    "/health": {
+      "get": {
+        "operationId": "health_check_health_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Health Check Health Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Health Check",
+        "tags": [
+          "health"
+        ]
+      }
+    },
+    "/version": {
+      "get": {
+        "operationId": "version_info_version_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "additionalProperties": {
+                    "type": "string"
+                  },
+                  "title": "Response Version Info Version Get",
+                  "type": "object"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Version Info",
+        "tags": [
+          "health"
+        ]
+      }
+    }
+  }
+}

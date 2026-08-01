@@ -18,6 +18,7 @@ from app.v2.router import router as v2_router
 from app.v2.scientific_router import router as scientific_v2_router
 from app.v2.execution_router import router as execution_v2_router
 from app.v2.decision_output_router import router as decision_output_v2_router
+from app.v2.account_router import router as account_v2_router
 
 logger = logging.getLogger("asre_lab")
 
@@ -52,6 +53,7 @@ app.include_router(v2_router)
 app.include_router(scientific_v2_router)
 app.include_router(execution_v2_router)
 app.include_router(decision_output_v2_router)
+app.include_router(account_v2_router)
 
 
 @app.on_event("startup")
@@ -61,10 +63,12 @@ def validate_startup_environment() -> None:
     silently broken CORS setup."""
     problems: list[str] = []
 
+    production = settings.ENV.lower() == "production"
+
     if not (settings.JWT_SECRET_KEY or settings.SUPABASE_JWT_SECRET):
         problems.append(
-            "No JWT_SECRET_KEY or SUPABASE_JWT_SECRET is configured; every "
-            "authenticated endpoint will fail with 500 on the first request."
+            "No JWT_SECRET_KEY or SUPABASE_JWT_SECRET is configured; legacy "
+            "HS256 tokens cannot be verified."
         )
     if settings.ALLOWED_ORIGINS == ["*"]:
         problems.append(
@@ -72,8 +76,31 @@ def validate_startup_environment() -> None:
             "browsers reject credentialed requests against a wildcard origin, and "
             "this is an insecure default for production. Set explicit origins."
         )
-    if settings.ENV == "production" and settings.DEBUG:
+    if production and settings.DEBUG:
         problems.append("DEBUG=True while ENV=production.")
+
+    # Production must use remote durable services.  The SQLite/filesystem and
+    # localhost-Redis defaults are deliberately useful for development and CI,
+    # but accepting them in production would make data and artifacts depend on
+    # a single application machine and leave asynchronous work undispatched.
+    if production:
+        if not settings.SUPABASE_URL:
+            problems.append("SUPABASE_URL is required in production.")
+        if not settings.SUPABASE_KEY:
+            problems.append(
+                "SUPABASE_KEY is required in production for durable PostgreSQL "
+                "persistence and private Supabase Storage."
+            )
+        if settings.CELERY_BROKER_URL == "redis://localhost:6379/0":
+            problems.append(
+                "CELERY_BROKER_URL must point to the production Redis service, "
+                "not the development localhost default."
+            )
+        if settings.CELERY_RESULT_BACKEND == "redis://localhost:6379/1":
+            problems.append(
+                "CELERY_RESULT_BACKEND must point to the production Redis service, "
+                "not the development localhost default."
+            )
 
     if not problems:
         return

@@ -1,0 +1,9 @@
+{$ASRE_APP_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy frontend:3000
+}
+
+{$ASRE_API_DOMAIN} {
+    encode zstd gzip
+    reverse_proxy api:8000
+}

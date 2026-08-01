@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "ASRE-LAB",
-  description: "ASRE-LAB engineering simulation platform"
+  title: "ASRE–Lab · Evidence-backed engineering",
+  description: "Bounded simulation, scientific validation, reproducible evidence, and human-reviewed engineering decisions."
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
