@@ -63,3 +63,7 @@ Development-only fallback variables (never configure these for production):
 The repository does not use `DATABASE_URL`, `APP_ENV`, `APP_DEBUG`,
 `CORS_ALLOWED_ORIGINS`, or `ACCESS_TOKEN_EXPIRE_MINUTES`; setting those names
 does not configure the running backend.
+
+For the supported single-VPS staging topology (Caddy, Next.js, FastAPI,
+separate Celery worker, and persistent Redis), follow
+[`VPS_STAGING_RUNBOOK.md`](VPS_STAGING_RUNBOOK.md).
