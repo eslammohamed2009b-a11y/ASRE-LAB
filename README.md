@@ -1,161 +1,142 @@
-# ASRE-LAB
+# ASRE-Lab
 
-> **Proprietary Source-Available Project**
->
-> This repository is public for technical inspection, portfolio evaluation,
-> university review, and demonstration only. It is not open-source software.
-> No permission is granted to use, copy, modify, redistribute, deploy, train
-> AI systems on, or create derivative works from this project. All rights are
-> reserved. See the [LICENSE](LICENSE) file.
+**Autonomous Smart Reverse Engineering Laboratory** — an engineering research platform that connects parametric design, bounded physics-based simulation, evidence capture, and reviewable engineering decisions.
 
-## Repository Status
+[Live Platform](https://asre-lab.vercel.app) · [Production API](https://api.23-88-125-110.sslip.io) · [Technical Documentation](docs/) · [License](LICENSE)
 
-- **Public for inspection** — the repository is intentionally public so
-  universities, reviewers, engineers, and competition judges can read the
-  code and history.
-- **Proprietary, all rights reserved** — public visibility is not an
-  open-source release; see [LICENSE](LICENSE).
-- **Active work in progress.**
-- Capability status (validated / implemented-but-unvalidated / partial /
-  unsupported / planned) is tracked honestly in the status table below and
-  in [GO_NO_GO_CHECKLIST.md](GO_NO_GO_CHECKLIST.md) — public visibility must
-  never be read as an implied claim that every listed feature is complete.
-- The frozen backend HTTP contract for downstream frontend work is documented in
-  [docs/BACKEND_API_CONTRACT.md](docs/BACKEND_API_CONTRACT.md) and enforced by
-  `backend/openapi-contract.json` plus a regression test.
+ASRE-Lab is built for the point where an engineering question becomes a reproducible study. Instead of leaving design inputs, solver settings, results, evidence, and recommendations scattered across disconnected tools, it keeps them in one traceable workflow with explicit assumptions and boundaries.
 
-## Honest capability status
+## The Problem
 
-Legend: **Validated** = executed locally/remotely with real evidence and
-passing. **Implemented, not externally validated** = code is real (no
-stubs/placeholders) but has not been exercised against live third-party
-infrastructure. **Partial** = some real functionality, known gaps.
-**Unsupported** = explicitly returns an error rather than a fabricated
-result. **Planned** = not yet built.
+Individual engineering researchers often move between parametric geometry, numerical tools, notebooks, spreadsheets, and ad-hoc reports. That makes it difficult to preserve what was simulated, why a model was considered valid, which evidence supports a conclusion, and how a later design iteration relates to earlier work.
 
-| Area | Status | Evidence |
-|---|---|---|
-| Module 1 — parametric CAD generation (real CadQuery/OCP kernel) | Validated locally | Real STEP/STL generation is covered by integration tests and real-HTTP E2E tests; files are persisted through `FileStorage`, not exposed as raw server paths. |
-| Module 1 — ownership-isolated jobs and files | Validated locally | Persisted job/status/result APIs and file downloads fail closed with 404 across users. Real-HTTP E2E evidence includes checksum/size verification and a process restart against the same SQLite database and storage root. |
-| Local backend test suite | Validated | Unit, integration, E2E, and benchmark marker suites pass in the pinned Python 3.11.15 / real-CadQuery environment. Current counts are recorded in `GO_NO_GO_CHECKLIST.md`. |
-| Remote CI (GitHub Actions) | Validated | Backend CI run `29950779579` passed on Ubuntu (install, compile, frozen OpenAPI contract, migrations/fresh schema, complete backend suite) and Windows (real CadQuery STEP/STL clean-process-exit regression). Supabase Preview was skipped and remains separate blocked evidence. |
-| Module 2 — thermal solver | Implemented, not externally validated | Real finite-difference steady-state solver (no fabricated values), executed in benchmark tests against analytical/grid-convergence checks locally. Not run against live production infrastructure. |
-| Module 2 — structural solver | Validated locally | Real 1D linear bar and Euler–Bernoulli cantilever finite-element solvers are benchmarked against analytical solutions. This is not 2D/3D arbitrary-CAD FEA. |
-| Module 2 — modal solver | Validated locally | Real SDOF frequency and 1D cantilever generalized eigenvalue calculations are benchmarked analytically. SDOF is scalar-only; beam mode shapes are persisted. |
-| Module 2 — bounded acoustic | Analytically validated locally | Real 1D frequency-domain Helmholtz duct solve with pressure amplitude/phase fields. It is not arbitrary-room or 3D acoustics. |
-| Module 2 — bounded electrostatic | Analytically validated locally | Real 2D rectangular-grid Laplace/Poisson solve with potential and electric-field components. It is not an electromagnetic-wave solver. |
-| Module 2 — bounded CFD | Analytically validated locally | Real fully developed laminar channel-flow finite-difference solve, validated against plane Poiseuille flow. It is not turbulence, external aerodynamics, arbitrary-CAD, or industrial CFD. |
-| Thermal → structural coupling | Validated locally | One-way sequential steady linear coupling maps the persisted mean 1D temperature to explicit structural thermal strain; compatible 1D models only. |
-| Reviewable Module 3 → Module 1 feedback | Validated locally | Persisted evidence-linked proposals require explicit acceptance before Module 1 generation and preserve parent/child iteration lineage. Proposed outcomes are not guarantees. |
-| Scientific field results | Validated locally | Genuine thermal, structural, and beam-modal arrays are stored as bounded compressed NPZ artifacts with checksums, reproducibility hashes, safe keys, owner-scoped metadata, and integrity-checked loading. |
-| Module 3 — deterministic engineering intelligence | Validated locally | Persisted datasets feed descriptive statistics, Pearson/Spearman association, first-order standardized linear sensitivity estimates, Pareto analysis, transparent ranking, and evidence-linked recommendations. Correlation is not causation and regression is not Sobol/global sensitivity. |
-| Integrated Module 1 → 2 → 3 pipeline | Validated locally | Uses authoritative persisted designs, unified real solver jobs/fields, and persisted deterministic analysis. Thermal and structural runs are disclosed 1D comparison scenarios, not arbitrary-CAD mesh simulation or inferred service loading. |
-| Persistence — durable ownership (SQLite local adapter) | Validated | Restart-durability and multi-instance-sharing proven with a real on-disk SQLite file (not `:memory:`), by unit tests. |
-| Persistence — Supabase (live) | **Blocked** | Ordered migrations and repository/storage adapters exist, but no live credentials are available. External tests skip explicitly and are not counted as passing. |
-| Async batch generation (Celery/Redis) | Implemented; queue transport unvalidated | Persisted jobs, progress, partial failure, cancellation, idempotency keys, per-user active-job limits, and result retrieval are tested in Celery eager mode. `docker-compose.yml` provides API + worker + Redis, but a real broker/worker run and load test remain blocked locally because Docker/Redis are unavailable. |
-| Licensing | Validated | Proprietary, source-available [LICENSE](LICENSE); public repo, all rights reserved. |
+ASRE-Lab brings those steps together without pretending that automation replaces engineering judgment.
 
-The legacy `/api/simulate/*` and `/api/analyze/full-report` compatibility paths are
-deprecated and isolated from the authoritative integrated pipeline. They must not be
-used as evidence for unified solver or deterministic-intelligence capability.
+## What I Built
 
-## 1) Initialization and GitHub repository
+The platform provides an authenticated workspace for creating supported parametric designs, choosing a bounded solver, checking inputs against declared validity rules, dispatching durable computation, and collecting the resulting evidence into decisions and reports.
 
-Run these commands locally inside ASRE-LAB:
-
-1. git init
-2. git branch -M main
-3. git add .
-4. git commit -m "chore: initialize ASRE-LAB full-stack structure"
-5. gh repo create ASRE-LAB --private --source=. --remote=origin --push
-
-If you do not use GitHub CLI:
-
-1. Create empty repo on GitHub named ASRE-LAB
-2. git remote add origin https://github.com/<username>/ASRE-LAB.git
-3. git push -u origin main
-
-## 2) Project structure
-
-- frontend: Next.js app
-- backend: FastAPI app
-- database: Supabase SQL schema
-- .github/workflows/deploy.yml: CI/CD deploy pipeline
-
-## 3) Database migrations
-
-Apply every numbered migration in `database/migrations/` in ascending order. The current
-authoritative sequence is `001` through `010`; do not stop at Migration 003. Migration 009
-adds unified solver-result provenance and owner-scoped analyses; Migration 010 adds reviewable
-design proposals and persistent iteration lineage.
-
-See `database/migrations/README.md`. The legacy `database/schema.sql` and
-`database/supabase_schema.sql` files are deprecated and must not be applied.
-
-## 4) Local queue stack
-
-`docker-compose.yml` defines the API, Celery worker, Redis broker/result
-backend, shared SQLite persistence, and shared design-file storage:
-
-```bash
-docker compose up --build
+```text
+Research question
+  → Parametric design
+  → Physics-based evaluation
+  → Evidence capture
+  → Analysis and decision support
+  → Reviewable iteration and report
 ```
 
-Provide production secrets through the environment. Celery eager-mode tests
-do not prove this separate-process stack; validate it in a Docker-capable
-environment before production use.
+Every stage is intentionally scoped to the models and data the implementation can actually support.
 
-## 5) CI/CD behavior
+## What Happens During an Experiment?
 
-Workflow file:
+1. A researcher describes a supported parametric design and stores the generated design record and private CAD artifacts.
+2. They select a runnable solver, material, geometry, and boundary conditions from the registry-backed capability set.
+3. The application evaluates declared validity rules before execution and blocks invalid configurations.
+4. A sealed execution record dispatches the simulation to a separate worker. Progress, status, results, and field artifacts are retained as owner-scoped records.
+5. The researcher reviews solver results, validity findings, benchmark and convergence inputs, then creates Scientific Trust evidence.
+6. Evidence can inform deterministic analysis and a reviewable decision. A human records the decision before a research report is generated.
 
-- .github/workflows/deploy.yml
+The workflow is designed to preserve context, not to turn a numerical result into an unreviewed engineering conclusion.
 
-On push to main:
+## Engineering Capabilities
 
-- frontend changes trigger build and deploy to Vercel
-- backend changes trigger deploy hook on Render
+ASRE-Lab ships bounded numerical models rather than a general-purpose industrial simulation suite.
 
-Zero-downtime note:
+| Family | Current implemented scope |
+| --- | --- |
+| Thermal conduction | Steady-state finite-difference conduction in bounded 1D and uniform cubic-grid scenarios. |
+| Linear structural mechanics | 1D axial-bar and Euler–Bernoulli cantilever-beam analysis. |
+| Modal analysis | SDOF mass-spring frequency and bounded 1D cantilever eigenvalue analysis. |
+| Acoustics | Straight, lossless 1D plane-wave duct analysis. |
+| Electrostatics | 2D rectangular-grid electrostatic potential and electric-field calculation. |
+| Laminar flow | Bounded plane-Poiseuille channel-flow calculation for laminar regimes. |
+| Thermal–structural workflow | Explicit one-way, sequential coupling for compatible bounded 1D cases. |
 
-- Render performs rolling deploy using health checks. Keep /health endpoint stable and pass health checks before traffic switch.
+The solver registry is the authoritative capability source. These models do **not** claim arbitrary CAD-mesh simulation, general 3D FEA/CFD, turbulence, nonlinear plasticity, industrial certification, or bidirectional general multiphysics. The [scientific trust documentation](docs/SCIENTIFIC_TRUST.md) describes the supported domains and exclusions in more detail.
 
-## 6) Required secrets in GitHub Actions
+## Design Generation and Execution
 
-Add these in GitHub repository secrets:
+Supported design requests become typed parametric records and can produce private STEP/STL artifacts through CadQuery/OCP. FastAPI owns the API boundary, validation, authorization, and persistence contracts. Redis/Valkey carries asynchronous work to a separate Celery worker, where engineering computation runs independently of the web request.
 
-- VERCEL_TOKEN
-- VERCEL_ORG_ID
-- VERCEL_PROJECT_ID
-- RENDER_DEPLOY_HOOK_URL
+This separation makes execution status, retries, cancellation, and results observable without exposing private files or server paths to the browser.
 
-## 7) Environment variables checklist
+## Engineering Intelligence, Evidence, and Scientific Trust
 
-Vercel (frontend):
+ASRE-Lab persists the context needed to inspect a result later: normalized inputs, solver identity and version, validity findings, convergence information, evidence records, artifacts, and provenance metadata. Where applicable, generated artifacts and field data are checksummed and linked to owner-scoped records.
 
-- NEXT_PUBLIC_FASTAPI_API_URL
-- NEXT_PUBLIC_SUPABASE_URL
-- NEXT_PUBLIC_SUPABASE_ANON_KEY
+The analysis layer provides deterministic descriptive statistics, associations, first-order sensitivity estimates, Pareto/trade-off views, transparent ranking, and evidence-linked recommendations. **Correlation indicates association; it does not establish physical causation.** Proposed design changes are hypotheses for review, not guaranteed improvements.
 
-Backend API and worker:
+AI may assist with supported natural-language design interpretation and evidence-grounded explanation. It is not treated as physics validation, hidden evidence, autonomous approval, or a substitute for an engineer's review. Human action is required for engineering decisions.
 
-- ENV
-- DEBUG
-- SUPABASE_URL
-- SUPABASE_KEY
-- SUPABASE_JWT_SECRET
-- ALLOWED_ORIGINS
-- JWT_SECRET_KEY
-- JWT_ALGORITHM
-- CELERY_BROKER_URL
-- CELERY_RESULT_BACKEND
-- CELERY_BROKER_VISIBILITY_TIMEOUT
-- SUPABASE_STORAGE_BUCKET
+For the underlying contracts, see [reproducible and reliable execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md), [authentication and founding-user behavior](docs/AUTH_AND_FOUNDING_USERS.md), and the [frontend integration guide](docs/FRONTEND_INTEGRATION.md).
 
-Reference template:
+## Production Architecture
 
-- .env.example
+```mermaid
+flowchart TD
+    B[Browser] --> F[Next.js frontend\nVercel]
+    F --> A[FastAPI API\nHetzner VPS]
+    A --> Q[Redis / Valkey queue]
+    Q --> W[Celery worker]
+    W --> S[Engineering solvers]
+    A --> DB[Supabase\nAuth · PostgreSQL · private Storage]
+    W --> DB
+    C[Caddy\nTLS / reverse proxy] --> A
+```
 
-See [production configuration](docs/PRODUCTION_CONFIGURATION.md) for the
-required service topology and exact production start commands. A production
-process rejects local SQLite/filesystem and default localhost-Redis fallbacks.
+- **Frontend:** Next.js on Vercel.
+- **Backend compute:** FastAPI, a separate Celery worker, persistent Redis/Valkey, and Caddy on a Hetzner VPS.
+- **Data and identity:** Supabase Auth, PostgreSQL, and private Storage.
+- **Transport security:** Caddy terminates TLS for the production API.
+- **Source control and CI:** GitHub.
+
+The current production services are available at [asre-lab.vercel.app](https://asre-lab.vercel.app) and [api.23-88-125-110.sslip.io](https://api.23-88-125-110.sslip.io). Browser-visible configuration contains only the API and Supabase public coordinates; backend service credentials remain server-side.
+
+## Reliability and Validation
+
+The repository includes unit, integration, benchmark, API-contract, migration, browser, and real-service validation. The production path has been exercised with Supabase authentication, owner isolation, private artifact access, a separate Redis/Celery worker, HTTPS, report export, and browser-based workflow checks.
+
+Validation evidence is deliberately kept closer to the code and operational documentation rather than reproduced as a large status table here. Useful starting points:
+
+- [Production configuration](docs/PRODUCTION_CONFIGURATION.md)
+- [Frontend testing](docs/FRONTEND_TESTING.md)
+- [Scientific trust](docs/SCIENTIFIC_TRUST.md)
+- [Reproducible and reliable execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md)
+
+Tracked Supabase migrations are maintained through **013** in `backend/supabase/migrations/`.
+
+## Current Scope and Limitations
+
+ASRE-Lab is intentionally precise about its boundaries:
+
+- Solvers run only within their declared geometry, material, boundary-condition, and validity envelopes.
+- It is not arbitrary industrial 3D multiphysics, arbitrary-mesh FEA/CFD, or a certification tool.
+- Some models are steady, linear, one-dimensional, or regular-grid by design; their outputs must be interpreted in that context.
+- Recommendations, rankings, and proposals remain reviewable decision support. They do not establish causality or replace engineering responsibility.
+- Reproducibility depends on retaining compatible inputs, solver versions, and physical-model assumptions; incompatible cases are reported rather than silently compared.
+
+## Repository Structure
+
+| Path | Purpose |
+| --- | --- |
+| `frontend/` | Next.js product interface, Supabase browser session handling, and Playwright coverage. |
+| `backend/` | FastAPI services, solver registry, Celery tasks, persistence adapters, tests, and Supabase migration mirror. |
+| `database/` | SQL schema and migration assets used by the project. |
+| `docs/` | Scientific scope, architecture, reliability, product integration, and operational references. |
+| `deploy/` | Caddy and VPS deployment assets; no credentials are committed. |
+| `docker-compose.vps.yml` | Single-VPS production-style topology for API, worker, Redis, frontend, and Caddy. |
+
+## Running Locally
+
+ASRE-Lab can run locally with the repository's Docker Compose configuration or with the frontend, API, worker, Redis, and a Supabase-compatible environment configured separately. Start with [production configuration](docs/PRODUCTION_CONFIGURATION.md) for required environment-variable names and service boundaries, then use the relevant frontend and backend test documentation for development workflows.
+
+Never commit credentials. The public frontend uses only `NEXT_PUBLIC_*` browser-safe settings; service-role and worker configuration belong on the backend only.
+
+## Live Project
+
+**Platform:** [https://asre-lab.vercel.app](https://asre-lab.vercel.app)
+**API:** [https://api.23-88-125-110.sslip.io](https://api.23-88-125-110.sslip.io)
+
+## License
+
+ASRE-Lab is **proprietary, source-available software**. Public visibility permits technical inspection only; it does not grant permission to use, copy, modify, redistribute, deploy, train AI systems on, or create derivative works from the project. See [LICENSE](LICENSE) for the full terms.
