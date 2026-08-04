@@ -15,6 +15,7 @@ env/
 .env
 .env.*
 !.env.example
+asre-lab-prod.vps.env.txt
 *.pem
 *.key
 

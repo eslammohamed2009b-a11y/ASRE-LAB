@@ -1,15 +1,27 @@
 # Production configuration
 
-ASRE-Lab has three independently running application processes: the Next.js
-frontend, the FastAPI API, and a Celery worker. They require a managed Redis
-service and a Supabase project that provides Auth, PostgreSQL, and the private
-`design-files` Storage bucket. Apply the ordered migrations through
-`013_accounts_and_founders.sql` before accepting user traffic.
+## Current production
+
+ASRE-Lab production uses Next.js on Vercel for the frontend and FastAPI on a
+Hetzner VPS for the API. A separate Celery worker performs asynchronous
+engineering work using persistent Redis/Valkey on the VPS. Caddy provides the
+reverse proxy and TLS for the API. Supabase provides Auth, PostgreSQL, and the
+private `design-files` Storage bucket.
+
+Apply the ordered Supabase migrations through
+`013_accounts_and_founders.sql` before accepting user traffic. Backend
+deployment to Hetzner is operational/manual; GitHub Actions validates backend
+changes but does not deploy the backend automatically.
 
 The API refuses to start with local SQLite/filesystem persistence or the
 development localhost Redis defaults when `ENV=production`.
 
-## Commands
+## Local development and staging
+
+The following commands and environment variables support local development or
+staging. They do not describe the production topology above.
+
+### Commands
 
 Run the frontend from `frontend/`:
 
@@ -64,6 +76,6 @@ The repository does not use `DATABASE_URL`, `APP_ENV`, `APP_DEBUG`,
 `CORS_ALLOWED_ORIGINS`, or `ACCESS_TOKEN_EXPIRE_MINUTES`; setting those names
 does not configure the running backend.
 
-For the supported single-VPS staging topology (Caddy, Next.js, FastAPI,
-separate Celery worker, and persistent Redis), follow
-[`VPS_STAGING_RUNBOOK.md`](VPS_STAGING_RUNBOOK.md).
+For local or staging Docker/VPS examples, follow
+[`VPS_STAGING_RUNBOOK.md`](VPS_STAGING_RUNBOOK.md); that topology is not the
+current production deployment.

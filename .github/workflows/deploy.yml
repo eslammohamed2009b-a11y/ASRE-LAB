@@ -103,15 +103,3 @@ jobs:
 
       - name: Run end-to-end tests (real live uvicorn process over real HTTP)
         run: python -m pytest -m e2e -q
-
-  deploy-backend:
-    needs: [changes, test-backend]
-    if: needs.changes.outputs.backend == 'true' || github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Trigger Render deploy hook
-        run: curl --fail --silent --show-error --request POST "${{ secrets.RENDER_DEPLOY_HOOK_URL }}"
-
-      - name: Wait for Render rolling deploy
-        run: |
-          echo "Render handles zero-downtime rolling update when health checks pass."
