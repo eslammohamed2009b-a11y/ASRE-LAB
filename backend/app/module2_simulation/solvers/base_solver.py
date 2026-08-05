@@ -177,6 +177,12 @@ class EngineeringSolver(ABC):
         """
         return []
 
+    def additional_validation_metadata(
+        self, raw_result: Any, request: SimulationCreateRequest
+    ) -> dict[str, Any]:
+        """Solver-specific benchmark/convergence evidence for this result."""
+        return {}
+
     def serialize_results(
         self,
         raw_result: Any,
@@ -223,6 +229,7 @@ class EngineeringSolver(ABC):
             "implementation_status": self.capability_metadata.implementation_status.value,
             "validation_status": self.capability_metadata.validation_status.value,
             "benchmark_references": self.capability_metadata.benchmark_references,
+            **self.additional_validation_metadata(raw_result, request),
         }
         payload.elapsed_time_seconds = time.perf_counter() - started
         payload.reproducibility_hash = hashlib.sha256(

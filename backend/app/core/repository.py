@@ -146,6 +146,7 @@ class SimulationInputRecord:
     initial_conditions: dict = field(default_factory=dict)
     boundary_conditions: dict = field(default_factory=dict)
     numerical_settings: dict = field(default_factory=dict)
+    geometry: dict = field(default_factory=dict)
     created_at: str = ""
 
 
@@ -267,6 +268,21 @@ class PersistenceRepository(ABC):
     def get_experiment(self, experiment_id: str) -> ExperimentRecord | None:
         ...
 
+    @abstractmethod
+    def list_experiments_for_user(self, user_id: str) -> list[ExperimentRecord]:
+        ...
+
+    @abstractmethod
+    def update_experiment(
+        self,
+        experiment_id: str,
+        *,
+        name: str | None = None,
+        status: str | None = None,
+        input_specification: dict | None = None,
+    ) -> None:
+        ...
+
     # -- design_models ---------------------------------------------------
     @abstractmethod
     def create_design_model(
@@ -340,6 +356,10 @@ class PersistenceRepository(ABC):
         ...
 
     @abstractmethod
+    def list_generation_jobs_for_experiment(self, experiment_id: str) -> list[GenerationJobRecord]:
+        ...
+
+    @abstractmethod
     def update_job(
         self,
         job_id: str,
@@ -410,6 +430,7 @@ class PersistenceRepository(ABC):
         initial_conditions: dict,
         boundary_conditions: dict,
         numerical_settings: dict,
+        geometry: dict | None = None,
     ) -> None:
         ...
 
@@ -508,6 +529,46 @@ class SupabaseRepository(PersistenceRepository):
             created_at=row.get("created_at", ""),
             updated_at=row.get("updated_at", ""),
         )
+
+    def list_experiments_for_user(self, user_id: str) -> list[ExperimentRecord]:
+        data = (
+            self._client.table("experiments")
+            .select("*")
+            .eq("user_id", user_id)
+            .order("updated_at", desc=True)
+            .execute()
+            .data
+        )
+        return [
+            ExperimentRecord(
+                id=row["id"],
+                user_id=row["user_id"],
+                name=row["name"],
+                status=row["status"],
+                input_specification=row.get("input_specification") or {},
+                application_version=row.get("application_version", "unknown"),
+                created_at=row.get("created_at", ""),
+                updated_at=row.get("updated_at", ""),
+            )
+            for row in (data or [])
+        ]
+
+    def update_experiment(
+        self,
+        experiment_id: str,
+        *,
+        name: str | None = None,
+        status: str | None = None,
+        input_specification: dict | None = None,
+    ) -> None:
+        payload: dict[str, Any] = {"updated_at": _ts()}
+        if name is not None:
+            payload["name"] = name
+        if status is not None:
+            payload["status"] = status
+        if input_specification is not None:
+            payload["input_specification"] = input_specification
+        self._client.table("experiments").update(payload).eq("id", experiment_id).execute()
 
     # -- design_models ---------------------------------------------------
     def create_design_model(
@@ -703,6 +764,18 @@ class SupabaseRepository(PersistenceRepository):
         )
         return len(data or [])
 
+    def list_generation_jobs_for_experiment(self, experiment_id: str) -> list[GenerationJobRecord]:
+        data = (
+            self._client.table("generation_jobs")
+            .select("*")
+            .eq("experiment_id", experiment_id)
+            .order("created_at")
+            .order("id")
+            .execute()
+            .data
+        )
+        return [self._row_to_job(row) for row in (data or [])]
+
     def list_simulation_jobs_for_experiment(self, experiment_id: str) -> list[SimulationJobRecord]:
         data = (
             self._client.table("simulation_jobs")
@@ -870,6 +943,7 @@ class SupabaseRepository(PersistenceRepository):
         initial_conditions: dict,
         boundary_conditions: dict,
         numerical_settings: dict,
+        geometry: dict | None = None,
     ) -> None:
         payload = {
             "simulation_id": simulation_id,
@@ -879,6 +953,7 @@ class SupabaseRepository(PersistenceRepository):
             "initial_conditions": initial_conditions,
             "boundary_conditions": boundary_conditions,
             "numerical_settings": numerical_settings,
+            "geometry": geometry or {},
             "created_at": _ts(),
         }
         self._client.table("simulation_inputs").insert(payload).execute()
@@ -902,6 +977,7 @@ class SupabaseRepository(PersistenceRepository):
             initial_conditions=row.get("initial_conditions") or {},
             boundary_conditions=row.get("boundary_conditions") or {},
             numerical_settings=row.get("numerical_settings") or {},
+            geometry=row.get("geometry") or {},
             created_at=row.get("created_at", ""),
         )
 
@@ -1215,10 +1291,16 @@ class LocalSQLiteRepository(PersistenceRepository):
                     initial_conditions TEXT NOT NULL DEFAULT '{}',
                     boundary_conditions TEXT NOT NULL DEFAULT '{}',
                     numerical_settings TEXT NOT NULL DEFAULT '{}',
+                    geometry TEXT NOT NULL DEFAULT '{}',
                     created_at TEXT NOT NULL
                 )
                 """
             )
+            simulation_input_columns = {
+                row[1] for row in conn.execute("PRAGMA table_info(simulation_inputs)").fetchall()
+            }
+            if "geometry" not in simulation_input_columns:
+                conn.execute("ALTER TABLE simulation_inputs ADD COLUMN geometry TEXT NOT NULL DEFAULT '{}'")
             conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS simulation_results (
@@ -1368,6 +1450,56 @@ class LocalSQLiteRepository(PersistenceRepository):
             created_at=row["created_at"],
             updated_at=row["updated_at"],
         )
+
+    def list_experiments_for_user(self, user_id: str) -> list[ExperimentRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM experiments WHERE user_id = ? ORDER BY updated_at DESC, id DESC",
+                (user_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [
+            ExperimentRecord(
+                id=row["id"],
+                user_id=row["user_id"],
+                name=row["name"],
+                status=row["status"],
+                input_specification=json.loads(row["input_specification"]),
+                application_version=row["application_version"],
+                created_at=row["created_at"],
+                updated_at=row["updated_at"],
+            )
+            for row in rows
+        ]
+
+    def update_experiment(
+        self,
+        experiment_id: str,
+        *,
+        name: str | None = None,
+        status: str | None = None,
+        input_specification: dict | None = None,
+    ) -> None:
+        fields = ["updated_at = ?"]
+        values: list[Any] = [_ts()]
+        if name is not None:
+            fields.append("name = ?")
+            values.append(name)
+        if status is not None:
+            fields.append("status = ?")
+            values.append(status)
+        if input_specification is not None:
+            fields.append("input_specification = ?")
+            values.append(json.dumps(input_specification))
+        values.append(experiment_id)
+        conn = self._connect()
+        try:
+            conn.execute(f"UPDATE experiments SET {', '.join(fields)} WHERE id = ?", values)
+            conn.commit()
+        finally:
+            conn.close()
 
     # -- design_models ---------------------------------------------------
     def create_design_model(
@@ -1579,6 +1711,17 @@ class LocalSQLiteRepository(PersistenceRepository):
             conn.close()
         return int(row["count"])
 
+    def list_generation_jobs_for_experiment(self, experiment_id: str) -> list[GenerationJobRecord]:
+        conn = self._connect()
+        try:
+            rows = conn.execute(
+                "SELECT * FROM generation_jobs WHERE experiment_id = ? ORDER BY created_at, id",
+                (experiment_id,),
+            ).fetchall()
+        finally:
+            conn.close()
+        return [self._row_to_job(row) for row in rows]
+
     def update_job(
         self,
         job_id: str,
@@ -1772,13 +1915,14 @@ class LocalSQLiteRepository(PersistenceRepository):
         initial_conditions: dict,
         boundary_conditions: dict,
         numerical_settings: dict,
+        geometry: dict | None = None,
     ) -> None:
         conn = self._connect()
         try:
             conn.execute(
                 "INSERT INTO simulation_inputs (simulation_id, material_name, material_properties, "
-                "units, initial_conditions, boundary_conditions, numerical_settings, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                "units, initial_conditions, boundary_conditions, numerical_settings, geometry, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     simulation_id,
                     material_name,
@@ -1787,6 +1931,7 @@ class LocalSQLiteRepository(PersistenceRepository):
                     json.dumps(initial_conditions),
                     json.dumps(boundary_conditions),
                     json.dumps(numerical_settings),
+                    json.dumps(geometry or {}),
                     _ts(),
                 ),
             )
@@ -1812,6 +1957,7 @@ class LocalSQLiteRepository(PersistenceRepository):
             initial_conditions=json.loads(row["initial_conditions"]),
             boundary_conditions=json.loads(row["boundary_conditions"]),
             numerical_settings=json.loads(row["numerical_settings"]),
+            geometry=json.loads(row["geometry"]) if "geometry" in row.keys() else {},
             created_at=row["created_at"],
         )
 

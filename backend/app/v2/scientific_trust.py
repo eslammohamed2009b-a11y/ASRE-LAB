@@ -25,6 +25,7 @@ class TrustCapability:
 
 
 def _thermal(x): return x["cold_c"] + (x["hot_c"] - x["cold_c"]) * x.get("position_fraction", .5)
+def _pyramid_constant_temperature(x): return x["boundary_temperature_c"]
 def _structural(x): return x["load_n"] * x["length_m"] / (x["youngs_modulus_pa"] * x["area_m2"])
 def _modal(x): return math.sqrt(x["stiffness_n_m"] / x["mass_kg"]) / (2 * math.pi)
 def _acoustic(x): return x.get("speed_m_s", 343.0) / (2 * x["length_m"])
@@ -34,6 +35,10 @@ def _coupling(x): return x["youngs_modulus_pa"] * x["alpha_1_k"] * x["delta_temp
 
 
 _COMMON_ASSUMPTIONS = {
+    "pyramid_thermal_conduction_v1": (
+        "steady state", "constant isotropic conductivity", "solid square-pyramid Cartesian mask",
+        "isothermal base and staircase sides/apex",
+    ),
     "thermal_conduction_v1": ("steady state", "constant isotropic conductivity", "bounded uniform discretization"),
     "structural_linear_1d_v1": ("small deformation", "linear elastic homogeneous material", "straight prismatic 1D member"),
     "modal_eigen_1d_v1": ("undamped free vibration", "linear system", "1D SDOF or Euler-Bernoulli beam"),
@@ -43,6 +48,14 @@ _COMMON_ASSUMPTIONS = {
 }
 
 _DEFINITIONS = [
+    TrustCapability(
+        "pyramid_thermal_conduction_v1", "Masked-grid steady heat conduction in a square pyramid",
+        _COMMON_ASSUMPTIONS["pyramid_thermal_conduction_v1"],
+        {"base_length":"m","height":"m","temperature":"degC","conductivity":"W/(m K)"},
+        {"base_length_m":(1e-3,1e3),"height_m":(1e-3,1e3),"grid_resolution":(9,41)},
+        "pyramid_constant_dirichlet", "Zero-source equal-boundary analytical constant solution",
+        "max_temperature_c", 1e-10, _pyramid_constant_temperature,
+    ),
     TrustCapability("thermal_conduction_v1","Steady heat conduction",_COMMON_ASSUMPTIONS["thermal_conduction_v1"],
         {"length":"m","temperature":"degC","conductivity":"W/(m K)"},{"length_m":(1e-6,1e3),"num_elements":(2,500)},
         "thermal_linear_1d","Analytical 1D linear temperature profile","temperature_c",1e-6,_thermal),

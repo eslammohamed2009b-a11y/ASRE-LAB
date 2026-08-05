@@ -1,22 +1,22 @@
 "use client";
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import {useEffect,useState} from "react";
+import {api} from "@/lib/api";
+
 type RecordItem={id:string;status:string;created_at:string;payload:Record<string,unknown>};
-type RecentItem={type:string;id:string;at:string};
-type Data={attempts:RecordItem[];manifests:RecordItem[];decisions:RecordItem[];reports:RecordItem[];account:{founding_user:boolean;founding_user_number:number|null;usage_access_period:string}};
-const List=({items,label}:{items:RecordItem[];label:string})=><div className="record-list">{items.length?items.map(item=><div className="record" key={item.id}><div><strong>{item.status.replaceAll("_"," ")}</strong><div className="mono">{item.id}</div></div><small>{new Date(item.created_at).toLocaleString()}</small></div>):<div className="empty">No {label.toLowerCase()} yet.</div>}</div>;
+type Study={id:string;title:string;status:string;updated_at:string;design_count:number;simulation_count:number;completed_run_count:number;failed_run_count:number;analysis_count:number;report_count:number};
+type Data={attempts:RecordItem[];decisions:RecordItem[];reports:RecordItem[];account:{founding_user:boolean;founding_user_number:number|null;usage_access_period:string}};
+
 export function Dashboard(){
-  const[data,setData]=useState<Data|null>(null),[error,setError]=useState(""),[recent,setRecent]=useState<RecentItem[]>([]);
-  useEffect(()=>{api<Data>("/api/v2/dashboard").then(setData).catch(reason=>setError(reason.message));try{setRecent(JSON.parse(localStorage.getItem("asre-recent-ids")||"[]"))}catch{setRecent([])}},[]);
-  return <div className="page"><div className="page-heading"><div><p className="eyebrow">DASHBOARD</p><h1>Engineering attention queue</h1><p className="muted">Only resources available to this authenticated account are shown.</p></div><Link className="button" href="/app/studies/new">New Engineering Study</Link></div>
+  const[data,setData]=useState<Data|null>(null),[studies,setStudies]=useState<Study[]>([]),[error,setError]=useState("");
+  useEffect(()=>{Promise.all([api<Data>("/api/v2/dashboard"),api<{items:Study[]}>("/api/studies")]).then(([dashboard,collection])=>{setData(dashboard);setStudies(collection.items)}).catch(reason=>setError(reason.message))},[]);
+  return <div className="page"><div className="page-heading"><div><p className="eyebrow">RESEARCH DASHBOARD</p><h1>Persisted studies</h1><p className="muted">Study state and counts come from the authenticated server, not this device.</p></div><Link className="button" href="/app/studies/new">New Research Study</Link></div>
   {error&&<p className="error" role="alert">{error}</p>}
-  {!data&&!error?<div className="panel">Loading account evidence…</div>:data&&<div className="dashboard-grid">
-    <section className="panel span-8"><h2>Active and recent attempts</h2><List items={data.attempts} label="attempts"/></section>
-    <section className="panel span-4"><h2>Recognition and access</h2>{data.account.founding_user?<><p><strong>Founding User — First 1,000</strong></p><p className="muted">Permanent recognition · ordinal #{data.account.founding_user_number}</p>{data.account.usage_access_period==="early_access"&&<p><strong>Early Access — Unlimited Usage</strong></p>}<p className="muted">Your badge is permanent. Unlimited usage is part of the current early-access period.</p></>:<p className="muted">Standard account access. No Founding User badge is assigned.</p>}</section>
-    <section className="panel span-4"><h2>Pending human decisions</h2><List items={data.decisions.filter(item=>item.status==="proposed")} label="pending decisions"/></section>
-    <section className="panel span-4"><h2>Recent reports</h2><List items={data.reports} label="reports"/></section>
-    <section className="panel span-4"><h2>Recently viewed on this device</h2>{recent.length?<div className="record-list">{recent.map(item=><div className="record" key={`${item.type}-${item.id}`}><span>{item.type}<span className="mono">{item.id}</span></span><small>{new Date(item.at).toLocaleString()}</small></div>)}</div>:<div className="empty">No resources opened on this device.</div>}</section>
-    <section className="panel span-12"><h2>Recent manifests</h2><List items={data.manifests} label="manifests"/></section>
+  {!data&&!error?<div className="panel">Loading server-side studiesâ€¦</div>:data&&<div className="dashboard-grid">
+    <section className="panel span-8"><h2>Your studies</h2>{studies.length?<table className="technical-table"><thead><tr><th>Study</th><th>Status</th><th>Designs</th><th>Runs</th><th>Analysis</th><th>Report</th><th>Updated</th></tr></thead><tbody>{studies.map(study=><tr key={study.id}><td><Link href={`/app/studies/${study.id}`}><strong>{study.title}</strong><br/><span className="mono">{study.id}</span></Link></td><td>{study.status}</td><td>{study.design_count}</td><td>{study.completed_run_count}/{study.simulation_count}{study.failed_run_count?` (${study.failed_run_count} failed)`:""}</td><td>{study.analysis_count}</td><td>{study.report_count}</td><td>{new Date(study.updated_at).toLocaleString()}</td></tr>)}</tbody></table>:<div className="empty">No persisted studies yet.</div>}</section>
+    <section className="panel span-4"><h2>Recognition and access</h2>{data.account.founding_user?<><p><strong>Founding User â€” First 1,000</strong></p><p className="muted">Permanent recognition Â· ordinal #{data.account.founding_user_number}</p>{data.account.usage_access_period==="early_access"&&<p><strong>Early Access â€” Unlimited Usage</strong></p>}</>:<p className="muted">Standard account access.</p>}</section>
+    <section className="panel span-4"><h2>Pending human decisions</h2><p>{data.decisions.filter(item=>item.status==="proposed").length} require review.</p></section>
+    <section className="panel span-4"><h2>Reports</h2><p>{data.reports.length} recent owner-scoped reports.</p></section>
+    <section className="panel span-4"><h2>Worker attempts</h2><p>{data.attempts.length} recent durable execution attempts.</p></section>
   </div>}</div>;
 }

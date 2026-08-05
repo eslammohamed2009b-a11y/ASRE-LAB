@@ -1,6 +1,10 @@
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import Response
+import csv
+import io
+import json
 
 from app.core.auth import get_current_user
 from app.module3_analysis.clustering import cluster_designs
@@ -119,3 +123,35 @@ def get_analysis_section(
     if value is None:
         raise HTTPException(status_code=404, detail="Analysis section not available")
     return value if isinstance(value, dict) else {section: value}
+
+
+@router.get("/{analysis_id}/export/{fmt}", summary="Export persisted analysis data")
+def export_analysis(
+    analysis_id: str, fmt: Literal["json", "csv"],
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        analysis = get_analysis_for_user(analysis_id, current_user["id"])
+    except AnalysisNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Analysis not found") from exc
+    if fmt == "json":
+        body = json.dumps(analysis.model_dump(mode="json"), sort_keys=True, indent=2).encode()
+        media_type = "application/json"
+    else:
+        dataset = analysis.result.get("dataset", {})
+        columns = dataset.get("columns", [])
+        buffer = io.StringIO()
+        writer = csv.writer(buffer)
+        writer.writerow(["design_id", "simulation_id", "solver_id", *columns])
+        for row in dataset.get("rows", []):
+            values = row.get("values", {})
+            writer.writerow([
+                row.get("design_id", ""), row.get("simulation_id", ""), row.get("solver_id", ""),
+                *[values.get(column, "") for column in columns],
+            ])
+        body = buffer.getvalue().encode()
+        media_type = "text/csv"
+    return Response(
+        content=body, media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="analysis-{analysis_id}.{fmt}"'},
+    )

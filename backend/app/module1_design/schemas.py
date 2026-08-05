@@ -3,7 +3,8 @@ Module 1 — Input Protocol
 Converts natural language into structured engineering parameters.
 """
 from enum import Enum
-from typing import Optional
+import math
+from typing import Literal, Optional
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
@@ -40,13 +41,66 @@ class DesignParameters(BaseModel):
 
     @model_validator(mode="after")
     def resolve_defaults(self) -> "DesignParameters":
-        """Internal-knowledge-base fallback for missing parameters."""
+        """Resolve a geometrically consistent, inspectable parameter set.
+
+        For a square pyramid, slope is the face angle measured from the base
+        plane, so ``tan(slope) = height / (base_length / 2)``.  Two supplied
+        dimensions determine the third.  Supplying all three is accepted only
+        when they agree within 0.5 degrees; research inputs must never carry a
+        silent geometric contradiction.
+        """
+        if self.geometry_type == GeometryType.PYRAMID:
+            supplied = self.model_fields_set
+            has_base = "base_length_m" in supplied and self.base_length_m is not None
+            has_height = "height_m" in supplied and self.height_m is not None
+            has_slope = "slope_angle_deg" in supplied and self.slope_angle_deg is not None
+
+            if has_base and has_height:
+                derived_slope = math.degrees(math.atan2(self.height_m, self.base_length_m / 2.0))
+                if has_slope and abs(self.slope_angle_deg - derived_slope) > 0.5:
+                    raise ValueError(
+                        "Inconsistent pyramid dimensions: base_length_m and height_m imply "
+                        f"slope_angle_deg={derived_slope:.3f}"
+                    )
+                self.slope_angle_deg = round(derived_slope, 6)
+            elif has_height and has_slope:
+                if self.slope_angle_deg <= 0 or self.slope_angle_deg >= 90:
+                    raise ValueError("A pyramid slope must be greater than 0 and less than 90 degrees")
+                self.base_length_m = round(
+                    2.0 * self.height_m / math.tan(math.radians(self.slope_angle_deg)), 6
+                )
+            elif has_base and has_slope:
+                if self.slope_angle_deg <= 0 or self.slope_angle_deg >= 90:
+                    raise ValueError("A pyramid slope must be greater than 0 and less than 90 degrees")
+                self.height_m = round(
+                    (self.base_length_m / 2.0) * math.tan(math.radians(self.slope_angle_deg)), 6
+                )
+            elif has_height:
+                self.slope_angle_deg = 51.8
+                self.base_length_m = round(
+                    2.0 * self.height_m / math.tan(math.radians(self.slope_angle_deg)), 6
+                )
+            elif has_base:
+                self.slope_angle_deg = 51.8
+                self.height_m = round(
+                    (self.base_length_m / 2.0) * math.tan(math.radians(self.slope_angle_deg)), 6
+                )
+            elif has_slope:
+                if self.slope_angle_deg <= 0 or self.slope_angle_deg >= 90:
+                    raise ValueError("A pyramid slope must be greater than 0 and less than 90 degrees")
+                self.base_length_m = 100.0
+                self.height_m = round(
+                    50.0 * math.tan(math.radians(self.slope_angle_deg)), 6
+                )
+            else:
+                self.base_length_m = 100.0
+                self.slope_angle_deg = 51.8
+                self.height_m = round(50.0 * math.tan(math.radians(51.8)), 6)
+            if self.material is None:
+                self.material = MaterialType.LIMESTONE
+            return self
+
         defaults_by_geometry = {
-            GeometryType.PYRAMID: {
-                "base_length_m": self.height_m * 1.27 if self.height_m else 100.0,
-                "slope_angle_deg": 51.8,
-                "material": MaterialType.LIMESTONE,
-            },
             GeometryType.BRIDGE: {
                 "base_length_m": 200.0,
                 "slope_angle_deg": 0.0,
@@ -64,6 +118,48 @@ class DesignParameters(BaseModel):
             if getattr(self, field_name) is None:
                 setattr(self, field_name, default_value)
         return self
+
+
+class SweepParameter(BaseModel):
+    field: Literal["base_length_m", "height_m", "slope_angle_deg", "wall_thickness_m"]
+    method: Literal["linear", "explicit"] = "linear"
+    minimum: float | None = Field(default=None, gt=0)
+    maximum: float | None = Field(default=None, gt=0)
+    count: int | None = Field(default=None, ge=2, le=100)
+    values: list[float] = Field(default_factory=list, min_length=0, max_length=100)
+
+    @model_validator(mode="after")
+    def validate_rule(self) -> "SweepParameter":
+        if self.method == "linear":
+            if self.minimum is None or self.maximum is None or self.count is None:
+                raise ValueError("A linear sweep requires minimum, maximum, and count")
+            if self.maximum <= self.minimum:
+                raise ValueError("A linear sweep maximum must be greater than minimum")
+        elif not self.values:
+            raise ValueError("An explicit sweep requires at least one value")
+        if any(value <= 0 for value in self.values):
+            raise ValueError("Explicit sweep values must be greater than zero")
+        return self
+
+
+class DesignSpaceRequest(BaseModel):
+    base_params: DesignParameters
+    parameters: list[SweepParameter] = Field(min_length=1, max_length=2)
+    seed: int = Field(default=0, ge=0, le=2_147_483_647)
+
+    @model_validator(mode="after")
+    def unique_parameters(self) -> "DesignSpaceRequest":
+        names = [parameter.field for parameter in self.parameters]
+        if len(names) != len(set(names)):
+            raise ValueError("Design-space parameter fields must be unique")
+        return self
+
+
+class DesignSpacePreviewResponse(BaseModel):
+    method: str
+    seed: int
+    variant_count: int
+    variants: list[dict]
 
 
 class DesignVariationRequest(BaseModel):
@@ -108,6 +204,9 @@ class BatchGenerateRequest(BaseModel):
     variation_count: int = Field(10, ge=1, le=500)
     vary_fields: list[str] = Field(default_factory=lambda: ["slope_angle_deg", "height_m"])
     variation_range_pct: float = Field(0.2, gt=0, le=1.0)
+    experiment_id: str | None = None
+    sweep_parameters: list[SweepParameter] = Field(default_factory=list, max_length=2)
+    seed: int = Field(default=0, ge=0, le=2_147_483_647)
 
     @field_validator("vary_fields")
     @classmethod
@@ -117,6 +216,13 @@ class BatchGenerateRequest(BaseModel):
         if invalid:
             raise ValueError(f"Unsupported vary_fields: {invalid}. Allowed: {sorted(allowed)}")
         return value
+
+    @model_validator(mode="after")
+    def validate_sweep_parameters(self) -> "BatchGenerateRequest":
+        names = [parameter.field for parameter in self.sweep_parameters]
+        if len(names) != len(set(names)):
+            raise ValueError("Sweep parameter fields must be unique")
+        return self
 
 
 class BatchGenerateResponse(BaseModel):

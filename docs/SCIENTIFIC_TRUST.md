@@ -6,6 +6,7 @@ multiphysics validation. Scientific confidence is deterministic and never AI-gen
 ## Supported bounded models
 
 - `thermal_conduction_v1`: steady 1D/structured-3D conduction with constant isotropic properties.
+- `pyramid_thermal_conduction_v1`: steady conduction on a structured Cartesian mask of a solid square parametric pyramid.
 - `structural_linear_1d_v1`: small-deformation linear axial bar or Euler-Bernoulli beam.
 - `modal_eigen_1d_v1`: undamped SDOF or cantilever-beam eigenmodes.
 - `acoustic_duct_1d_v1`: lossless, linear, plane-wave duct acoustics.
@@ -23,6 +24,39 @@ field, plane-Poiseuille maximum velocity, or restrained thermal stress. Toleranc
 declared in solver metadata. Coarse/medium/fine studies require decreasing medium-to-fine
 change below the declared threshold. Coupling convergence is explicitly not applicable;
 the coupling benchmark is a consistency check, not general validation.
+
+### Geometry-aware pyramid thermal model
+
+`pyramid_thermal_conduction_v1` solves
+
+```text
+k * Laplacian(T) + q = 0
+```
+
+on a solid square-pyramid domain. The base is Dirichlet at
+`prescribed_temperature_c`; the staircase-approximated sides and apex are
+Dirichlet at `ambient_temperature_c`; `heat_source_w_m3` is uniform inside the
+mask. Conductivity is homogeneous, isotropic, and constant. The anisotropic
+seven-point finite-difference stencil accounts for distinct horizontal and
+vertical cell spacing, and deterministic Gauss-Seidel iteration stops at the
+declared maximum-update tolerance.
+
+The solver accepts height/base ratios from 0.1 through 10 and odd bounding-box
+grid resolutions from 9 through 41. It persists the numerical temperature field
+and a separate finite domain mask; values outside that mask are storage fill
+values, not physical pyramid results.
+
+The per-result benchmark is the analytical zero-source/equal-Dirichlet constant
+temperature solution. Iterative convergence and its residual history are saved.
+Spatial convergence is not inferred from one run: researchers must repeat the
+same scenario at at least three odd grid resolutions and inspect the
+coarse/medium/fine metric change. Tests also verify that the estimated mask
+volume approaches the analytical pyramid volume under refinement and that a
+height change produces a genuinely different geometry-sensitive result.
+
+This model has no transient conduction, convection, radiation, contact,
+anisotropy, temperature-dependent properties, arbitrary CAD-mesh import, or
+general FEA claim.
 
 ## Confidence rules
 

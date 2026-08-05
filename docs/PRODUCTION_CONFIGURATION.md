@@ -9,7 +9,7 @@ reverse proxy and TLS for the API. Supabase provides Auth, PostgreSQL, and the
 private `design-files` Storage bucket.
 
 Apply the ordered Supabase migrations through
-`013_accounts_and_founders.sql` before accepting user traffic. Backend
+`014_simulation_geometry_inputs.sql` before accepting user traffic. Backend
 deployment to Hetzner is operational/manual; GitHub Actions validates backend
 changes but does not deploy the backend automatically.
 

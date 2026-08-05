@@ -13,6 +13,7 @@ from app.module2_simulation.schemas import (
 from app.module2_simulation.service import run_simulation_service
 from app.module2_simulation.solver_registry import UnsupportedAnalysisError
 from app.module2_simulation.tasks import run_simulation_task
+from app.core.repository import get_repository
 
 router = APIRouter(
     prefix="/api/simulate",
@@ -92,6 +93,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
 from app.module2_simulation.service import (  # noqa: E402
     SimulationNotFoundError,
     SimulationRateLimitError,
+    SimulationWorkerUnavailableError,
     cancel_simulation_service,
     create_simulation_job_service,
     get_simulation_results_service,
@@ -101,12 +103,18 @@ from app.module2_simulation.service import (  # noqa: E402
     download_field_result_service,
 )
 from app.core.storage import StorageError  # noqa: E402
+from fastapi.responses import Response  # noqa: E402
+import csv as _csv  # noqa: E402
+import io as _io  # noqa: E402
+import json as _json  # noqa: E402
+from dataclasses import asdict as _asdict  # noqa: E402
 from app.module2_simulation.simulation_advisor import recommend_from_registry  # noqa: E402
 from app.module2_simulation.solver_registry import (  # noqa: E402
     UnknownSolverError,
     UnsupportedCapabilityError,
     list_solvers,
 )
+from app.module2_simulation.solvers.base_solver import SolverValidationError  # noqa: E402
 
 simulations_router = APIRouter(
     prefix="/api/simulations",
@@ -160,12 +168,16 @@ def create_simulation(
 ) -> SimulationJobResponse:
     try:
         return create_simulation_job_service(payload, current_user["id"], idempotency_key)
-    except (UnknownSolverError, UnsupportedCapabilityError) as exc:
+    except (UnknownSolverError, UnsupportedCapabilityError, SolverValidationError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
     except (MaterialNotFoundError, MaterialPropertyNotFoundError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     except SimulationRateLimitError as exc:
         raise HTTPException(status_code=429, detail=str(exc)) from exc
+    except SimulationWorkerUnavailableError as exc:
+        raise HTTPException(status_code=503, detail=str(exc)) from exc
 
 
 @simulations_router.get(
@@ -251,3 +263,38 @@ def download_simulation_field(simulation_id: str, field_result_id: str, current_
         return download_field_result_service(simulation_id, field_result_id, current_user["id"])
     except (SimulationNotFoundError, StorageError) as exc:
         raise HTTPException(status_code=404, detail="Field result not found") from exc
+
+
+@simulations_router.get("/{simulation_id}/export/{fmt}", summary="Export persisted simulation data")
+def export_simulation_data(
+    simulation_id: str, fmt: str, current_user: dict = Depends(get_current_user),
+):
+    repo = get_repository()
+    job = repo.get_simulation_job(simulation_id)
+    if job is None or job.user_id != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Simulation not found")
+    simulation_input = repo.get_simulation_input(simulation_id)
+    result = repo.get_simulation_result(simulation_id)
+    if result is None:
+        raise HTTPException(status_code=409, detail="Simulation result is not available")
+    fields = repo.list_field_results(simulation_id)
+    if fmt == "json":
+        body = _json.dumps({
+            "job": _asdict(job), "input": _asdict(simulation_input) if simulation_input else None,
+            "result": _asdict(result), "fields": [_asdict(field) for field in fields],
+        }, sort_keys=True, indent=2).encode()
+        media_type, extension = "application/json", "json"
+    elif fmt == "csv":
+        buffer = _io.StringIO()
+        writer = _csv.writer(buffer)
+        writer.writerow(["simulation_id", "design_id", "solver_id", "metric", "value"])
+        for metric, value in sorted(result.summary_metrics.items()):
+            writer.writerow([simulation_id, job.design_id or "", result.solver_id, metric, value])
+        body = buffer.getvalue().encode()
+        media_type, extension = "text/csv", "csv"
+    else:
+        raise HTTPException(status_code=404, detail="Unsupported export format")
+    return Response(
+        content=body, media_type=media_type,
+        headers={"Content-Disposition": f'attachment; filename="simulation-{simulation_id}.{extension}"'},
+    )

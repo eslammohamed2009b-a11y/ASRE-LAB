@@ -51,6 +51,45 @@ class UnsupportedAnalysisError(Exception):
 
 # -- new unified registry (Phase C2) ------------------------------------------------
 SOLVER_REGISTRY: dict[str, CapabilityEntry] = {
+    "pyramid_thermal_conduction_v1": CapabilityEntry(
+        solver_id="pyramid_thermal_conduction_v1",
+        family=SolverFamily.THERMAL,
+        version="1.0.0",
+        implementation_status=ImplementationStatus.REAL,
+        validation_status=ValidationStatus.PARTIALLY_VALIDATED,
+        governing_equations=["Steady-state heat conduction in the masked domain: k * Laplacian(T) + q = 0"],
+        supported_dimensions=["pyramid3d"],
+        geometry_limitations=(
+            "Solid square parametric pyramid only; height/base ratio 0.1-10; odd Cartesian grids "
+            "9-41 nodes per bounding-box axis. Staircase mask, not a CAD or arbitrary finite-element mesh."
+        ),
+        supported_materials=["concrete", "steel", "aluminum", "granite", "limestone"],
+        supported_boundary_conditions=[
+            "prescribed_temperature_c (isothermal base)",
+            "ambient_temperature_c (isothermal staircase sides/apex)",
+            "heat_source_w_m3 (uniform volumetric source)",
+        ],
+        required_inputs=[
+            "material", "geometry.base_length_m", "geometry.height_m", "geometry.grid_resolution",
+            "boundary_conditions.prescribed_temperature_c", "boundary_conditions.ambient_temperature_c",
+            "boundary_conditions.heat_source_w_m3", "numerical_settings",
+        ],
+        output_metrics=[
+            "max_temperature_c", "avg_temperature_c", "min_temperature_c",
+            "max_temperature_gradient_k_m", "estimated_domain_volume_m3", "integrated_heat_source_w",
+        ],
+        known_limitations=[
+            "No transient conduction, convection, radiation, contact resistance, anisotropy, or temperature-dependent properties.",
+            "Dirichlet base and exposed-surface temperatures only.",
+            "Grid-mask volume and boundary location are resolution dependent; convergence evidence is required.",
+            "This is not arbitrary CAD-mesh FEA and must not be interpreted as one.",
+        ],
+        benchmark_references=[
+            "tests/unit/test_pyramid_thermal_solver.py::test_zero_source_equal_boundaries_matches_constant_analytical_solution",
+            "tests/unit/test_pyramid_thermal_solver.py::test_geometry_change_changes_geometry_sensitive_result",
+            "tests/unit/test_pyramid_thermal_solver.py::test_resolution_convergence_is_reported",
+        ],
+    ),
     "thermal_conduction_v1": CapabilityEntry(
         solver_id="thermal_conduction_v1",
         family=SolverFamily.THERMAL,

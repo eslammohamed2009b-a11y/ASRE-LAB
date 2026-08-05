@@ -12,6 +12,7 @@ THERMAL=REGISTRY.get("thermal_conduction_v1")
 
 def test_all_real_capabilities_and_coupling_are_registered():
     assert {x.solver_id for x in REGISTRY.list()} == {
+        "pyramid_thermal_conduction_v1",
         "thermal_conduction_v1","structural_linear_1d_v1","modal_eigen_1d_v1",
         "acoustic_duct_1d_v1","electrostatic_rectangular_2d_v1",
         "cfd_laminar_channel_2d_v1","thermal_structural_one_way_v1"}

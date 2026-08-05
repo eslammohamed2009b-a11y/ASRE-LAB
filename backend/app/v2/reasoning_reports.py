@@ -3,6 +3,8 @@ import csv,hashlib,io,json,tempfile,uuid
 from datetime import datetime,timezone
 from pathlib import Path
 from typing import Any
+from dataclasses import asdict
+from app.core.repository import get_repository
 from app.core.storage import FileStorage,build_simulation_object_key,get_storage
 from app.v2.execution import canonical_bytes,normalize
 from app.v2.repository import EvidenceRepository
@@ -69,13 +71,62 @@ def _pdf(text):
     for x in offset[1:]:out+=f"{x:010d} 00000 n \n".encode()
     out+=f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode();return bytes(out)
 class ReportService:
-    def __init__(self,repo=None,storage=None):self.repo=repo or EvidenceRepository();self.storage=storage or get_storage()
+    def __init__(self,repo=None,storage=None,core_repo=None):self.repo=repo or EvidenceRepository();self.storage=storage or get_storage();self.core_repo=core_repo or get_repository()
     def create(self,user,experiment,title,evidence_ids):
         records=_safe_evidence(self.repo,user,evidence_ids)
         if len(records)!=len(evidence_ids):raise ReasoningError("All report evidence must exist and be owner-accessible")
         existing=next((x for x in self.repo.list(user,"research_report") if x["payload"].get("evidence_ids")==evidence_ids and x["payload"].get("title")==title),None)
         if existing:return existing
         sections={"title":{"text":title,"evidence_ids":[]},"experiment":{"id":experiment,"evidence_ids":[]}}
+        experiment_record=self.core_repo.get_experiment(experiment)
+        if experiment_record is not None and experiment_record.user_id != user:
+            raise ReasoningError("Experiment is not owner-accessible")
+        if experiment_record is not None:
+            study=experiment_record.input_specification.get("study",{})
+            designs=self.core_repo.list_design_models_for_experiment(experiment)
+            simulations=self.core_repo.list_simulation_jobs_for_experiment(experiment)
+            analyses=self.core_repo.list_analyses_for_experiment(experiment)
+            alternatives=[{
+                "design_id":design.id,"variation_index":design.variation_index,
+                "geometry_family":design.geometry_family,"parameters":design.parameters,
+                "units":design.units,"generation_status":design.generation_status,
+            } for design in designs]
+            simulation_evidence=[]
+            for job in simulations:
+                input_record=self.core_repo.get_simulation_input(job.id)
+                result_record=self.core_repo.get_simulation_result(job.id)
+                result_data=asdict(result_record) if result_record else "not available"
+                if isinstance(result_data,dict):result_data.pop("field_values",None)
+                simulation_evidence.append({
+                    "simulation_id":job.id,"design_id":job.design_id,"solver_id":job.solver_id,
+                    "status":job.status,"input":asdict(input_record) if input_record else "not available",
+                    "result":result_data,
+                })
+            latest_analysis=asdict(analyses[-1]) if analyses else "not available"
+            sections.update({
+                "research_setup":{"data":{
+                    "study_title":experiment_record.name,
+                    "research_question":study.get("research_question","not available"),
+                    "hypothesis":study.get("hypothesis") or "not available",
+                    "independent_variables":study.get("independent_variables",[]),
+                    "controlled_variables":study.get("controlled_variables",[]),
+                    "output_variables":study.get("output_variables",[]),
+                    "objectives":study.get("objectives",[]),
+                },"evidence_ids":[]},
+                "design_space":{"data":{
+                    "definition":study.get("design_space") or experiment_record.input_specification.get("sweep_parameters") or "not available",
+                    "alternatives":alternatives,
+                },"evidence_ids":[item["design_id"] for item in alternatives]},
+                "simulation_evidence":{"data":simulation_evidence,"evidence_ids":[item["simulation_id"] for item in simulation_evidence]},
+                "analysis":{"data":latest_analysis,"evidence_ids":([latest_analysis["id"]] if isinstance(latest_analysis,dict) else [])},
+            })
+        else:
+            sections.update({
+                "research_setup":{"data":"not available","evidence_ids":[]},
+                "design_space":{"data":"not available","evidence_ids":[]},
+                "simulation_evidence":{"data":"not available","evidence_ids":[]},
+                "analysis":{"data":"not available","evidence_ids":[]},
+            })
         for row in records:
             p=row["payload"];kind=row["record_type"]
             if kind=="scientific_trust":sections["scientific_trust"]={"data":p,"evidence_ids":[row["id"]]}
@@ -83,7 +134,7 @@ class ReportService:
             elif kind=="engineering_decision":sections["decision_analysis"]={"data":p,"evidence_ids":[row["id"]]}
             elif kind=="reasoning_event":sections["explanation"]={"data":p["snapshot"],"evidence_ids":[row["id"]]}
             elif kind=="job_attempt" and p.get("failure"):sections["failure"]={"data":p["failure"],"evidence_ids":[row["id"]]}
-        report={"report_version":"1.0","generated_at":now(),"title":title,"experiment_id":experiment,"sections":sections,"evidence_ids":evidence_ids}
+        report={"report_version":"2.0","generated_at":now(),"title":title,"experiment_id":experiment,"sections":sections,"evidence_ids":evidence_ids}
         json_bytes=canonical_bytes(report);rows=[]
         decision=sections.get("decision_analysis",{}).get("data",{})
         for item in decision.get("ranking",[]):rows.append({"table":"ranking","design_id":item["design_id"],"rank":item["rank"],"score":item["score"]})
