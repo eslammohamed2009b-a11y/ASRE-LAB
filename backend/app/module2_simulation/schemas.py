@@ -111,6 +111,7 @@ class Geometry(BaseModel):
     length_m: float | None = Field(default=None, gt=0)
     width_m: float | None = Field(default=None, gt=0)
     height_m: float | None = Field(default=None, gt=0)
+    base_length_m: float | None = Field(default=None, gt=0)
     cross_section_area_m2: float | None = Field(default=None, gt=0)
     moment_of_inertia_m4: float | None = Field(default=None, gt=0)
     num_elements: int | None = Field(default=None, ge=1, le=500)

@@ -136,9 +136,16 @@ def run_simulation_job(
 
     persisted_status = (
         "partial_failure"
-        if repo.get_simulation_job(simulation_id).status == "partial_failure"
+        if repo.get_simulation_job(simulation_id).status == "partial_failure" or not result.convergence.converged
         else "completed"
     )
+    if not result.convergence.converged:
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="nonconverged",
+            safe_error_message="The numerical solve did not meet its declared convergence tolerance; inspect the preserved result with caution.",
+            finished_at=_now_iso(),
+        )
     repo.record_simulation_result(
         SimulationResultRecord(
             simulation_id=simulation_id,

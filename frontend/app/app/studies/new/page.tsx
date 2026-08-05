@@ -1,5 +1,5 @@
-import { StudyWorkflow } from "@/components/study-workflow";
+import { ResearchStudy } from "@/components/research-study";
 
 export default function NewStudyPage() {
-  return <StudyWorkflow />;
+  return <ResearchStudy />;
 }

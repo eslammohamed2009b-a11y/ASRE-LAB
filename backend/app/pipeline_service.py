@@ -190,6 +190,7 @@ def _persist_authoritative_simulation(
         initial_conditions={},
         boundary_conditions=boundary_conditions,
         numerical_settings={"max_iterations": 300, "tolerance": 1e-5},
+        geometry=geometry,
     )
     outcome = run_simulation_job(
         simulation_id=simulation_id,

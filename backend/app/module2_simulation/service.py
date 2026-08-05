@@ -45,15 +45,17 @@ from app.module2_simulation.schemas import (  # noqa: E402
     SimulationStatus,
 )
 from app.module2_simulation.solver_registry import require_available  # noqa: E402
-from app.module2_simulation.solvers.base_solver import EngineeringSolver  # noqa: E402
+from app.module2_simulation.solvers.base_solver import EngineeringSolver, SolverValidationError  # noqa: E402
 from app.module2_simulation.solvers.modal_solver import ModalSolver  # noqa: E402
 from app.module2_simulation.solvers.structural_solver import StructuralLinearSolver  # noqa: E402
 from app.module2_simulation.solvers.thermal_solver import ThermalConductionSolver  # noqa: E402
+from app.module2_simulation.solvers.pyramid_thermal_solver import PyramidThermalConductionSolver  # noqa: E402
 from app.module2_simulation.solvers.acoustic_solver import AcousticDuctSolver  # noqa: E402
 from app.module2_simulation.solvers.electrostatic_solver import ElectrostaticRectangularSolver  # noqa: E402
 from app.module2_simulation.solvers.channel_flow_solver import LaminarChannelFlowSolver  # noqa: E402
 
 SOLVER_CLASSES: dict[str, type[EngineeringSolver]] = {
+    "pyramid_thermal_conduction_v1": PyramidThermalConductionSolver,
     "thermal_conduction_v1": ThermalConductionSolver,
     "structural_linear_1d_v1": StructuralLinearSolver,
     "modal_eigen_1d_v1": ModalSolver,
@@ -69,6 +71,10 @@ class SimulationNotFoundError(Exception):
 
 
 class SimulationRateLimitError(Exception):
+    pass
+
+
+class SimulationWorkerUnavailableError(Exception):
     pass
 
 
@@ -118,6 +124,23 @@ def create_simulation_job_service(
     # Raises MaterialNotFoundError if unknown - fail before any job row is created.
     material_properties = properties_as_dict(request.material.name)
 
+    # Validate the entire bounded scientific configuration before persisting
+    # or dispatching work. Worker-side validation remains defense in depth.
+    SOLVER_CLASSES[request.solver_id]().validate_inputs(request)
+
+    if request.experiment_id is not None:
+        experiment = repo.get_experiment(request.experiment_id)
+        if experiment is None or experiment.user_id != user_id:
+            raise SimulationNotFoundError("Study not found")
+        if experiment.status == "archived":
+            raise SolverValidationError("Archived studies cannot accept new simulations")
+    if request.design_id is not None:
+        if request.experiment_id is None:
+            raise SolverValidationError("A design-linked simulation requires experiment_id")
+        designs = repo.list_design_models_for_experiment(request.experiment_id)
+        if not any(design.id == request.design_id and design.user_id == user_id for design in designs):
+            raise SimulationNotFoundError("Design not found")
+
     simulation_id = repo.create_simulation_job(
         user_id=user_id,
         solver_id=request.solver_id,
@@ -133,6 +156,7 @@ def create_simulation_job_service(
         initial_conditions=request.initial_conditions.model_dump(),
         boundary_conditions=request.boundary_conditions.model_dump(),
         numerical_settings=request.numerical_settings.model_dump(),
+        geometry=request.geometry.model_dump(),
     )
 
     # Local import: avoid importing Celery/the task module (and therefore
@@ -141,17 +165,26 @@ def create_simulation_job_service(
     # `app.module1_design.router`'s `generate_batch` endpoint.
     from app.module2_simulation.tasks import run_simulation_job_task
 
-    run_simulation_job_task.delay(
-        simulation_id=simulation_id,
-        solver_id=request.solver_id,
-        material_name=request.material.name,
-        geometry=request.geometry.model_dump(),
-        boundary_conditions=request.boundary_conditions.model_dump(),
-        initial_conditions=request.initial_conditions.model_dump(),
-        numerical_settings=request.numerical_settings.model_dump(),
-        experiment_id=request.experiment_id,
-        design_id=request.design_id,
-    )
+    try:
+        run_simulation_job_task.delay(
+            simulation_id=simulation_id,
+            solver_id=request.solver_id,
+            material_name=request.material.name,
+            geometry=request.geometry.model_dump(),
+            boundary_conditions=request.boundary_conditions.model_dump(),
+            initial_conditions=request.initial_conditions.model_dump(),
+            numerical_settings=request.numerical_settings.model_dump(),
+            experiment_id=request.experiment_id,
+            design_id=request.design_id,
+        )
+    except Exception as exc:
+        repo.update_simulation_job(
+            simulation_id, status="failed", progress_percent=100,
+            error_code="worker_dispatch_failed",
+            safe_error_message="The computation worker is unavailable; no result was produced.",
+            finished_at=_now_iso(),
+        )
+        raise SimulationWorkerUnavailableError("The computation worker is unavailable") from exc
 
     job = repo.get_simulation_job(simulation_id)
     return _to_job_response(job)

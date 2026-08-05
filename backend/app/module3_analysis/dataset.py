@@ -31,6 +31,7 @@ def _metric_unit(name: str) -> str:
         "_c": "degC", "_k": "K", "_pa": "Pa", "_hz": "Hz", "_m": "m",
         "_m2": "m^2", "_m3": "m^3", "_n": "N", "_kg": "kg", "_s": "s",
         "_w": "W", "_w_m2": "W/m^2", "_w_m3": "W/m^3", "_m_s": "m/s",
+        "_k_m": "K/m", "_w_mk": "W/(m*K)",
     }
     for suffix in sorted(suffixes, key=len, reverse=True):
         if name.lower().endswith(suffix):

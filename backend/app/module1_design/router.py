@@ -8,6 +8,7 @@ from fastapi import HTTPException
 from app.module1_design.nl_parser import parse_design_request
 from app.module1_design.cadquery_engine import generate_model
 from app.module1_design.multiprocessing_generator import generate_design_matrix
+from app.module1_design.design_space import build_design_space
 from app.core.config import settings
 from app.core.repository import get_repository
 from app.core.storage import build_object_key, get_storage
@@ -15,6 +16,8 @@ from app.core.auth import get_current_user
 from app.module1_design.schemas import (
     BatchGenerateRequest,
     BatchGenerateResponse,
+    DesignSpacePreviewResponse,
+    DesignSpaceRequest,
     DesignVariationRequest,
     GenerateSingleResponse,
     ParseResponse,
@@ -100,6 +103,25 @@ def parse_prompt(payload: PromptRequest):
     """Natural language -> DesignParameters (Input Protocol)."""
     params = parse_design_request(payload.prompt)
     return ParseResponse(params=params)
+
+
+@router.post(
+    "/design-space/preview",
+    response_model=DesignSpacePreviewResponse,
+    summary="Preview a deterministic resolved design space",
+)
+def preview_design_space(payload: DesignSpaceRequest) -> DesignSpacePreviewResponse:
+    try:
+        variants = build_design_space(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    method = "grid" if len(payload.parameters) == 2 else payload.parameters[0].method
+    return DesignSpacePreviewResponse(
+        method=method,
+        seed=payload.seed,
+        variant_count=len(variants),
+        variants=variants,
+    )
 
 
 @router.post(
@@ -217,16 +239,53 @@ def generate_batch(
             ),
         )
 
-    experiment_id = repo.create_experiment(
-        user_id=current_user["id"],
-        name=f"generate-batch: {payload.base_params.geometry_type}",
-        input_specification=payload.model_dump(),
-    )
+    if payload.experiment_id:
+        experiment = repo.get_experiment(payload.experiment_id)
+        if experiment is None or experiment.user_id != current_user["id"]:
+            raise HTTPException(status_code=404, detail="Study not found")
+        if experiment.status == "archived":
+            raise HTTPException(status_code=409, detail="Archived studies cannot accept new designs")
+        if repo.list_design_models_for_experiment(experiment.id):
+            raise HTTPException(
+                status_code=409,
+                detail="This study already has a persisted design space; create a new study to preserve lineage.",
+            )
+        experiment_id = experiment.id
+    else:
+        experiment_id = repo.create_experiment(
+            user_id=current_user["id"],
+            name=f"generate-batch: {payload.base_params.geometry_type}",
+            input_specification=payload.model_dump(mode="json"),
+        )
+
+    resolved_variants = None
+    requested_count = payload.variation_count
+    if payload.sweep_parameters:
+        try:
+            resolved_variants = build_design_space(DesignSpaceRequest(
+                base_params=payload.base_params,
+                parameters=payload.sweep_parameters,
+                seed=payload.seed,
+            ))
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        requested_count = len(resolved_variants)
+    if payload.experiment_id:
+        updated_specification = dict(experiment.input_specification)
+        study_metadata = dict(updated_specification.get("study") or {})
+        study_metadata["design_space"] = {
+            "seed": payload.seed,
+            "sweep_parameters": [item.model_dump(mode="json") for item in payload.sweep_parameters],
+            "variant_count": requested_count,
+            "base_params": payload.base_params.model_dump(mode="json"),
+        }
+        updated_specification["study"] = study_metadata
+        repo.update_experiment(experiment_id, status="active", input_specification=updated_specification)
     job_id = repo.create_job(
         experiment_id=experiment_id,
         user_id=current_user["id"],
         job_type="design_batch",
-        requested_count=payload.variation_count,
+        requested_count=requested_count,
         idempotency_key=idempotency_key,
     )
 
@@ -235,15 +294,24 @@ def generate_batch(
     # this router's other, synchronous endpoints.
     from app.module1_design.tasks import generate_batch_task
 
-    generate_batch_task.delay(
-        job_id=job_id,
-        experiment_id=experiment_id,
-        user_id=current_user["id"],
-        base_params=payload.base_params.model_dump(),
-        variation_count=payload.variation_count,
-        vary_fields=payload.vary_fields,
-        variation_range_pct=payload.variation_range_pct,
-    )
+    try:
+        generate_batch_task.delay(
+            job_id=job_id,
+            experiment_id=experiment_id,
+            user_id=current_user["id"],
+            base_params=payload.base_params.model_dump(),
+            variation_count=requested_count,
+            vary_fields=payload.vary_fields,
+            variation_range_pct=payload.variation_range_pct,
+            resolved_variants=resolved_variants,
+        )
+    except Exception as exc:
+        repo.update_job(
+            job_id, status="failed", progress_percent=100,
+            error_code="worker_dispatch_failed",
+            safe_error_message="The design worker is unavailable; no variant was generated.",
+        )
+        raise HTTPException(status_code=503, detail="The design worker is unavailable") from exc
 
     return BatchGenerateResponse(job_id=job_id, experiment_id=experiment_id, status="queued")
 
@@ -274,6 +342,23 @@ def export_stl(design_id: str, current_user: dict = Depends(get_current_user)):
 
     return storage.create_download_response(
         record.object_key, download_filename=f"{design_id}.stl", media_type="model/stl"
+    )
+
+
+@router.get("/files/{file_id}/download", summary="Download an owner-scoped CAD artifact")
+def download_design_file(file_id: str, current_user: dict = Depends(get_current_user)):
+    if not _is_valid_design_id(file_id):
+        raise HTTPException(status_code=404, detail="Design artifact not found")
+    record = get_repository().get_design_file(file_id)
+    if record is None or record.owner_id != current_user["id"]:
+        raise HTTPException(status_code=404, detail="Design artifact not found")
+    storage = get_storage()
+    if not storage.file_exists(record.object_key):
+        raise HTTPException(status_code=404, detail="Design artifact not found")
+    return storage.create_download_response(
+        record.object_key,
+        download_filename=f"{record.design_model_id or file_id}.{record.file_format}",
+        media_type=record.media_type,
     )
 
 

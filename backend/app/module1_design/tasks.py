@@ -92,7 +92,10 @@ def persist_generated_design(
         user_id=user_id,
         geometry_family=params.geometry_type.value,
         parameters=result["params"],
-        units={"length": "m", "angle": "deg"},
+        units={
+            "base_length_m": "m", "height_m": "m", "wall_thickness_m": "m",
+            "slope_angle_deg": "deg",
+        },
         variation_index=variation_index,
         generation_status="completed",
         cadquery_version=getattr(cadquery, "__version__", "unknown"),
@@ -138,6 +141,7 @@ def run_batch_generation(
     variation_count: int,
     vary_fields: list[str],
     variation_range_pct: float,
+    resolved_variants: list[dict[str, Any]] | None = None,
     checkpoint_delay_seconds: float = 0,
 ) -> dict[str, Any]:
     """The real, synchronous batch-generation loop. Safe to call directly
@@ -200,7 +204,11 @@ def run_batch_generation(
             cancelled = True
             break
 
-        variant_params = _build_variation_params(base_params, vary_fields, variation_range_pct)
+        variant_params = (
+            DesignParameters(**resolved_variants[idx]["parameters"])
+            if resolved_variants is not None
+            else _build_variation_params(base_params, vary_fields, variation_range_pct)
+        )
         try:
             _generate_one_variant(
                 repo=repo,
@@ -262,6 +270,7 @@ def generate_batch_task(
     variation_count: int,
     vary_fields: list[str],
     variation_range_pct: float,
+    resolved_variants: list[dict[str, Any]] | None = None,
     checkpoint_delay_seconds: float = 0,
 ) -> dict[str, Any]:
     try:
@@ -274,6 +283,7 @@ def generate_batch_task(
             variation_count=variation_count,
             vary_fields=vary_fields,
             variation_range_pct=variation_range_pct,
+            resolved_variants=resolved_variants,
             checkpoint_delay_seconds=checkpoint_delay_seconds,
         )
     except Exception as exc:

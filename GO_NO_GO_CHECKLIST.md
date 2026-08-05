@@ -1,7 +1,7 @@
 # ASRE-LAB Backend Go/No-Go Checklist
 
-Current consolidated status for the Big Batch 2 draft branch. Historical snapshots were
-removed because they described superseded code and produced contradictory capability claims.
+Current consolidated status for the research-readiness release candidate. Historical snapshots
+were removed because they described superseded code and produced contradictory capability claims.
 
 ## Release gate
 
@@ -15,7 +15,7 @@ Redis/Celery, CI, or production validation.
 - [x] Parametric CadQuery generation with STEP/STL storage contracts.
 - [x] Durable experiments, designs, jobs, simulation inputs/results, field metadata, and analyses.
 - [x] SQLite and Supabase repository adapters use the shared `PersistenceRepository` contract.
-- [x] Real bounded thermal, structural, and modal methods documented in
+- [x] Real bounded thermal, geometry-aware pyramid thermal, structural, and modal methods documented in
   `docs/SCIENTIFIC_CAPABILITY_GAPS.md`.
 - [x] Genuine solver fields use bounded NPZ artifacts, integrity checks, safe keys, and
   owner-scoped retrieval.
@@ -31,8 +31,8 @@ Redis/Celery, CI, or production validation.
   mapping evidence, provenance, and partial-failure state.
 - [x] Reviewable improvement proposals require explicit acceptance before Module 1 execution and
   persist proposal state plus parent/child iteration lineage.
-- [x] Backend OpenAPI contract frozen at version 1.0.0 with a deterministic snapshot and
-  regression test; all 40 paths, authentication, legacy deprecation, and core response types audited.
+- [x] Backend OpenAPI contract frozen at version 3.0.0 with a deterministic snapshot and
+  regression test; all 93 paths, authentication, legacy deprecation, and core response types audited.
 
 ## Scientific scope gates
 
@@ -51,22 +51,25 @@ Redis/Celery, CI, or production validation.
 ## Validation required before merge or deployment
 
 - [ ] Review all Draft PR changes and obtain explicit merge approval.
-- [ ] Apply Migrations 001–010 to a disposable/staging Supabase project.
+- [ ] Apply migrations 001 through 014 to a disposable/staging Supabase project.
 - [ ] Run live Supabase repository, storage, RLS, field-result, and analysis round trips.
 - [ ] Validate Redis with separate Celery workers, including restart, retry, cancellation,
   concurrency, partial failure, and load behavior.
-- [x] Obtain a successful remote CI run of the required backend suites. GitHub Actions run
-  `29950779579`: Ubuntu authoritative suite and Windows CadQuery clean-exit job passed.
+- [ ] Obtain a successful remote CI run for this release candidate. Prior main evidence only:
+  GitHub Actions run `29950779579` passed the Ubuntu authoritative suite and Windows CadQuery job.
 - [ ] Run final production-like Module 1 → Module 2 → Module 3 end-to-end validation.
 - [x] Reconcile local validation evidence with README and scientific capability documentation.
 
-## Current local validation evidence (2026-07-22)
+## Current local validation evidence (2026-08-05)
 
-- Combined unit/integration/E2E/benchmark selection: **108 passed, 14 deselected**; real process
-  exit code 0.
-- Complete backend suite: **118 passed, 4 skipped**; real process exit code 0.
-- The four external Supabase tests skipped because live credentials are unavailable; these are
-  blocked evidence, never passing evidence.
+- Backend unit suite: **135 passed**; real process exit code 0.
+- Backend integration marker suite: **58 passed** with real CadQuery/OCP; real process exit code 0.
+- Focused comparative-study suite: **3 passed**, including five real geometry-aware runs,
+  JSON/CSV exports, and safe pre-write validation failures.
+- Backend contract + E2E suites: **8 passed**; real process exit code 0.
+- Frontend Vitest suite: **6 passed**; TypeScript and production Next.js build passed.
+- External Supabase execution remains blocked because live test credentials are unavailable in
+  this workspace; it is not passing evidence.
 - The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4
   dependency set's NLopt and CasADi imports. The pinned CadQuery 2.8/OCP 7.9 dependency set plus
   the Windows DLL bootstrap exits cleanly after STEP/STL generation. A subprocess regression test
@@ -75,7 +78,7 @@ Redis/Celery, CI, or production validation.
 
 ## Test commands
 
-From `backend/` in the pinned Python 3.11 environment:
+From `backend/` in the pinned Python 3.12 environment:
 
 ```text
 python -m pytest tests/unit/test_pipeline_persistence.py \

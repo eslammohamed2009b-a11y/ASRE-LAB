@@ -44,7 +44,7 @@ ASRE-Lab ships bounded numerical models rather than a general-purpose industrial
 
 | Family | Current implemented scope |
 | --- | --- |
-| Thermal conduction | Steady-state finite-difference conduction in bounded 1D and uniform cubic-grid scenarios. |
+| Thermal conduction | Steady-state finite-difference conduction in bounded 1D and uniform cubic-grid scenarios, plus a separate masked-grid solid square-pyramid model. |
 | Linear structural mechanics | 1D axial-bar and Euler–Bernoulli cantilever-beam analysis. |
 | Modal analysis | SDOF mass-spring frequency and bounded 1D cantilever eigenvalue analysis. |
 | Acoustics | Straight, lossless 1D plane-wave duct analysis. |
@@ -103,7 +103,7 @@ Validation evidence is deliberately kept closer to the code and operational docu
 - [Scientific trust](docs/SCIENTIFIC_TRUST.md)
 - [Reproducible and reliable execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md)
 
-Tracked Supabase migrations are maintained through **013** in `backend/supabase/migrations/`.
+Tracked Supabase migrations are maintained through **014** in `backend/supabase/migrations/`.
 
 ## Current Scope and Limitations
 
@@ -112,6 +112,7 @@ ASRE-Lab is intentionally precise about its boundaries:
 - Solvers run only within their declared geometry, material, boundary-condition, and validity envelopes.
 - It is not arbitrary industrial 3D multiphysics, arbitrary-mesh FEA/CFD, or a certification tool.
 - Some models are steady, linear, one-dimensional, or regular-grid by design; their outputs must be interpreted in that context.
+- `pyramid_thermal_conduction_v1` uses a resolution-dependent Cartesian staircase mask of a parametric square pyramid. It is geometry-sensitive, but it does not consume CAD meshes and is not general 3D FEA.
 - Recommendations, rankings, and proposals remain reviewable decision support. They do not establish causality or replace engineering responsibility.
 - Reproducibility depends on retaining compatible inputs, solver versions, and physical-model assumptions; incompatible cases are reported rather than silently compared.
 
