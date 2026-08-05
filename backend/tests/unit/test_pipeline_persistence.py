@@ -210,6 +210,33 @@ def test_pipeline_never_uses_stale_columns_or_simulation_metrics():
     assert "synthesize_report" not in source
 
 
+def test_supabase_simulation_creation_provisions_a_direct_user_profile():
+    client = _RecordingClient()
+    repo = SupabaseRepository(client)
+
+    simulation_id = repo.create_simulation_job("owner-a", "thermal_conduction_v1")
+
+    assert simulation_id == "job-1"
+    assert client.rpc_calls == [
+        ("provision_asre_account", {"requested_user_id": "owner-a", "requested_email": None})
+    ]
+    assert len(client.inserts) == 1
+    table, payload = client.inserts[0]
+    assert table == "simulation_jobs"
+    assert payload | {"created_at": None, "updated_at": None} == {
+        "user_id": "owner-a",
+        "solver_id": "thermal_conduction_v1",
+        "experiment_id": None,
+        "design_id": None,
+        "status": "queued",
+        "progress_percent": 0,
+        "idempotency_key": None,
+        "created_at": None,
+        "updated_at": None,
+    }
+    assert payload["created_at"] and payload["updated_at"]
+
+
 def test_pipeline_rejects_unsupported_family_without_empirical_fallback(monkeypatch, tmp_path):
     db_path = tmp_path / "pipeline.sqlite3"
     _configure_pipeline(monkeypatch, db_path)
