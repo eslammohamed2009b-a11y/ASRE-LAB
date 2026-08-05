@@ -72,8 +72,13 @@ class LaminarChannelFlowSolver(EngineeringSolver):
         pressure = np.repeat((model["gradient"] * x)[None,:], y.size, axis=0)
         # Fully developed u(y), v=0 gives discrete divergence exactly zero.
         mass_residual = float(np.max(np.abs(np.gradient(u, x, axis=1)+np.gradient(v, y, axis=0))))
+        # ``trapezoid`` was added after the lower NumPy versions supported by
+        # this project.  ``trapz`` is numerically equivalent for this fixed
+        # coordinate integration and remains available across the supported
+        # NumPy range.
+        mean_velocity = float(np.trapz(profile, y) / request.geometry.height_m)
         return {"x":x,"y":y,"u":u,"v":v,"pressure":pressure,"momentum_residual":momentum_residual,
-                "mass_residual":mass_residual,"reynolds":model["reynolds"],"mean_velocity":float(np.trapezoid(profile,y)/request.geometry.height_m)}
+                "mass_residual":mass_residual,"reynolds":model["reynolds"],"mean_velocity":mean_velocity}
 
     def calculate_residual(self, raw_result):
         return max(raw_result["momentum_residual"], raw_result["mass_residual"])
