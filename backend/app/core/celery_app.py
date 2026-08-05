@@ -26,6 +26,9 @@ celery_app.conf.update(
     result_expires=3600,
     task_always_eager=settings.CELERY_TASK_ALWAYS_EAGER,
     task_eager_propagates=settings.CELERY_TASK_ALWAYS_EAGER,
+    # This durable batch lives at app level rather than a package tasks.py,
+    # so it must be explicitly imported by every worker process.
+    imports=("app.comparative_tasks",),
 )
 
 celery_app.autodiscover_tasks(["app.module1_design", "app.module2_simulation", "app"])
