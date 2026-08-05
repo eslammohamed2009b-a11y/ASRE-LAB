@@ -500,6 +500,14 @@ class SupabaseRepository(PersistenceRepository):
     ) -> str:
         from app.core.config import settings
 
+        # Every experiment references profiles(id).  Browser navigation normally
+        # provisions this through /api/v2/account/me, but creation endpoints
+        # must also be safe for a newly authenticated user who arrives directly.
+        # The database function is owner/service-role scoped and idempotent.
+        self._client.rpc(
+            "provision_asre_account",
+            {"requested_user_id": user_id, "requested_email": None},
+        ).execute()
         payload = {
             "user_id": user_id,
             "name": name,

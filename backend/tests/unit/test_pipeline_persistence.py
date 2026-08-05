@@ -177,10 +177,15 @@ class _RecordingClient:
     def __init__(self):
         self.tables = []
         self.inserts = []
+        self.rpc_calls = []
 
     def table(self, name):
         self.tables.append(name)
         return _Query(self, name)
+
+    def rpc(self, name, parameters):
+        self.rpc_calls.append((name, parameters))
+        return type("Request", (), {"execute": lambda _self: type("Response", (), {"data": []})()})()
 
 
 def test_pipeline_never_uses_stale_columns_or_simulation_metrics():
@@ -191,6 +196,9 @@ def test_pipeline_never_uses_stale_columns_or_simulation_metrics():
     )
 
     experiment_payload = client.inserts[0][1]
+    assert client.rpc_calls == [
+        ("provision_asre_account", {"requested_user_id": "owner-a", "requested_email": None})
+    ]
     assert set(experiment_payload) >= {"user_id", "name", "input_specification"}
     assert not {"owner_id", "title", "description"} & set(experiment_payload)
     assert "simulation_metrics" not in client.tables
