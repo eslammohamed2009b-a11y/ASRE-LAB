@@ -19,6 +19,7 @@ jobs:
     outputs:
       frontend: ${{ steps.filter.outputs.frontend }}
       backend: ${{ steps.filter.outputs.backend }}
+      vercel_cli_configured: ${{ steps.vercel_cli.outputs.configured }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -35,9 +36,24 @@ jobs:
               - 'backend/**'
               - '.github/workflows/deploy.yml'
 
+      - name: Detect Vercel CLI credentials
+        id: vercel_cli
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          if [ -n "$VERCEL_TOKEN" ] && [ -n "$VERCEL_ORG_ID" ] && [ -n "$VERCEL_PROJECT_ID" ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          fi
+
   deploy-frontend:
     needs: changes
-    if: needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch'
+    if: >-
+      (needs.changes.outputs.frontend == 'true' || github.event_name == 'workflow_dispatch') &&
+      needs.changes.outputs.vercel_cli_configured == 'true'
     runs-on: ubuntu-latest
     defaults:
       run:
