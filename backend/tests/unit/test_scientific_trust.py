@@ -46,14 +46,18 @@ def test_valid_warning_and_invalid_envelopes():
  ("thermal_structural_one_way_v1",{"youngs_modulus_pa":200,"alpha_1_k":.01,"delta_temperature_k":5},10),
 ])
 def test_benchmark_formula_correctness(solver_id,inputs,expected):
-    result=benchmark(REGISTRY.get(solver_id),inputs)
+    result=benchmark(REGISTRY.get(solver_id),inputs,expected,"benchmark-run")
     assert result["reference_result"]==pytest.approx(expected)
     assert result["passed"]
 
 def test_benchmark_pass_and_failure():
     inputs={"cold_c":0,"hot_c":100}
-    assert benchmark(THERMAL,inputs,50)["passed"]
-    assert not benchmark(THERMAL,inputs,60)["passed"]
+    assert benchmark(THERMAL,inputs,50,"benchmark-run")["passed"]
+    assert not benchmark(THERMAL,inputs,60,"benchmark-run")["passed"]
+
+def test_benchmark_cannot_synthetically_pass_without_computation():
+    with pytest.raises(ValueError, match="actual computed result"):
+        benchmark(THERMAL, {"cold_c": 0, "hot_c": 100})
 
 def test_convergence_and_nonconvergence():
     good=convergence(THERMAL,[10,10.1,10.11],threshold=.02)
@@ -98,7 +102,7 @@ def test_api_serialization_and_user_b_denial(tmp_path,monkeypatch):
     assert response.status_code==200 and response.json()["physical_model"]=="Steady heat conduction"
     created=client.post("/api/v2/scientific/trust",json={
         "solver_id":"thermal_conduction_v1","inputs":{"length_m":1,"num_elements":20},
-        "benchmark_inputs":{"cold_c":0,"hot_c":100},"computed_result":50,
+        "benchmark_inputs":{"cold_c":0,"hot_c":100},"computed_result":50,"source_simulation_id":"benchmark-run",
         "convergence_values":[10,10.1,10.11]}).json()
     assert created["payload"]["confidence"]["level"]=="high"
     record_id=created["id"]

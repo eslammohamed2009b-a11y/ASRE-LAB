@@ -1,6 +1,6 @@
 {
   "contract_version": "3.0.0-research-studies",
-  "openapi_sha256": "7b00e5256ca6cc1122dfaf19dfd1d9eadae2d902641ae4b1fc24f572a18ecd8e",
+  "openapi_sha256": "377d009082c96e297fa879760d6fea89f9e6a3df2cdcccb3cfe3104b3d76f975",
   "path_count": 94,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],

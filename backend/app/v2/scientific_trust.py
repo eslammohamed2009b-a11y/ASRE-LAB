@@ -150,15 +150,28 @@ def validate(item: TrustCapability, inputs: dict[str, Any]) -> dict[str, Any]:
     return {"status":status,"rules":findings,"normalized_inputs":inputs}
 
 
-def benchmark(item: TrustCapability, inputs: dict[str,float], computed: float|None=None) -> dict[str,Any]:
-    reference=float(item.benchmark_formula(inputs)); actual=reference if computed is None else float(computed)
+def benchmark(item: TrustCapability, inputs: dict[str,float], computed: float|None=None,
+              source_simulation_id: str | None = None) -> dict[str,Any]:
+    if computed is None:
+        raise ValueError("Benchmark evaluation requires an actual computed result; use reference_only for reference calculations.")
+    if not source_simulation_id:
+        raise ValueError("Benchmark evidence requires source_simulation_id from a real computation.")
+    reference=float(item.benchmark_formula(inputs)); actual=float(computed)
     absolute=abs(actual-reference); relative=absolute/max(abs(reference),1e-15)
     return {"benchmark_id":item.benchmark_id,"solver_id":item.solver_id,"title":item.benchmark_title,
         "reference_type":"documented analytical formula","physical_assumptions":list(item.assumptions),
         "reference_inputs":inputs,"reference_result":reference,"computed_result":actual,
         "selected_metric":item.benchmark_metric,"absolute_error":absolute,"relative_error":relative,
         "declared_tolerance":item.benchmark_tolerance,"passed":relative<=item.benchmark_tolerance,
-        "limitations":["Valid only for the stated bounded analytical case."],"evidence_links":["solver_metadata"]}
+        "source_simulation_id":source_simulation_id,"created_from_real_computation":True,
+        "limitations":["Valid only for the stated bounded analytical case."],"evidence_links":["solver_metadata",source_simulation_id]}
+
+
+def reference_only(item: TrustCapability, inputs: dict[str, float]) -> dict[str, Any]:
+    """Return a reference value without making a scientific validation claim."""
+    return {"benchmark_id": item.benchmark_id, "solver_id": item.solver_id,
+            "reference_result": float(item.benchmark_formula(inputs)), "reference_inputs": inputs,
+            "status": "reference_only", "passed": None, "created_from_real_computation": False}
 
 
 def convergence(item: TrustCapability, values: list[float], configurations: list[dict]|None=None, threshold=.02):
