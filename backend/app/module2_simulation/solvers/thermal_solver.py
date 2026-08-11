@@ -33,7 +33,7 @@ def _solve_steady_state_heat(
     conductivity_w_mk: float,
     max_iterations: int,
     tolerance: float,
-) -> np.ndarray:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Solves k * Laplacian(T) + q = 0 on a cubic domain with Dirichlet
     boundary conditions T=ambient on all faces.
@@ -46,7 +46,10 @@ def _solve_steady_state_heat(
     # T(i,j,k) = (sum(neighbors) + q*dx^2/k) / 6
     source_term = (heat_source_w_m3 * dx * dx) / max(conductivity_w_mk, 1e-9)
 
-    for _ in range(max_iterations):
+    final_max_delta = float("inf")
+    iterations = 0
+    converged = False
+    for iteration in range(1, max_iterations + 1):
         max_delta = 0.0
         for i in range(1, grid_n - 1):
             for j in range(1, grid_n - 1):
@@ -63,11 +66,17 @@ def _solve_steady_state_heat(
                     ) / 6.0
                     T[i, j, k] = new
                     max_delta = max(max_delta, abs(new - old))
-
+        iterations = iteration
+        final_max_delta = max_delta
         if max_delta < tolerance:
+            converged = True
             break
-
-    return T
+    return T, {
+        "iterations": iterations,
+        "final_max_delta": final_max_delta,
+        "tolerance": tolerance,
+        "converged": converged,
+    }
 
 
 def _sample_field_to_mesh_nodes(field: np.ndarray, mesh: Mesh) -> np.ndarray:
@@ -92,7 +101,7 @@ class ThermalSolver(BaseSolver):
         tolerance = float(boundary_conditions.get("tolerance", 1e-5))
 
         conductivity = THERMAL_CONDUCTIVITY_W_MK.get(material.lower(), 1.7)
-        field_grid = _solve_steady_state_heat(
+        field_grid, _ = _solve_steady_state_heat(
             grid_n=grid_n,
             ambient_temp_c=ambient_temp,
             heat_source_w_m3=heat_source,
@@ -270,7 +279,7 @@ class ThermalConductionSolver(EngineeringSolver):
             }
 
         grid_n = geometry.grid_resolution or 20
-        field_grid = _solve_steady_state_heat(
+        field_grid, convergence = _solve_steady_state_heat(
             grid_n=grid_n,
             ambient_temp_c=bc.ambient_temperature_c,
             heat_source_w_m3=bc.heat_source_w_m3 or 0.0,
@@ -282,9 +291,12 @@ class ThermalConductionSolver(EngineeringSolver):
             "dim": "3d",
             "field": field_grid,
             "conductivity_w_mk": k,
-            "residual": None,
-            "iterations": numerical.max_iterations,
-            "tolerance": numerical.tolerance,
+            # This is an iteration update norm, not an algebraic residual.
+            "residual": convergence["final_max_delta"],
+            "iterations": convergence["iterations"],
+            "tolerance": convergence["tolerance"],
+            "converged": convergence["converged"],
+            "convergence_metric": "maximum_iteration_update",
         }
 
     def calculate_residual(self, raw_result: dict[str, Any]) -> float | None:
@@ -292,7 +304,7 @@ class ThermalConductionSolver(EngineeringSolver):
 
     def check_convergence(self, raw_result: dict[str, Any]) -> ConvergenceStatus:
         return ConvergenceStatus(
-            converged=True,
+            converged=raw_result.get("converged", True),
             iterations=raw_result["iterations"],
             residual=raw_result["residual"],
             tolerance=raw_result["tolerance"],
@@ -310,6 +322,17 @@ class ThermalConductionSolver(EngineeringSolver):
         hotspot_count = min(5, len(flat_field))
         hotspot_node_ids = np.argsort(flat_field)[-hotspot_count:].tolist() if hotspot_count else []
         return summary_metrics, flat_field.tolist(), hotspot_node_ids
+
+    def additional_validation_metadata(self, raw_result: dict[str, Any], request) -> dict[str, Any]:
+        if raw_result["dim"] != "3d":
+            return {"convergence_metric": "algebraic_residual", "direct_solve": True}
+        return {
+            "convergence_metric": "maximum_iteration_update",
+            "final_max_delta": raw_result["residual"],
+            "iterations": raw_result["iterations"],
+            "requested_tolerance": raw_result["tolerance"],
+            "criterion_satisfied": raw_result["converged"],
+        }
 
     def extract_field_outputs(self, raw_result, request):
         field = np.asarray(raw_result["field"], dtype=float)
