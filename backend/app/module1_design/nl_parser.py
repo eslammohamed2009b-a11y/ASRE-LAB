@@ -7,6 +7,7 @@ import anthropic
 
 from app.core.config import settings
 from app.module1_design.schemas import DesignParameters, GeometryType
+from app.module1_design.capability_registry import require_executable_geometry
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY) if settings.ANTHROPIC_API_KEY else None
 
@@ -81,6 +82,11 @@ def parse_design_request(natural_language_prompt: str) -> DesignParameters:
         geometry = GeometryType.DOME
     elif "arch" in lower_prompt:
         geometry = GeometryType.ARCH
+
+    # An LLM can extract parameters, but it is never an implementation
+    # authority.  Reject recognised-but-unbuildable geometries before it can
+    # make them appear executable.
+    require_executable_geometry(geometry.value)
 
     explicit = _semantic_overrides(natural_language_prompt)
     if client is not None:

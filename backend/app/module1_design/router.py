@@ -6,6 +6,7 @@ from fastapi import APIRouter, Depends, Header
 from fastapi import HTTPException
 
 from app.module1_design.nl_parser import parse_design_request
+from app.module1_design.capability_registry import UnsupportedRecognizedGeometryError
 from app.module1_design.cadquery_engine import generate_model
 from app.module1_design.multiprocessing_generator import generate_design_matrix
 from app.module1_design.design_space import build_design_space
@@ -101,7 +102,10 @@ def _cleanup_generated_files(result: dict) -> None:
 )
 def parse_prompt(payload: PromptRequest):
     """Natural language -> DesignParameters (Input Protocol)."""
-    params = parse_design_request(payload.prompt)
+    try:
+        params = parse_design_request(payload.prompt)
+    except UnsupportedRecognizedGeometryError as exc:
+        raise HTTPException(status_code=422, detail={"code": "UNDERSTOOD_BUT_UNSUPPORTED", "message": str(exc)}) from exc
     return ParseResponse(params=params)
 
 
@@ -131,7 +135,10 @@ def preview_design_space(payload: DesignSpaceRequest) -> DesignSpacePreviewRespo
     description="Parses the prompt and exports STL/STEP files for one design, durably stored via FileStorage.",
 )
 def generate_single(payload: PromptRequest, current_user: dict = Depends(get_current_user)):
-    params = parse_design_request(payload.prompt)
+    try:
+        params = parse_design_request(payload.prompt)
+    except UnsupportedRecognizedGeometryError as exc:
+        raise HTTPException(status_code=422, detail={"code": "UNDERSTOOD_BUT_UNSUPPORTED", "message": str(exc)}) from exc
     try:
         result = generate_model(params)
     except Exception as exc:

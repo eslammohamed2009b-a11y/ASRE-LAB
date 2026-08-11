@@ -20,6 +20,8 @@ from app.v2.execution_router import router as execution_v2_router
 from app.v2.decision_output_router import router as decision_output_v2_router
 from app.v2.account_router import router as account_v2_router
 from app.study_router import router as study_router
+from app.capabilities_router import router as capabilities_router
+from app.capability_validation import validate_capability_consistency
 
 logger = logging.getLogger("asre_lab")
 
@@ -56,6 +58,7 @@ app.include_router(execution_v2_router)
 app.include_router(decision_output_v2_router)
 app.include_router(account_v2_router)
 app.include_router(study_router)
+app.include_router(capabilities_router)
 
 
 @app.on_event("startup")
@@ -63,6 +66,7 @@ def validate_startup_environment() -> None:
     """Fail fast (production) or warn loudly (development) about configuration
     problems that would otherwise surface later as confusing 401/500s or a
     silently broken CORS setup."""
+    validate_capability_consistency()
     problems: list[str] = []
 
     production = settings.ENV.lower() == "production"

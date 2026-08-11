@@ -35,8 +35,11 @@ router = APIRouter(
 @router.post(
     "/full-report",
     response_model=FullReportResponse,
-    summary="Generate analytical full report",
-    description="Runs clustering, correlation, and synthesis over simulation output data.",
+    summary="Legacy non-authoritative analytical full report",
+    description=("Legacy compatibility endpoint for clustering/correlation/optional LLM synthesis. "
+                 "It is not the authoritative deterministic research-analysis workflow; use "
+                 "POST /api/analyze/experiments/{experiment_id} instead."),
+    deprecated=True,
 )
 def full_report(payload: FullReportRequest) -> FullReportResponse:
     """

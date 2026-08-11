@@ -20,20 +20,10 @@ from app.module2_simulation.schemas import (
     ValidationStatus,
 )
 
-# -- legacy registry (unchanged) ------------------------------------------------
-# Used only by the legacy `/api/simulate/*` compatibility router and its service. This is a
-# narrower, older concept ("is this analysis_type backed by a real solver at
-# all") than the new `SOLVER_REGISTRY` below and is kept exactly as before so
-# compatibility surface; the authoritative pipeline uses `SOLVER_REGISTRY` and `EngineeringSolver`.
-SOLVER_VALIDATION_STATUS: dict[str, str] = {
-    "thermal": "validated_prototype",
-    "structural": "unsupported",
-    "wind_load": "unsupported",
-}
-
-
-def is_supported(analysis_type: str) -> bool:
-    return SOLVER_VALIDATION_STATUS.get(analysis_type) == "validated_prototype"
+# Compatibility aliases are deliberately derived after SOLVER_REGISTRY is
+# declared below.  They retain the old endpoint vocabulary but cannot act as a
+# second scientific authority.
+LEGACY_ANALYSIS_SOLVER_IDS = {"thermal": "thermal_conduction_v1"}
 
 
 class UnsupportedAnalysisError(Exception):
@@ -275,6 +265,23 @@ SOLVER_REGISTRY: dict[str, CapabilityEntry] = {
         benchmark_references=[],
     ),
 }
+
+# Deprecated compatibility view.  This is computed from SOLVER_REGISTRY rather
+# than maintained by hand.  Do not use it for new code.
+SOLVER_VALIDATION_STATUS: dict[str, str] = {
+    analysis_type: (
+        "validated_prototype" if SOLVER_REGISTRY[solver_id].implementation_status == ImplementationStatus.REAL
+        else "unsupported"
+    )
+    for analysis_type, solver_id in LEGACY_ANALYSIS_SOLVER_IDS.items()
+}
+SOLVER_VALIDATION_STATUS.update({"structural": "unsupported", "wind_load": "unsupported"})
+
+
+def is_supported(analysis_type: str) -> bool:
+    """Deprecated legacy query, derived from the authoritative registry."""
+    solver_id = LEGACY_ANALYSIS_SOLVER_IDS.get(analysis_type)
+    return bool(solver_id and SOLVER_REGISTRY[solver_id].implementation_status == ImplementationStatus.REAL)
 
 
 class UnknownSolverError(Exception):

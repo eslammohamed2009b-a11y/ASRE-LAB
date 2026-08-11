@@ -11,6 +11,7 @@ import tempfile
 import cadquery as cq
 
 from app.module1_design.schemas import DesignParameters, GeometryType
+from app.module1_design.capability_registry import require_executable_geometry
 
 EXPORT_DIR = Path(tempfile.gettempdir()) / "asre_lab_exports"
 EXPORT_DIR.mkdir(parents=True, exist_ok=True)
@@ -57,6 +58,7 @@ def generate_model(params: DesignParameters) -> dict:
     Returns metadata (id + file paths) rather than the raw geometry,
     since geometry is streamed to the frontend as STL for Three.js.
     """
+    require_executable_geometry(params.geometry_type.value)
     builder = GEOMETRY_BUILDERS.get(params.geometry_type)
     if builder is None:
         raise ValueError(f"No parametric builder for {params.geometry_type}")
