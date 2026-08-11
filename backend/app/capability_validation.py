@@ -65,11 +65,8 @@ def capability_consistency_errors() -> list[str]:
             solver = SOLVER_REGISTRY[trust.solver_id]
             if not trust.benchmark_id or not trust.benchmark_title:
                 errors.append(f"scientific trust benchmark is incomplete: {trust.solver_id}")
-            if trust.benchmark_id not in " ".join(solver.benchmark_references):
-                # Test identifiers do not have to equal trust benchmark IDs, but
-                # a trust benchmark requires declared solver benchmark evidence.
-                if not solver.benchmark_references:
-                    errors.append(f"scientific trust benchmark lacks solver association: {trust.solver_id}")
+            if trust.solver_benchmark_reference not in solver.benchmark_references:
+                errors.append(f"scientific trust benchmark lacks exact solver association: {trust.solver_id}")
     seen: set[str] = set()
     for method_id, item in ANALYSIS_CAPABILITY_REGISTRY.items():
         if method_id in seen or item.get("method_id") != method_id:

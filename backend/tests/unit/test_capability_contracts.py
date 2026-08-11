@@ -72,6 +72,18 @@ def test_sensitivity_contract_matches_implementation_rule():
     )
 
 
+def test_execution_mode_metadata_matches_bounded_solver_implementations():
+    cfd = SOLVER_REGISTRY["cfd_laminar_channel_2d_v1"]
+    acoustic = SOLVER_REGISTRY["acoustic_duct_1d_v1"]
+    thermal = SOLVER_REGISTRY["thermal_conduction_v1"]
+    assert "finite-difference" in cfd.numerical_method.lower()
+    assert "numpy.linalg.solve" in cfd.numerical_method
+    assert "finite-difference" in acoustic.numerical_method.lower()
+    assert "complex direct numpy.linalg.solve" in acoustic.numerical_method
+    assert "1D: finite-difference assembled linear system with direct numpy.linalg.solve" in thermal.numerical_method
+    assert "3D: Gauss-Seidel-style iterative" in thermal.numerical_method
+
+
 def test_validator_detects_missing_solver_contract_field(monkeypatch):
     monkeypatch.setattr(SOLVER_REGISTRY["thermal_conduction_v1"], "numerical_method", "not_available")
     assert any("numerical_method" in error for error in capability_consistency_errors())

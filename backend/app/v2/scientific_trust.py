@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Callable
 
 from app.module2_simulation.solver_registry import SOLVER_REGISTRY
@@ -22,6 +22,7 @@ class TrustCapability:
     benchmark_tolerance: float
     benchmark_formula: Callable[[dict[str, float]], float]
     convergence_applicable: bool = True
+    solver_benchmark_reference: str = ""
 
 
 def _thermal(x): return x["cold_c"] + (x["hot_c"] - x["cold_c"]) * x.get("position_fraction", .5)
@@ -80,11 +81,26 @@ _DEFINITIONS = [
         "coupling_restrained_expansion","Analytical restrained thermal stress","thermal_stress_pa",1e-8,_coupling,False),
 ]
 
+# Exact, machine-verifiable association to the solver registry evidence.  The
+# trust benchmark remains its own bounded analytical check; this field links it
+# to the specific declared implementation benchmark without fuzzy matching.
+_SOLVER_BENCHMARK_ASSOCIATIONS = {
+    "pyramid_thermal_conduction_v1": "tests/unit/test_pyramid_thermal_solver.py::test_zero_source_equal_boundaries_matches_constant_analytical_solution",
+    "thermal_conduction_v1": "tests/integration/test_thermal_solver_v2_benchmark.py::test_1d_slab_matches_linear_analytical_profile (1d Dirichlet-Dirichlet analytical linear profile)",
+    "structural_linear_1d_v1": "tests/integration/test_structural_solver_benchmark.py::test_axial_bar_matches_analytical_solution",
+    "modal_eigen_1d_v1": "tests/integration/test_modal_solver_benchmark.py::test_sdof_matches_analytical_frequency",
+    "acoustic_duct_1d_v1": "tests/integration/test_acoustic_solver.py (analytical sine-profile benchmark)",
+    "electrostatic_rectangular_2d_v1": "tests/integration/test_electrostatic_solver.py (parallel-plate linear-potential benchmark)",
+    "cfd_laminar_channel_2d_v1": "tests/integration/test_channel_flow_solver.py (analytical plane-Poiseuille profile and refinement)",
+}
+
 
 class TrustRegistry:
     def __init__(self):
         self._items: dict[str, TrustCapability] = {}
-        for item in _DEFINITIONS: self.register(item)
+        for item in _DEFINITIONS:
+            reference = _SOLVER_BENCHMARK_ASSOCIATIONS.get(item.solver_id, "")
+            self.register(replace(item, solver_benchmark_reference=reference))
     def register(self, item: TrustCapability):
         if item.solver_id in self._items: raise ValueError(f"Duplicate scientific capability: {item.solver_id}")
         self._items[item.solver_id] = item

@@ -7,6 +7,7 @@ from app.v2.repository import EvidenceRepository
 from app.v2.scientific_trust import (
     REGISTRY, TrustCapability, TrustRegistry, benchmark, confidence, convergence, validate,
 )
+from app.module2_simulation.solver_registry import SOLVER_REGISTRY
 
 THERMAL=REGISTRY.get("thermal_conduction_v1")
 
@@ -16,6 +17,11 @@ def test_all_real_capabilities_and_coupling_are_registered():
         "thermal_conduction_v1","structural_linear_1d_v1","modal_eigen_1d_v1",
         "acoustic_duct_1d_v1","electrostatic_rectangular_2d_v1",
         "cfd_laminar_channel_2d_v1","thermal_structural_one_way_v1"}
+
+def test_trust_benchmarks_have_exact_solver_registry_associations():
+    for item in REGISTRY.list():
+        if item.solver_id in SOLVER_REGISTRY:
+            assert item.solver_benchmark_reference in SOLVER_REGISTRY[item.solver_id].benchmark_references
 
 def test_duplicate_registration_is_rejected():
     registry=TrustRegistry()
