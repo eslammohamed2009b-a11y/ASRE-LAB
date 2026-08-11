@@ -32,9 +32,9 @@ DESIGN_CAPABILITY_REGISTRY: dict[str, dict[str, Any]] = {
         "geometry_id": "tower", "display_name": "Hollow square tower",
         "implementation_status": "supported", "cad_backend": "CadQuery/OCP", "generator_version": "1.0.0",
         "supported_parameters": ["base_length_m", "height_m", "wall_thickness_m", "material"],
-        "required_parameters": [], "derived_parameters": [],
+        "required_parameters": ["height_m"], "derived_parameters": ["base_length_m", "wall_thickness_m", "material"],
         "supported_operations": ["generate", "export_step", "export_stl"], "units": "SI metres",
-        "known_constraints": ["wall thickness must be less than half the base length"],
+        "known_constraints": ["height_m is required", "wall thickness must be less than half the base length"],
         "known_limitations": ["Straight prismatic square section only."], "produces_step": True, "produces_stl": True,
         "implementation_reference": "app.module1_design.cadquery_engine.build_tower",
     },
@@ -61,6 +61,13 @@ class UnsupportedRecognizedGeometryError(ValueError):
     def __init__(self, geometry_id: str):
         super().__init__(f"Geometry '{geometry_id}' is understood but unsupported: no CAD generator is available.")
         self.geometry_id = geometry_id
+
+
+class GeometryClassificationError(ValueError):
+    """A deterministic, client-safe refusal from language interpretation."""
+    def __init__(self, code: str, message: str):
+        super().__init__(message)
+        self.code = code
 
 
 def require_executable_geometry(geometry_id: str) -> dict[str, Any]:

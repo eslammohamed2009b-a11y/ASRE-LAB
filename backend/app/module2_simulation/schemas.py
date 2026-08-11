@@ -251,14 +251,22 @@ class CapabilityEntry(BaseModel):
     implementation_status: ImplementationStatus
     validation_status: ValidationStatus
     governing_equations: list[str]
+    numerical_method: str = "not_available"
+    discretization: str = "not_available"
     supported_dimensions: list[str]
+    supported_geometry: list[str] = Field(default_factory=list)
     geometry_limitations: str
+    consumes_cad_geometry: bool = False
+    geometry_dependency_description: str = "not_available"
     supported_materials: list[str]
     supported_boundary_conditions: list[str]
     required_inputs: list[str]
     output_metrics: list[str]
+    validity_envelope: dict[str, str] = Field(default_factory=dict)
     known_limitations: list[str]
     benchmark_references: list[str]
+    convergence_requirements: str = "not_available"
+    implementation_reference: str = "not_available"
 
 
 class CapabilitiesResponse(BaseModel):

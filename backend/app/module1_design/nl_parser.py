@@ -7,7 +7,11 @@ import anthropic
 
 from app.core.config import settings
 from app.module1_design.schemas import DesignParameters, GeometryType
-from app.module1_design.capability_registry import require_executable_geometry
+from app.module1_design.capability_registry import (
+    GeometryClassificationError,
+    UnsupportedRecognizedGeometryError,
+    require_executable_geometry,
+)
 
 client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY) if settings.ANTHROPIC_API_KEY else None
 
@@ -73,20 +77,28 @@ def parse_design_request(natural_language_prompt: str) -> DesignParameters:
     own validator (the "internal knowledge base").
     """
     lower_prompt = natural_language_prompt.lower()
-    geometry = GeometryType.PYRAMID
-    if "bridge" in lower_prompt:
-        geometry = GeometryType.BRIDGE
-    elif "tower" in lower_prompt:
-        geometry = GeometryType.TOWER
-    elif "dome" in lower_prompt:
-        geometry = GeometryType.DOME
-    elif "arch" in lower_prompt:
-        geometry = GeometryType.ARCH
+    mentioned = [geometry for word, geometry in {
+        "pyramid": GeometryType.PYRAMID, "bridge": GeometryType.BRIDGE,
+        "tower": GeometryType.TOWER, "dome": GeometryType.DOME, "arch": GeometryType.ARCH,
+    }.items() if re.search(rf"\b{word}\b", lower_prompt)]
+    if len(mentioned) > 1:
+        raise GeometryClassificationError("AMBIGUOUS", "Multiple geometry families were requested; choose one supported geometry.")
+    if not mentioned:
+        # These are explicit geometry requests we understand are outside the
+        # registry.  Other prose with no shape is ambiguous rather than made
+        # into a default pyramid.
+        if re.search(r"\b(sphere|cube|cylinder|cone|torus)\b", lower_prompt):
+            raise GeometryClassificationError("INVALID", "The requested geometry is not supported by the design capability registry.")
+        raise GeometryClassificationError("AMBIGUOUS", "No identifiable geometry family was provided.")
+    geometry = mentioned[0]
 
     # An LLM can extract parameters, but it is never an implementation
     # authority.  Reject recognised-but-unbuildable geometries before it can
     # make them appear executable.
-    require_executable_geometry(geometry.value)
+    try:
+        require_executable_geometry(geometry.value)
+    except UnsupportedRecognizedGeometryError as exc:
+        raise GeometryClassificationError("UNDERSTOOD_BUT_UNSUPPORTED", str(exc)) from exc
 
     explicit = _semantic_overrides(natural_language_prompt)
     if client is not None:

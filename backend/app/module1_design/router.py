@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Header
 from fastapi import HTTPException
 
 from app.module1_design.nl_parser import parse_design_request
-from app.module1_design.capability_registry import UnsupportedRecognizedGeometryError
+from app.module1_design.capability_registry import GeometryClassificationError
 from app.module1_design.cadquery_engine import generate_model
 from app.module1_design.multiprocessing_generator import generate_design_matrix
 from app.module1_design.design_space import build_design_space
@@ -104,8 +104,8 @@ def parse_prompt(payload: PromptRequest):
     """Natural language -> DesignParameters (Input Protocol)."""
     try:
         params = parse_design_request(payload.prompt)
-    except UnsupportedRecognizedGeometryError as exc:
-        raise HTTPException(status_code=422, detail={"code": "UNDERSTOOD_BUT_UNSUPPORTED", "message": str(exc)}) from exc
+    except GeometryClassificationError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
     return ParseResponse(params=params)
 
 
@@ -137,8 +137,8 @@ def preview_design_space(payload: DesignSpaceRequest) -> DesignSpacePreviewRespo
 def generate_single(payload: PromptRequest, current_user: dict = Depends(get_current_user)):
     try:
         params = parse_design_request(payload.prompt)
-    except UnsupportedRecognizedGeometryError as exc:
-        raise HTTPException(status_code=422, detail={"code": "UNDERSTOOD_BUT_UNSUPPORTED", "message": str(exc)}) from exc
+    except GeometryClassificationError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
     try:
         result = generate_model(params)
     except Exception as exc:
