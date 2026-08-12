@@ -100,12 +100,15 @@ def test_api_serialization_and_user_b_denial(tmp_path,monkeypatch):
     client=TestClient(app)
     response=client.get("/api/v2/scientific/solvers/thermal_conduction_v1")
     assert response.status_code==200 and response.json()["physical_model"]=="Steady heat conduction"
-    created=client.post("/api/v2/scientific/trust",json={
+    rejected=client.post("/api/v2/scientific/trust",json={
         "solver_id":"thermal_conduction_v1","inputs":{"length_m":1,"num_elements":20},
         "benchmark_inputs":{"cold_c":0,"hot_c":100},"computed_result":50,"source_simulation_id":"benchmark-run",
-        "convergence_values":[10,10.1,10.11]}).json()
-    assert created["payload"]["confidence"]["level"]=="high"
-    record_id=created["id"]
+            "convergence_values":[10,10.1,10.11]})
+    assert rejected.status_code == 404
+    record_id=EvidenceRepository(str(tmp_path/"api.db")).create("user-a", {
+        "record_type":"scientific_trust","status":"valid","experiment_id":None,"simulation_id":None,
+        "parent_record_id":None,"payload":{"confidence":{"level":"low"}}
+    })["id"]
     app.dependency_overrides[get_current_user]=lambda:{"id":"user-b"}
     assert client.get(f"/api/v2/scientific/trust/{record_id}").status_code==404
     app.dependency_overrides.clear()

@@ -2,6 +2,8 @@ import hashlib,json,sqlite3,uuid
 from datetime import datetime,timezone
 from app.core.persistence import persistence_service
 from app.core.repository import default_local_db_path
+from app.v2.evidence_models import EVIDENCE_MODELS, EvidenceType
+from app.module2_simulation.source_resolution import SimulationSourceError, resolve_simulation_source
 
 def canonical(value): return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=True)
 
@@ -29,6 +31,37 @@ class EvidenceRepository:
                 old=db.execute("select id from engineering_evidence_records where user_id=? and record_type=? and payload_checksum=?",
                     (user_id,row["record_type"],digest)).fetchone(); return self.get(old[0],user_id)
         return row
+
+    def create_scientific_evidence(self, user_id, payload: dict):
+        """Validate typed evidence and owner-scoped provenance before reuse of
+        the existing versioned evidence table."""
+        try:
+            evidence_type=EvidenceType(payload.get("evidence_type"))
+            model=EVIDENCE_MODELS[evidence_type].model_validate(payload)
+        except Exception as exc:
+            raise ValueError("Invalid authoritative scientific evidence payload") from exc
+        if model.schema_version != "2.0":
+            raise ValueError("Unsupported scientific evidence schema version")
+        if model.simulation_id:
+            try: source=resolve_simulation_source(model.simulation_id,user_id)
+            except SimulationSourceError as exc: raise ValueError("Evidence simulation source is unavailable") from exc
+            if model.solver_id and model.solver_id != source.solver_id:
+                raise ValueError("Evidence solver_id contradicts simulation source")
+            if model.solver_version and model.solver_version != source.solver_version:
+                raise ValueError("Evidence solver_version contradicts simulation source")
+            if model.experiment_id and model.experiment_id != source.experiment_id:
+                raise ValueError("Evidence experiment_id contradicts simulation source")
+        for source_id in model.source_ids:
+            if self.get(source_id,user_id) is None:
+                raise ValueError("Evidence source_ids must resolve to same-owner evidence")
+        return self.create(user_id,{
+            "record_type":f"scientific_{evidence_type.value}","status":model.status,
+            "experiment_id":model.experiment_id,"simulation_id":model.simulation_id,
+            "parent_record_id":None,"payload":model.model_dump(mode="json"),
+        })
+
+    def list_scientific_for_simulation(self, user_id, simulation_id):
+        return [row for row in self.list(user_id) if row["simulation_id"] == simulation_id and row["record_type"].startswith("scientific_")]
     def get(self,record_id,user_id):
         if self.client:
             data=self.client.table("engineering_evidence_records").select("*").eq("id",record_id).eq("user_id",user_id).execute().data

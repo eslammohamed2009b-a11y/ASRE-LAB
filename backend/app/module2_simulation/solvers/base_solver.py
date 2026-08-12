@@ -35,6 +35,7 @@ from app.module2_simulation.schemas import (
     SimulationCreateRequest,
     SimulationResultPayload,
 )
+from app.module2_simulation.provenance import input_fingerprint, result_hash
 
 
 class Mesh(BaseModel):
@@ -231,10 +232,24 @@ class EngineeringSolver(ABC):
             "benchmark_references": self.capability_metadata.benchmark_references,
             **self.additional_validation_metadata(raw_result, request),
         }
+        material_snapshot = {
+            name: value for name, value in material_properties.items()
+            if isinstance(value, (int, float, str, bool, type(None)))
+        }
+        fingerprint = input_fingerprint(
+            solver_id=payload.solver_id, solver_version=payload.solver_version,
+            request=request.model_dump(mode="json"), material_snapshot=material_snapshot,
+            design_id=request.design_id, application_version="unknown",
+        )
+        payload.validation_metadata["input_fingerprint"] = fingerprint
+        payload.validation_metadata["material_properties_used"] = material_snapshot
+        payload.reproducibility_hash = result_hash(
+            solver_id=payload.solver_id, solver_version=payload.solver_version,
+            input_fingerprint_value=fingerprint, converged=convergence.converged,
+            iteration_count=convergence.iterations, metric=convergence.residual,
+            summary_metrics=payload.summary_metrics, validation_metadata=payload.validation_metadata,
+        )
         payload.elapsed_time_seconds = time.perf_counter() - started
-        payload.reproducibility_hash = hashlib.sha256(
-            json.dumps(evidence, sort_keys=True, separators=(",", ":")).encode()
-        ).hexdigest()
         return payload, self.extract_field_outputs(raw_result, request)
 
     def run(self, request: SimulationCreateRequest) -> SimulationResultPayload:
