@@ -4,7 +4,11 @@ from pydantic import BaseModel,Field
 from app.core.auth import get_current_user
 from app.v2.repository import EvidenceRepository
 from app.core.repository import get_repository
-from app.module2_simulation.source_resolution import SimulationSourceError,resolve_simulation_source
+from app.module2_simulation.source_resolution import (
+    SimulationSourceError,
+    SimulationSourceNotFoundError,
+    resolve_simulation_source,
+)
 from app.v2.scientific_trust import REGISTRY,benchmark,confidence,convergence,metadata,reference_only,validate
 
 router=APIRouter(prefix="/api/v2/scientific",tags=["Backend V2 - Scientific Trust"])
@@ -22,12 +26,19 @@ def _item(solver_id):
     try:return REGISTRY.get(solver_id)
     except KeyError:raise HTTPException(404,"Scientific solver capability not found")
 def _authoritative_benchmark(item, source_simulation_id, user_id, client_value=None):
-    try: source=resolve_simulation_source(source_simulation_id,user_id)
-    except SimulationSourceError: raise HTTPException(404,"Source simulation not found")
+    try:
+        source=resolve_simulation_source(
+            source_simulation_id,
+            user_id,
+            require_completed_result=True,
+            required_summary_metric=item.benchmark_metric,
+        )
+    except SimulationSourceNotFoundError:
+        raise HTTPException(404,"Source simulation not found")
+    except SimulationSourceError as exc:
+        raise HTTPException(422,str(exc))
     if source.solver_id != item.solver_id: raise HTTPException(422,"Source simulation solver does not match benchmark solver")
-    if source.job_status != "completed" or source.result.status != "completed": raise HTTPException(422,"Source simulation is not completed")
     result=source.result
-    if item.benchmark_metric not in result.summary_metrics: raise HTTPException(422,f"Source result does not contain benchmark metric '{item.benchmark_metric}'")
     computed=float(result.summary_metrics[item.benchmark_metric])
     if client_value is not None and float(client_value) != computed: raise HTTPException(422,"Client computed_result does not match persisted scientific result")
     return computed

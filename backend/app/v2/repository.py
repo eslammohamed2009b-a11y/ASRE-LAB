@@ -2,12 +2,32 @@ import hashlib,json,sqlite3,uuid
 from datetime import datetime,timezone
 from app.core.persistence import persistence_service
 from app.core.repository import default_local_db_path
-from app.v2.evidence_models import EVIDENCE_MODELS, EvidenceType
+from app.v2.evidence_models import (
+    EVIDENCE_MODELS,
+    BenchmarkEvidence,
+    EvidenceType,
+    RefinementConvergenceEvidence,
+)
 from app.module2_simulation.source_resolution import SimulationSourceError, resolve_simulation_source
 
 def canonical(value): return json.dumps(value,sort_keys=True,separators=(",",":"),ensure_ascii=True)
 
 class EvidenceRepository:
+    _COMPUTED_EVIDENCE_TYPES = {
+        EvidenceType.NUMERICAL_RESULT,
+        EvidenceType.FIELD_RESULT,
+        EvidenceType.RUN_CONVERGENCE,
+        EvidenceType.ANALYSIS,
+    }
+    _DEFINED_DEPENDENCIES = {
+        EvidenceType.BENCHMARK: {EvidenceType.NUMERICAL_RESULT},
+        EvidenceType.FIELD_RESULT: {EvidenceType.NUMERICAL_RESULT},
+        EvidenceType.REFINEMENT_CONVERGENCE: {
+            EvidenceType.NUMERICAL_RESULT,
+            EvidenceType.RUN_CONVERGENCE,
+        },
+    }
+
     def __init__(self,path=None):
         self.client=persistence_service.client if persistence_service.enabled and path is None else None
         self.path=path or default_local_db_path()
@@ -42,23 +62,110 @@ class EvidenceRepository:
             raise ValueError("Invalid authoritative scientific evidence payload") from exc
         if model.schema_version != "2.0":
             raise ValueError("Unsupported scientific evidence schema version")
+
+        resolved_sources = []
         if model.simulation_id:
-            try: source=resolve_simulation_source(model.simulation_id,user_id)
-            except SimulationSourceError as exc: raise ValueError("Evidence simulation source is unavailable") from exc
-            if model.solver_id and model.solver_id != source.solver_id:
-                raise ValueError("Evidence solver_id contradicts simulation source")
-            if model.solver_version and model.solver_version != source.solver_version:
-                raise ValueError("Evidence solver_version contradicts simulation source")
-            if model.experiment_id and model.experiment_id != source.experiment_id:
-                raise ValueError("Evidence experiment_id contradicts simulation source")
+            source = self._resolve_and_validate_simulation(
+                model,
+                model.simulation_id,
+                user_id,
+                require_completed=evidence_type in self._COMPUTED_EVIDENCE_TYPES,
+            )
+            resolved_sources.append(source)
+
+        if isinstance(model, BenchmarkEvidence):
+            source = self._resolve_and_validate_simulation(
+                model,
+                model.source_simulation_id,
+                user_id,
+                require_completed=True,
+                required_metric=model.metric_name,
+            )
+            resolved_sources.append(source)
+
+        if isinstance(model, RefinementConvergenceEvidence):
+            for level in model.levels:
+                source = self._resolve_and_validate_simulation(
+                    model,
+                    level.simulation_id,
+                    user_id,
+                    require_completed=True,
+                    required_metric=model.selected_metric,
+                )
+                resolved_sources.append(source)
+
+        experiments = {source.experiment_id for source in resolved_sources if source.experiment_id}
+        designs = {source.design_id for source in resolved_sources if source.design_id}
+        if len(experiments) > 1:
+            raise ValueError("Evidence simulation references span contradictory experiments")
+        if len(designs) > 1:
+            raise ValueError("Evidence simulation references span contradictory designs")
+
         for source_id in model.source_ids:
-            if self.get(source_id,user_id) is None:
-                raise ValueError("Evidence source_ids must resolve to same-owner evidence")
+            self._validate_evidence_dependency(model, evidence_type, source_id, user_id)
         return self.create(user_id,{
-            "record_type":f"scientific_{evidence_type.value}","status":model.status,
+            "record_type":f"scientific_{evidence_type.value}","status":model.status.value,
             "experiment_id":model.experiment_id,"simulation_id":model.simulation_id,
             "parent_record_id":None,"payload":model.model_dump(mode="json"),
         })
+
+    @staticmethod
+    def _resolve_and_validate_simulation(
+        model,
+        simulation_id: str,
+        user_id: str,
+        *,
+        require_completed: bool,
+        required_metric: str | None = None,
+    ):
+        try:
+            source = resolve_simulation_source(
+                simulation_id,
+                user_id,
+                require_result=require_completed or required_metric is not None,
+                require_completed_result=require_completed,
+                required_summary_metric=required_metric,
+            )
+        except SimulationSourceError as exc:
+            raise ValueError("Evidence simulation source is unavailable") from exc
+        if model.solver_id and model.solver_id != source.solver_id:
+            raise ValueError("Evidence solver_id contradicts simulation source")
+        if model.solver_version and source.solver_version and model.solver_version != source.solver_version:
+            raise ValueError("Evidence solver_version contradicts simulation source")
+        if model.experiment_id and model.experiment_id != source.experiment_id:
+            raise ValueError("Evidence experiment_id contradicts simulation source")
+        if model.design_id and model.design_id != source.design_id:
+            raise ValueError("Evidence design_id contradicts simulation source")
+        return source
+
+    def _validate_evidence_dependency(self, model, evidence_type, source_id, user_id):
+        record = self.get(source_id, user_id)
+        if record is None:
+            raise ValueError("Evidence source_ids must resolve to same-owner evidence")
+        record_type = record.get("record_type", "")
+        if not record_type.startswith("scientific_"):
+            raise ValueError("Evidence source_ids must reference authoritative scientific evidence")
+        try:
+            source_type = EvidenceType(record_type.removeprefix("scientific_"))
+            source_model = EVIDENCE_MODELS[source_type].model_validate(record.get("payload"))
+        except Exception as exc:
+            raise ValueError("Evidence source_ids must reference authoritative scientific evidence") from exc
+        allowed = self._DEFINED_DEPENDENCIES.get(evidence_type)
+        if allowed is not None and source_type not in allowed:
+            raise ValueError(
+                f"{evidence_type.value} evidence cannot depend on {source_type.value} evidence"
+            )
+        if model.experiment_id and source_model.experiment_id and model.experiment_id != source_model.experiment_id:
+            raise ValueError("Evidence dependency contradicts experiment_id")
+        if allowed is not None:
+            if model.solver_id and source_model.solver_id and model.solver_id != source_model.solver_id:
+                raise ValueError("Evidence dependency contradicts solver_id")
+            if (
+                model.solver_version
+                and source_model.solver_version
+                and model.solver_version != source_model.solver_version
+            ):
+                raise ValueError("Evidence dependency contradicts solver_version")
 
     def list_scientific_for_simulation(self, user_id, simulation_id):
         return [row for row in self.list(user_id) if row["simulation_id"] == simulation_id and row["record_type"].startswith("scientific_")]

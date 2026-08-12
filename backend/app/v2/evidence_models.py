@@ -1,13 +1,34 @@
 """Typed, versioned scientific evidence payloads persisted in engineering_evidence_records."""
 from __future__ import annotations
 from enum import Enum
-from typing import Any
-from pydantic import BaseModel, Field
+from typing import Any, Literal
+from pydantic import BaseModel, Field, model_validator
 
 class EvidenceType(str, Enum):
     NUMERICAL_RESULT="numerical_result"; VALIDITY="validity"; BENCHMARK="benchmark"
     RUN_CONVERGENCE="run_convergence"; REFINEMENT_CONVERGENCE="refinement_convergence"
     FIELD_RESULT="field_result"; ANALYSIS="analysis"
+
+class ResultEvidenceStatus(str, Enum):
+    COMPLETED = "completed"
+    WARNING = "warning"
+    FAIL = "fail"
+
+class ValidityEvidenceStatus(str, Enum):
+    VALID = "valid"
+    VALID_WITH_WARNINGS = "valid_with_warnings"
+    INVALID = "invalid"
+
+class BenchmarkEvidenceStatus(str, Enum):
+    PASS = "pass"
+    FAIL = "fail"
+    WARNING = "warning"
+
+class ConvergenceEvidenceStatus(str, Enum):
+    COMPLETED = "completed"
+    NOT_CONVERGED = "not_converged"
+    NOT_RUN = "not_run"
+    NOT_APPLICABLE = "not_applicable"
 
 class EvidenceBase(BaseModel):
     evidence_type: EvidenceType
@@ -35,6 +56,13 @@ class BenchmarkEvidence(EvidenceBase):
     tolerance: float
     passed: bool
     source_simulation_id: str
+    status: BenchmarkEvidenceStatus
+
+    @model_validator(mode="after")
+    def status_matches_result(self):
+        if self.passed != (self.status == BenchmarkEvidenceStatus.PASS):
+            raise ValueError("Benchmark status must agree with passed")
+        return self
 
 class RunConvergenceEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.RUN_CONVERGENCE
@@ -44,6 +72,7 @@ class RunConvergenceEvidence(EvidenceBase):
     iterations: int | None = None
     criterion: str
     passed: bool | None = None
+    status: ConvergenceEvidenceStatus
 
 class NumericalResultEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.NUMERICAL_RESULT
@@ -51,24 +80,42 @@ class NumericalResultEvidence(EvidenceBase):
     material_snapshot: dict[str, dict[str, float | str]]
     numerical_method: str
     convergence: dict
+    status: ResultEvidenceStatus
 
 class FieldResultEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.FIELD_RESULT
     variable_name: str; unit: str; array_shape: list[int]; checksum_sha256: str
     format: str; format_version: str
+    status: ResultEvidenceStatus
 
 class ValidityEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.VALIDITY
     evaluated_inputs: dict[str, Any]
     rules: list[dict[str, Any]]
+    status: ValidityEvidenceStatus
+
+class RefinementLevel(BaseModel):
+    level: Literal["coarse", "medium", "fine"]
+    simulation_id: str
+    value: float | None = None
+    configuration: dict[str, Any] = Field(default_factory=dict)
 
 class RefinementConvergenceEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.REFINEMENT_CONVERGENCE
-    levels: list[dict[str, Any]]
+    selected_metric: str
+    levels: list[RefinementLevel]
+    status: ConvergenceEvidenceStatus
+
+    @model_validator(mode="after")
+    def has_exact_refinement_levels(self):
+        if [item.level for item in self.levels] != ["coarse", "medium", "fine"]:
+            raise ValueError("Refinement evidence requires ordered coarse, medium, and fine levels")
+        return self
 
 class AnalysisEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.ANALYSIS
     analysis_id: str; dataset_hash: str
+    status: ResultEvidenceStatus
 
 EVIDENCE_MODELS = {
     EvidenceType.NUMERICAL_RESULT: NumericalResultEvidence,
