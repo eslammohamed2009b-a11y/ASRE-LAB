@@ -45,6 +45,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
     SimulationStatus,
 )
 from app.module2_simulation.solver_registry import require_available  # noqa: E402
+from app.module2_simulation.evidence_lifecycle import list_simulation_evidence  # noqa: E402
 from app.module2_simulation.solvers.base_solver import EngineeringSolver, SolverValidationError  # noqa: E402
 from app.module2_simulation.solvers.modal_solver import ModalSolver  # noqa: E402
 from app.module2_simulation.solvers.structural_solver import StructuralLinearSolver  # noqa: E402
@@ -246,6 +247,14 @@ def get_simulation_results_service(simulation_id: str, user_id: str) -> Simulati
 
     base = _to_job_response(job)
     return SimulationResultsResponse(**base.model_dump(), result=result_payload)
+
+
+def list_simulation_evidence_service(simulation_id: str, user_id: str) -> list[dict]:
+    repo = get_repository()
+    try:
+        return list_simulation_evidence(repo, simulation_id, user_id)
+    except LookupError as exc:
+        raise SimulationNotFoundError(simulation_id) from exc
 
 
 def _field_metadata(record) -> FieldResultMetadataResponse:

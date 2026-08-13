@@ -13,6 +13,7 @@ def run_simulation_task(payload: dict) -> dict:
 import logging as _logging
 from datetime import datetime, timezone
 from typing import Any
+from pydantic import ValidationError
 
 from app.core.repository import SimulationResultRecord, get_repository
 from app.module2_simulation.schemas import (
@@ -25,6 +26,13 @@ from app.module2_simulation.schemas import (
 from app.module2_simulation.schemas import SimulationCreateRequest as _SimulationCreateRequest
 from app.module2_simulation.solvers.base_solver import SolverValidationError
 from app.module2_simulation.field_results import persist_field_result
+from app.module2_simulation.evidence_lifecycle import persist_automatic_evidence
+from app.module2_simulation.provenance import result_hash
+from app.module2_simulation.materials import (
+    MaterialNotFoundError,
+    MaterialPropertyNotFoundError,
+    properties_as_dict,
+)
 from app.core.storage import get_storage
 
 logger = _logging.getLogger(__name__)
@@ -65,24 +73,75 @@ def run_simulation_job(
         # terminal state with "running".
         return {"simulation_id": simulation_id, "status": "cancelled"}
 
+    if repo.get_simulation_input(simulation_id) is None:
+        # Direct/internal callers use this same authoritative lifecycle. Keep
+        # their actual invocation arguments as the immutable input snapshot.
+        try:
+            material_properties = properties_as_dict(material_name)
+        except (MaterialNotFoundError, MaterialPropertyNotFoundError) as exc:
+            repo.update_simulation_job(
+                simulation_id, status="failed", error_code="validation_error",
+                safe_error_message=str(exc), progress_percent=100, finished_at=_now_iso(),
+            )
+            return {"simulation_id": simulation_id, "status": "failed", "error": str(exc)}
+        repo.record_simulation_input(
+            simulation_id=simulation_id, material_name=material_name,
+            material_properties=material_properties, units={},
+            initial_conditions=initial_conditions,
+            boundary_conditions=boundary_conditions,
+            numerical_settings=numerical_settings, geometry=geometry,
+        )
+
+    existing_result = repo.get_simulation_result(simulation_id)
+    if existing_result is not None:
+        # A worker retry after result persistence must recover missing evidence,
+        # never execute the solver or create another set of field artifacts.
+        terminal_status = "completed" if existing_result.status == "completed" else "partial_failure"
+        repo.update_simulation_job(simulation_id, status=terminal_status, progress_percent=100)
+        try:
+            records = persist_automatic_evidence(repo, simulation_id)
+        except Exception:
+            logger.error("Scientific evidence recovery failed for simulation %s", simulation_id, exc_info=True)
+            repo.update_simulation_job(
+                simulation_id, status="partial_failure", progress_percent=100,
+                error_code="evidence_persistence_error",
+                safe_error_message="The result is preserved, but its scientific evidence lifecycle is incomplete.",
+            )
+            return {"simulation_id": simulation_id, "status": "partial_failure"}
+        return {
+            "simulation_id": simulation_id, "status": terminal_status,
+            "field_result_count": len(repo.list_field_results(simulation_id)),
+            "evidence_record_count": len(records),
+        }
+
+    if repo.list_field_results(simulation_id):
+        # Fields without a final result indicate an interrupted attempt. Do
+        # not append a second, potentially contradictory artifact set.
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="incomplete_field_lifecycle",
+            safe_error_message="Field persistence was interrupted before the final result identity was recorded.",
+            finished_at=_now_iso(),
+        )
+        return {"simulation_id": simulation_id, "status": "partial_failure"}
+
     repo.update_simulation_job(simulation_id, status="running", started_at=_now_iso(), progress_percent=10)
 
-    request = _SimulationCreateRequest(
-        solver_id=solver_id,
-        experiment_id=experiment_id,
-        design_id=design_id,
-        material=MaterialSelection(name=material_name),
-        geometry=Geometry(**geometry),
-        boundary_conditions=BoundaryConditions(**boundary_conditions),
-        initial_conditions=InitialConditions(**initial_conditions),
-        numerical_settings=NumericalSettings(**numerical_settings),
-    )
-
-    solver_cls = SOLVER_CLASSES[solver_id]
     try:
+        request = _SimulationCreateRequest(
+            solver_id=solver_id,
+            experiment_id=experiment_id,
+            design_id=design_id,
+            material=MaterialSelection(name=material_name),
+            geometry=Geometry(**geometry),
+            boundary_conditions=BoundaryConditions(**boundary_conditions),
+            initial_conditions=InitialConditions(**initial_conditions),
+            numerical_settings=NumericalSettings(**numerical_settings),
+        )
+        solver_cls = SOLVER_CLASSES[solver_id]
         result, numerical_fields = solver_cls().run_with_fields(request)
         result.source_simulation_id = simulation_id
-    except SolverValidationError as exc:
+    except (SolverValidationError, ValidationError) as exc:
         repo.update_simulation_job(
             simulation_id,
             status="failed",
@@ -109,6 +168,7 @@ def run_simulation_job(
     from app.core.config import settings as _settings
 
     field_records = []
+    field_persistence_failed = False
     try:
         storage = storage or get_storage()
         for numerical_field in numerical_fields:
@@ -126,6 +186,7 @@ def run_simulation_job(
                 },
             ))
     except Exception:
+        field_persistence_failed = True
         logger.error("Scientific field persistence failed for simulation %s", simulation_id, exc_info=True)
         repo.update_simulation_job(
             simulation_id, status="partial_failure", progress_percent=100,
@@ -133,6 +194,12 @@ def run_simulation_job(
             safe_error_message="Scalar results completed, but one or more field artifacts could not be persisted.",
             finished_at=_now_iso(),
         )
+
+    if field_persistence_failed:
+        return {
+            "simulation_id": simulation_id, "status": "partial_failure",
+            "field_result_count": len(field_records),
+        }
 
     persisted_status = (
         "partial_failure"
@@ -146,39 +213,97 @@ def run_simulation_job(
             safe_error_message="The numerical solve did not meet its declared convergence tolerance; inspect the preserved result with caution.",
             finished_at=_now_iso(),
         )
-    repo.record_simulation_result(
-        SimulationResultRecord(
-            simulation_id=simulation_id,
+    try:
+        final_result_hash = result_hash(
             solver_id=result.solver_id,
             solver_version=result.solver_version,
-            governing_equations=result.governing_equations,
-            assumptions=result.assumptions,
-            warnings=result.warnings,
+            input_fingerprint_value=result.validation_metadata["input_fingerprint"],
             converged=result.convergence.converged,
-            residual=result.convergence.residual,
             iteration_count=result.convergence.iterations,
+            metric=result.convergence.residual,
             tolerance=result.convergence.tolerance,
             summary_metrics=result.summary_metrics,
-            field_values=result.field_values,
-            hotspot_node_ids=result.hotspot_node_ids,
-            result_object_keys=[record.storage_object_key for record in field_records],
-            application_version=_settings.APPLICATION_VERSION,
-            status=persisted_status,
-            numerical_method=result.numerical_method,
-            residual_history=result.residual_history,
             validation_metadata=result.validation_metadata,
-            elapsed_time_seconds=result.elapsed_time_seconds,
-            reproducibility_hash=result.reproducibility_hash,
-            source_design_id=design_id,
+            numerical_method=result.numerical_method,
+            field_checksums=[
+                f"{record.variable_name}:{record.unit}:{record.reproducibility_hash}"
+                for record in field_records
+            ],
         )
-    )
+    except Exception:
+        logger.error("Final scientific result hashing failed for simulation %s", simulation_id, exc_info=True)
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="result_hash_error",
+            safe_error_message="Scientific result identity could not be finalized.",
+            finished_at=_now_iso(),
+        )
+        return {"simulation_id": simulation_id, "status": "partial_failure"}
+
+    try:
+        repo.record_simulation_result(
+            SimulationResultRecord(
+                simulation_id=simulation_id,
+                solver_id=result.solver_id,
+                solver_version=result.solver_version,
+                governing_equations=result.governing_equations,
+                assumptions=result.assumptions,
+                warnings=result.warnings,
+                converged=result.convergence.converged,
+                residual=result.convergence.residual,
+                iteration_count=result.convergence.iterations,
+                tolerance=result.convergence.tolerance,
+                summary_metrics=result.summary_metrics,
+                field_values=result.field_values,
+                hotspot_node_ids=result.hotspot_node_ids,
+                result_object_keys=[record.storage_object_key for record in field_records],
+                application_version=_settings.APPLICATION_VERSION,
+                status=persisted_status,
+                numerical_method=result.numerical_method,
+                residual_history=result.residual_history,
+                validation_metadata=result.validation_metadata,
+                elapsed_time_seconds=result.elapsed_time_seconds,
+                reproducibility_hash=final_result_hash,
+                source_design_id=design_id,
+            )
+        )
+    except Exception:
+        logger.error("Scientific result persistence failed for simulation %s", simulation_id, exc_info=True)
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="result_persistence_error",
+            safe_error_message="Field artifacts are preserved, but the final scientific result was not persisted.",
+            finished_at=_now_iso(),
+        )
+        return {
+            "simulation_id": simulation_id, "status": "partial_failure",
+            "field_result_count": len(field_records),
+        }
     latest = repo.get_simulation_job(simulation_id)
     if latest.status != "partial_failure":
         repo.update_simulation_job(simulation_id, status="completed", progress_percent=100, finished_at=_now_iso())
         status = "completed"
     else:
         status = "partial_failure"
-    return {"simulation_id": simulation_id, "status": status, "field_result_count": len(field_records)}
+    try:
+        evidence_records = persist_automatic_evidence(repo, simulation_id)
+    except Exception:
+        logger.error("Scientific evidence persistence failed for simulation %s", simulation_id, exc_info=True)
+        repo.update_simulation_job(
+            simulation_id, status="partial_failure", progress_percent=100,
+            error_code="evidence_persistence_error",
+            safe_error_message="The result is preserved, but its scientific evidence lifecycle is incomplete.",
+            finished_at=_now_iso(),
+        )
+        return {
+            "simulation_id": simulation_id, "status": "partial_failure",
+            "field_result_count": len(field_records),
+        }
+    return {
+        "simulation_id": simulation_id, "status": status,
+        "field_result_count": len(field_records),
+        "evidence_record_count": len(evidence_records),
+    }
 
 
 @celery_app.task(name="module2.run_simulation_job_task", max_retries=0)

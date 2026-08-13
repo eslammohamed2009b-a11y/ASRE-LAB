@@ -35,7 +35,7 @@ from app.module2_simulation.schemas import (
     SimulationCreateRequest,
     SimulationResultPayload,
 )
-from app.module2_simulation.provenance import input_fingerprint, result_hash
+from app.module2_simulation.provenance import input_fingerprint
 
 
 class Mesh(BaseModel):
@@ -243,12 +243,9 @@ class EngineeringSolver(ABC):
         )
         payload.validation_metadata["input_fingerprint"] = fingerprint
         payload.validation_metadata["material_properties_used"] = material_snapshot
-        payload.reproducibility_hash = result_hash(
-            solver_id=payload.solver_id, solver_version=payload.solver_version,
-            input_fingerprint_value=fingerprint, converged=convergence.converged,
-            iteration_count=convergence.iterations, metric=convergence.residual,
-            summary_metrics=payload.summary_metrics, validation_metadata=payload.validation_metadata,
-        )
+        # The persisted lifecycle computes the final result identity only
+        # after all applicable field artifacts and their checksums exist.
+        payload.reproducibility_hash = ""
         payload.elapsed_time_seconds = time.perf_counter() - started
         return payload, self.extract_field_outputs(raw_result, request)
 

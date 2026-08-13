@@ -77,7 +77,7 @@ class RunConvergenceEvidence(EvidenceBase):
 class NumericalResultEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.NUMERICAL_RESULT
     summary_metrics: dict[str, float]
-    material_snapshot: dict[str, dict[str, float | str]]
+    material_snapshot: dict[str, float | str | bool | None]
     numerical_method: str
     convergence: dict
     status: ResultEvidenceStatus

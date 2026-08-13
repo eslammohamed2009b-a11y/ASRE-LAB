@@ -24,13 +24,14 @@ def resolve_simulation_source(
     require_result: bool = True,
     require_completed_result: bool = False,
     required_summary_metric: str | None = None,
+    repository=None,
 ) -> SimulationSource:
     """Resolve an owner-scoped simulation and optionally its authoritative result.
 
     Completion and metric requirements are opt-in so callers that legitimately
     inspect queued/running simulations can continue to use the shared resolver.
     """
-    repo=get_repository(); job=repo.get_simulation_job(simulation_id)
+    repo=repository or get_repository(); job=repo.get_simulation_job(simulation_id)
     if job is None or job.user_id != user_id:
         raise SimulationSourceNotFoundError("Simulation not found")
     result=repo.get_simulation_result(simulation_id)

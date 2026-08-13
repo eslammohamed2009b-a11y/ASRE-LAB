@@ -16,7 +16,6 @@ class EvidenceRepository:
     _COMPUTED_EVIDENCE_TYPES = {
         EvidenceType.NUMERICAL_RESULT,
         EvidenceType.FIELD_RESULT,
-        EvidenceType.RUN_CONVERGENCE,
         EvidenceType.ANALYSIS,
     }
     _DEFINED_DEPENDENCIES = {
@@ -28,9 +27,16 @@ class EvidenceRepository:
         },
     }
 
-    def __init__(self,path=None):
-        self.client=persistence_service.client if persistence_service.enabled and path is None else None
-        self.path=path or default_local_db_path()
+    def __init__(self,path=None,repository=None):
+        self.source_repository = repository
+        repository_path = getattr(repository, "db_path", None)
+        repository_client = getattr(repository, "_client", None)
+        self.client = repository_client or (
+            persistence_service.client
+            if persistence_service.enabled and path is None and repository_path is None
+            else None
+        )
+        self.path=path or repository_path or default_local_db_path()
         if self.client is None:
             with sqlite3.connect(self.path) as db: db.execute("""create table if not exists engineering_evidence_records(
             id text primary key,user_id text not null,experiment_id text,simulation_id text,record_type text not null,
@@ -38,11 +44,23 @@ class EvidenceRepository:
             parent_record_id text,created_at text not null,unique(user_id,record_type,payload_checksum))""")
     def create(self,user_id,value):
         body=canonical(value["payload"]); digest=hashlib.sha256(body.encode()).hexdigest()
+        if self.client:
+            existing=(self.client.table("engineering_evidence_records").select("*")
+                .eq("user_id",user_id).eq("record_type",value["record_type"])
+                .eq("payload_checksum",digest).execute().data)
+            if existing:return existing[0]
         row={"id":str(uuid.uuid4()),"user_id":user_id,**value,"schema_version":"2.0","payload_checksum":digest,
              "created_at":datetime.now(timezone.utc).isoformat()}
         if self.client:
-            data=self.client.table("engineering_evidence_records").upsert(row,on_conflict="user_id,record_type,payload_checksum").execute().data
-            return data[0]
+            data=self.client.table("engineering_evidence_records").upsert(
+                row,on_conflict="user_id,record_type,payload_checksum",ignore_duplicates=True
+            ).execute().data
+            if data:return data[0]
+            existing=(self.client.table("engineering_evidence_records").select("*")
+                .eq("user_id",user_id).eq("record_type",value["record_type"])
+                .eq("payload_checksum",digest).execute().data)
+            if existing:return existing[0]
+            raise RuntimeError("Scientific evidence upsert did not return a persisted record")
         with sqlite3.connect(self.path) as db:
             try: db.execute("insert into engineering_evidence_records values(?,?,?,?,?,?,?,?,?,?,?)",
                 (row["id"],user_id,row.get("experiment_id"),row.get("simulation_id"),row["record_type"],row["status"],
@@ -65,11 +83,17 @@ class EvidenceRepository:
 
         resolved_sources = []
         if model.simulation_id:
+            completed_claim = (
+                evidence_type in self._COMPUTED_EVIDENCE_TYPES
+                and model.status.value == "completed"
+            )
             source = self._resolve_and_validate_simulation(
                 model,
                 model.simulation_id,
                 user_id,
-                require_completed=evidence_type in self._COMPUTED_EVIDENCE_TYPES,
+                require_result=evidence_type in self._COMPUTED_EVIDENCE_TYPES
+                or evidence_type == EvidenceType.RUN_CONVERGENCE,
+                require_completed=completed_claim,
             )
             resolved_sources.append(source)
 
@@ -109,22 +133,25 @@ class EvidenceRepository:
             "parent_record_id":None,"payload":model.model_dump(mode="json"),
         })
 
-    @staticmethod
     def _resolve_and_validate_simulation(
+        self,
         model,
         simulation_id: str,
         user_id: str,
         *,
         require_completed: bool,
+        require_result: bool | None = None,
         required_metric: str | None = None,
     ):
         try:
             source = resolve_simulation_source(
                 simulation_id,
                 user_id,
-                require_result=require_completed or required_metric is not None,
+                require_result=(require_completed or required_metric is not None)
+                if require_result is None else require_result,
                 require_completed_result=require_completed,
                 required_summary_metric=required_metric,
+                repository=self.source_repository,
             )
         except SimulationSourceError as exc:
             raise ValueError("Evidence simulation source is unavailable") from exc

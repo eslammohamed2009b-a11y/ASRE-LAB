@@ -1,7 +1,7 @@
 {
   "contract_version": "3.0.0-research-studies",
-  "openapi_sha256": "121c928638815d25a11f0f9de82dfdaf213ba8cd4d0b5f44c7703db3f597b8be",
-  "path_count": 95,
+  "openapi_sha256": "040e3ad45f0e3955b0113c14a838cb7c891b073b75eb24a75677a6d6d42f20ca",
+  "path_count": 96,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
@@ -78,6 +78,7 @@
     "/api/capabilities",
     "/api/simulations/capabilities",
     "/api/simulations/{simulation_id}/fields",
+    "/api/simulations/{simulation_id}/evidence",
     "/api/simulations/{simulation_id}/fields/{field_result_id}/download",
     "/api/simulations/{simulation_id}/results",
     "/api/simulations/{simulation_id}/export/{fmt}",

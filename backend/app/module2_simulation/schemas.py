@@ -244,6 +244,17 @@ class FieldResultMetadataResponse(BaseModel):
     created_at: str
 
 
+class ScientificEvidenceResponse(BaseModel):
+    id: str
+    record_type: str
+    status: str
+    schema_version: str
+    experiment_id: str | None = None
+    simulation_id: str
+    payload: dict
+    created_at: str
+
+
 class CapabilityEntry(BaseModel):
     solver_id: str
     family: SolverFamily

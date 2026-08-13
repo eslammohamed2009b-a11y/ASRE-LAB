@@ -89,6 +89,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
     SimulationJobResponse,
     SimulationResultsResponse,
     FieldResultMetadataResponse,
+    ScientificEvidenceResponse,
 )
 from app.module2_simulation.service import (  # noqa: E402
     SimulationNotFoundError,
@@ -217,6 +218,23 @@ def get_simulation_results(
 ) -> SimulationResultsResponse:
     try:
         return get_simulation_results_service(simulation_id, current_user["id"])
+    except SimulationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="Simulation not found") from exc
+
+
+@simulations_router.get(
+    "/{simulation_id}/evidence",
+    response_model=list[ScientificEvidenceResponse],
+    summary="List authoritative scientific evidence for a simulation",
+    description="Returns server-generated, typed scientific provenance for an owner-scoped persisted simulation.",
+)
+def list_simulation_evidence(
+    simulation_id: str, current_user: dict = Depends(get_current_user)
+) -> list[ScientificEvidenceResponse]:
+    from app.module2_simulation.service import list_simulation_evidence_service
+
+    try:
+        return list_simulation_evidence_service(simulation_id, current_user["id"])
     except SimulationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Simulation not found") from exc
 
