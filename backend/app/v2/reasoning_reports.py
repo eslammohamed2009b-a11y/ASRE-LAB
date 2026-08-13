@@ -8,6 +8,7 @@ from app.core.repository import get_repository
 from app.core.storage import FileStorage,build_simulation_object_key,get_storage
 from app.v2.execution import canonical_bytes,normalize
 from app.v2.repository import EvidenceRepository
+from app.v2.claim_integrity import classify_claim
 
 LEVELS={"simple","engineering","research"}
 STAGES={"workflow_planned","design_generation_planned","validity_check_started","validity_check_completed","job_queued","geometry_generated","solver_started","solver_progress","convergence_checked","scientific_trust_completed","design_classified","sensitivity_completed","pareto_completed","recommendation_produced","recommendation_approved","recommendation_rejected","reproduction_completed","report_generated","failure_occurred","cancellation_completed"}
@@ -20,18 +21,25 @@ def _safe_evidence(repo,user,ids):
         row=repo.get(id,user)
         if row:records.append(row)
     return records
-def explain(stage,level,records):
+def explain(stage,level,records,claim_assessments=None):
     if stage not in STAGES:raise ReasoningError("Unsupported reasoning stage")
     if level not in LEVELS:raise ReasoningError("Unsupported explanation level")
     if not records:return {"level":level,"summary":"There is not enough evidence to explain this result confidently.","facts":[],"evidence_ids":[],"next_action":"Collect or persist the required engineering evidence.","limitations":["Evidence is insufficient."]}
     facts=[];warnings=[];limitations=[];confidence=None
+    claim_assessments=claim_assessments or {}
     for row in records:
         payload=row["payload"];confidence=payload.get("confidence",confidence)
         warnings.extend(payload.get("warnings",[]));limitations.extend(payload.get("limitations",[]))
         if row["record_type"]=="engineering_decision":
-            rec=payload.get("recommendation",{});facts.append({"code":"RECOMMENDATION_STATUS","value":rec.get("statement"),"evidence_id":row["id"]})
+            rec=payload.get("recommendation",{});assessment=claim_assessments.get(row["id"])
+            if assessment and assessment["classification"]=="finding":
+                facts.append({"code":"RECOMMENDATION_STATUS","value":rec.get("statement"),"evidence_ids":assessment["evidence_ids"],"classification":"finding"})
+            else:
+                facts.append({"code":"INSUFFICIENT_EVIDENCE","value":"The recommendation is not an established research finding.","evidence_ids":[],"classification":"insufficient_evidence"})
         elif row["record_type"]=="scientific_trust":
-            facts.append({"code":"SCIENTIFIC_CONFIDENCE","value":payload.get("confidence"),"evidence_id":row["id"]})
+            assessment=claim_assessments.get(row["id"])
+            if assessment and assessment["classification"]=="finding":facts.append({"code":"SCIENTIFIC_TRUST","value":payload.get("overall_trust"),"evidence_id":row["id"],"classification":"finding"})
+            else:facts.append({"code":"INSUFFICIENT_EVIDENCE","value":"Scientific trust provenance could not be resolved.","evidence_ids":[],"classification":"insufficient_evidence"})
         elif row["record_type"]=="run_manifest":
             facts.append({"code":"RUN_STATUS","value":payload.get("status"),"evidence_id":row["id"]})
         elif row["record_type"]=="job_attempt":
@@ -44,9 +52,17 @@ def explain(stage,level,records):
         "next_action":"Review the linked evidence and choose the next controlled action.",
         "safety_statement":"This is an evidence summary, not hidden model chain-of-thought."}
 class ReasoningService:
-    def __init__(self,repo=None):self.repo=repo or EvidenceRepository()
+    def __init__(self,repo=None):self.repo=repo or EvidenceRepository(repository=get_repository())
     def create(self,user,experiment,stage,level,evidence_ids,context=None):
-        records=_safe_evidence(self.repo,user,evidence_ids);snapshot=explain(stage,level,records)
+        records=_safe_evidence(self.repo,user,evidence_ids)
+        assessments={}
+        for row in records:
+            if row["record_type"]=="engineering_decision":
+                rec=row["payload"].get("recommendation",{})
+                assessments[row["id"]]=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]))
+            elif row["record_type"]=="scientific_trust":
+                assessments[row["id"]]=classify_claim(self.repo,user,"Scientific trust classification",[row["id"]])
+        snapshot=explain(stage,level,records,assessments)
         payload={"event_id":str(uuid.uuid4()),"experiment_id":experiment,"stage":stage,"status":"completed",
             "summary_code":stage.upper(),"title":stage.replace("_"," ").title(),"reason_codes":[],
             "evidence_ids":snapshot["evidence_ids"],"metrics":normalize((context or {}).get("metrics",{})),
@@ -71,7 +87,8 @@ def _pdf(text):
     for x in offset[1:]:out+=f"{x:010d} 00000 n \n".encode()
     out+=f"trailer << /Size {len(objects)+1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode();return bytes(out)
 class ReportService:
-    def __init__(self,repo=None,storage=None,core_repo=None):self.repo=repo or EvidenceRepository();self.storage=storage or get_storage();self.core_repo=core_repo or get_repository()
+    def __init__(self,repo=None,storage=None,core_repo=None):
+        self.core_repo=core_repo or get_repository();self.repo=repo or EvidenceRepository(repository=self.core_repo);self.storage=storage or get_storage()
     def create(self,user,experiment,title,evidence_ids):
         records=_safe_evidence(self.repo,user,evidence_ids)
         if len(records)!=len(evidence_ids):raise ReasoningError("All report evidence must exist and be owner-accessible")
@@ -96,13 +113,20 @@ class ReportService:
                 input_record=self.core_repo.get_simulation_input(job.id)
                 result_record=self.core_repo.get_simulation_result(job.id)
                 result_data=asdict(result_record) if result_record else "not available"
-                if isinstance(result_data,dict):result_data.pop("field_values",None)
+                if isinstance(result_data,dict):
+                    result_data.pop("field_values",None)
+                    result_data.pop("result_object_keys",None)
                 simulation_evidence.append({
                     "simulation_id":job.id,"design_id":job.design_id,"solver_id":job.solver_id,
                     "status":job.status,"input":asdict(input_record) if input_record else "not available",
                     "result":result_data,
                 })
             latest_analysis=asdict(analyses[-1]) if analyses else "not available"
+            analysis_evidence=[] if not analyses else [item for item in self.repo.list(
+                user,"scientific_analysis",experiment_id=experiment,
+            ) if item["payload"].get("analysis_id")==analyses[-1].id]
+            if analyses and not analysis_evidence:
+                latest_analysis={"status":"insufficient_evidence","message":"Analysis provenance evidence is unavailable."}
             sections.update({
                 "research_setup":{"data":{
                     "study_title":experiment_record.name,
@@ -118,7 +142,7 @@ class ReportService:
                     "alternatives":alternatives,
                 },"evidence_ids":[item["design_id"] for item in alternatives]},
                 "simulation_evidence":{"data":simulation_evidence,"evidence_ids":[item["simulation_id"] for item in simulation_evidence]},
-                "analysis":{"data":latest_analysis,"evidence_ids":([latest_analysis["id"]] if isinstance(latest_analysis,dict) else [])},
+                "analysis":{"data":latest_analysis,"evidence_ids":([analysis_evidence[-1]["id"]] if analysis_evidence else [])},
             })
         else:
             sections.update({
@@ -131,7 +155,10 @@ class ReportService:
             p=row["payload"];kind=row["record_type"]
             if kind=="scientific_trust":sections["scientific_trust"]={"data":p,"evidence_ids":[row["id"]]}
             elif kind=="run_manifest":sections["reproducibility"]={"data":p,"evidence_ids":[row["id"]]}
-            elif kind=="engineering_decision":sections["decision_analysis"]={"data":p,"evidence_ids":[row["id"]]}
+            elif kind=="engineering_decision":
+                rec=p.get("recommendation",{})
+                assessment=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]))
+                sections["decision_analysis"]={"data":p,"evidence_ids":[row["id"]],"claim_integrity":assessment}
             elif kind=="reasoning_event":sections["explanation"]={"data":p["snapshot"],"evidence_ids":[row["id"]]}
             elif kind=="job_attempt" and p.get("failure"):sections["failure"]={"data":p["failure"],"evidence_ids":[row["id"]]}
         report={"report_version":"2.0","generated_at":now(),"title":title,"experiment_id":experiment,"sections":sections,"evidence_ids":evidence_ids}

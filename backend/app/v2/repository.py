@@ -3,6 +3,7 @@ from datetime import datetime,timezone
 from app.core.persistence import persistence_service
 from app.core.repository import default_local_db_path
 from app.v2.evidence_models import (
+    AnalysisEvidence,
     EVIDENCE_MODELS,
     BenchmarkEvidence,
     EvidenceType,
@@ -24,6 +25,14 @@ class EvidenceRepository:
         EvidenceType.REFINEMENT_CONVERGENCE: {
             EvidenceType.NUMERICAL_RESULT,
             EvidenceType.RUN_CONVERGENCE,
+        },
+        EvidenceType.ANALYSIS: {
+            EvidenceType.NUMERICAL_RESULT,
+            EvidenceType.FIELD_RESULT,
+            EvidenceType.VALIDITY,
+            EvidenceType.RUN_CONVERGENCE,
+            EvidenceType.BENCHMARK,
+            EvidenceType.REFINEMENT_CONVERGENCE,
         },
     }
 
@@ -117,16 +126,65 @@ class EvidenceRepository:
                     required_metric=model.selected_metric,
                 )
                 resolved_sources.append(source)
+            required = [
+                model.refinement_parameter, model.comparison_hash,
+                model.convergence_threshold, model.coarse_to_medium_change,
+                model.medium_to_fine_change, model.passed,
+            ]
+            level_required = [
+                value for level in model.levels
+                for value in (level.refinement_value, level.input_fingerprint, level.solver_id, level.solver_version)
+            ]
+            if any(value is None for value in required + level_required):
+                raise ValueError("Authoritative refinement evidence requires complete real-run provenance")
+
+        if isinstance(model, AnalysisEvidence):
+            if self.source_repository is None:
+                raise ValueError("Analysis evidence requires the authoritative analysis repository")
+            analysis = self.source_repository.get_analysis(model.analysis_id)
+            if analysis is None or analysis.user_id != user_id:
+                raise ValueError("Analysis evidence source is unavailable")
+            if (
+                analysis.experiment_id != model.experiment_id
+                or analysis.analysis_type != model.analysis_type
+                or analysis.dataset_hash != model.dataset_hash
+                or sorted(analysis.source_simulation_ids) != sorted(model.source_simulation_ids)
+                or analysis.reproducibility_hash != model.provenance.get("reproducibility_hash")
+            ):
+                raise ValueError("Analysis evidence contradicts the persisted analysis")
+            if model.simulation_id is not None:
+                raise ValueError("Analysis evidence must use source_simulation_ids")
+            for simulation_id in model.source_simulation_ids:
+                resolved_sources.append(self._resolve_and_validate_simulation(
+                    model, simulation_id, user_id, require_completed=True,
+                ))
+            if len(set(model.source_simulation_ids)) != len(model.source_simulation_ids):
+                raise ValueError("Analysis source_simulation_ids must be unique")
+            if not model.source_ids:
+                raise ValueError("Analysis evidence requires authoritative scientific source_ids")
+            required_provenance = {"configuration", "engine_version", "reproducibility_hash"}
+            if not required_provenance <= set(model.provenance):
+                raise ValueError("Analysis evidence provenance is incomplete")
 
         experiments = {source.experiment_id for source in resolved_sources if source.experiment_id}
         designs = {source.design_id for source in resolved_sources if source.design_id}
         if len(experiments) > 1:
             raise ValueError("Evidence simulation references span contradictory experiments")
-        if len(designs) > 1:
+        if len(designs) > 1 and not isinstance(model, AnalysisEvidence):
             raise ValueError("Evidence simulation references span contradictory designs")
 
         for source_id in model.source_ids:
             self._validate_evidence_dependency(model, evidence_type, source_id, user_id)
+        if isinstance(model, AnalysisEvidence):
+            covered = set()
+            for source_id in model.source_ids:
+                dependency = self.get(source_id, user_id)
+                dependency_type = EvidenceType(dependency["record_type"].removeprefix("scientific_"))
+                dependency_model = EVIDENCE_MODELS[dependency_type].model_validate(dependency["payload"])
+                if dependency["record_type"] == "scientific_numerical_result":
+                    covered.add(dependency_model.simulation_id)
+            if set(model.source_simulation_ids) - covered:
+                raise ValueError("Every analysis source simulation requires numerical evidence provenance")
         return self.create(user_id,{
             "record_type":f"scientific_{evidence_type.value}","status":model.status.value,
             "experiment_id":model.experiment_id,"simulation_id":model.simulation_id,

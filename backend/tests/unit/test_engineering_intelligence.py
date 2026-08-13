@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import pytest
 from pydantic import ValidationError
 
@@ -23,6 +24,7 @@ from app.module3_analysis.service import (
     list_analyses_for_user,
     run_experiment_analysis,
 )
+from app.v2.repository import EvidenceRepository
 
 
 def _seed(repo: LocalSQLiteRepository, *, owner: str = "user-a", count: int = 8):
@@ -40,12 +42,25 @@ def _seed(repo: LocalSQLiteRepository, *, owner: str = "user-a", count: int = 8)
             simulation_id, "steel", {"density": 7800.0 + index}, {"density": "kg/m^3"},
             {}, {"axial_load_n": 100.0}, {"tolerance": 1e-6},
         )
+        fingerprint = hashlib.sha256(f"input:{simulation_id}".encode()).hexdigest()
+        result_digest = hashlib.sha256(f"result:{simulation_id}".encode()).hexdigest()
         repo.record_simulation_result(SimulationResultRecord(
             simulation_id=simulation_id, solver_id="structural_linear_static", solver_version="1.0",
             converged=True, residual=1e-8, iteration_count=1, tolerance=1e-6,
             summary_metrics={"strength_pa": float(index * 2), "mass_kg": float(10 - index)},
+            numerical_method="bounded_unit_fixture", reproducibility_hash=result_digest,
+            validation_metadata={"input_fingerprint":fingerprint,"material_properties_used":{"density":7800.0+index}},
         ))
         repo.update_simulation_job(simulation_id, status="completed", progress_percent=100)
+        EvidenceRepository(repository=repo).create_scientific_evidence(owner, {
+            "evidence_type":"numerical_result","schema_version":"2.0",
+            "experiment_id":experiment_id,"design_id":design_id,"simulation_id":simulation_id,
+            "solver_id":"structural_linear_static","solver_version":"1.0",
+            "input_fingerprint":fingerprint,"result_hash":result_digest,
+            "status":"completed","summary_metrics":{"strength_pa":float(index*2),"mass_kg":float(10-index)},
+            "material_snapshot":{"density":7800.0+index},"numerical_method":"bounded_unit_fixture",
+            "convergence":{"converged":True},
+        })
         simulation_ids.append(simulation_id)
     return experiment_id, simulation_ids
 
@@ -83,9 +98,15 @@ def test_statistics_correlations_and_sensitivity_are_deterministic(tmp_path):
     assert abs(relation["pearson"]["coefficient"]) == pytest.approx(1.0)
     assert relation["effect_size_interpretation"] == "very_large"
     assert "does not establish causation" in relation["warning"]
+    assert relation["dataset_hash"] == dataset.dataset_hash
+    assert len(relation["observations"]) == relation["sample_count"]
+    assert relation["evidence_ids"]
     assert sensitivity["features"][0]["standardized_coefficient"] == pytest.approx(1.0)
     assert sensitivity["r_squared"] == pytest.approx(1.0)
     assert len(sensitivity["evidence_simulation_ids"]) == 8
+    assert sensitivity["dataset_hash"] == dataset.dataset_hash
+    assert len(sensitivity["observations"]) == sensitivity["sample_count"]
+    assert sensitivity["residual_diagnostics"]
 
 
 def test_sensitivity_rejects_small_or_invalid_datasets(tmp_path):
@@ -118,6 +139,12 @@ def test_pareto_ranking_and_recommendation_reference_real_evidence(tmp_path):
     assert len(pareto["pareto_optimal"]) == 1
     assert len(pareto["dominated"]) == 7
     assert ranking["ranking"][0]["objective_values"]["metric.strength_pa"] == 16.0
+    assert pareto["dataset_hash"] == dataset.dataset_hash
+    assert pareto["source_simulation_ids"]
+    assert pareto["objective_directions"]["metric.strength_pa"] == "maximize"
+    assert ranking["dataset_hash"] == dataset.dataset_hash
+    assert ranking["normalization_method"] == "min_max"
+    assert ranking["objectives"][0]["weight"] == 2
     assert recommendation["evidence"]["source_ids"]
     assert "user-supplied" in recommendation["warnings"][0]
 
@@ -140,6 +167,14 @@ def test_analysis_is_persisted_across_restart_and_owner_scoped(tmp_path):
     stored = get_analysis_for_user(response.id, "user-a", restarted)
     listed = list_analyses_for_user(experiment_id, "user-a", restarted)
     assert stored.dataset_hash == response.dataset_hash
+    assert response.analysis_evidence_id
+    analysis_evidence = EvidenceRepository(repository=repo).get(response.analysis_evidence_id, "user-a")
+    assert analysis_evidence["record_type"] == "scientific_analysis"
+    assert analysis_evidence["payload"]["source_simulation_ids"] == sorted(analysis_evidence["payload"]["source_simulation_ids"])
+    assert analysis_evidence["payload"]["source_ids"]
+    tampered=dict(analysis_evidence["payload"]);tampered["dataset_hash"]="tampered"
+    with pytest.raises(ValueError,match="contradicts"):
+        EvidenceRepository(repository=repo).create_scientific_evidence("user-a",tampered)
     assert stored.result["recommendations"][0]["evidence"]["source_ids"]
     assert [item.id for item in listed] == [response.id]
     with pytest.raises(AnalysisNotFoundError):

@@ -94,3 +94,4 @@ class AnalysisResponse(BaseModel):
     reproducibility_hash: str
     created_at: str
     updated_at: str
+    analysis_evidence_id: str | None = None

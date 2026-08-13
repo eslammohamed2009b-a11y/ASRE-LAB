@@ -66,7 +66,13 @@ def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
                 continue
             item = {
                 "first": first, "second": second, "sample_count": int(x.size),
+                "dataset_hash": dataset.dataset_hash,
                 "evidence_simulation_ids": [row.simulation_id for row in evidence],
+                "evidence_ids": sorted({item for row in evidence for item in row.evidence_ids}),
+                "observations": [
+                    {"simulation_id": row.simulation_id, first: row.values[first], second: row.values[second]}
+                    for row in evidence
+                ],
                 "warning": "Statistical association only; correlation does not establish causation.",
             }
             if method in {"pearson", "both"}:
@@ -102,7 +108,7 @@ def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
     if len(dataset.rows) < 3:
         warnings.append("At least three pairwise-valid observations are required for correlation.")
     return {
-        "relationships": relationships,
+        "dataset_hash": dataset.dataset_hash, "method": method, "relationships": relationships,
         "warnings": warnings,
     }
 
@@ -155,13 +161,21 @@ def regression_sensitivity(dataset: ExperimentDataset, spec: SensitivitySpec) ->
         warnings.append("Poor linear fit: first-order coefficients are not a reliable summary of this dataset.")
     return {
         "target": spec.target, "features": items, "sample_count": len(evidence),
+        "dataset_hash": dataset.dataset_hash,
         "r_squared": float(r_squared), "condition_number": condition_number,
         "residual_diagnostics": {
             "root_mean_squared_standardized_residual": float(np.sqrt(np.mean((y_scaled - prediction) ** 2))),
             "maximum_absolute_standardized_residual": float(np.max(np.abs(y_scaled - prediction))),
             "mean_standardized_residual": float(np.mean(y_scaled - prediction)),
         },
-        "evidence_simulation_ids": [row.simulation_id for row in evidence], "warnings": warnings,
+        "evidence_simulation_ids": [row.simulation_id for row in evidence],
+        "evidence_ids": sorted({item for row in evidence for item in row.evidence_ids}),
+        "observations": [{
+            "simulation_id": row.simulation_id,
+            "features": {name: row.values[name] for name in features},
+            "target": row.values[spec.target],
+        } for row in evidence],
+        "warnings": warnings,
     }
 
 
@@ -185,6 +199,8 @@ def pareto_front(dataset: ExperimentDataset, objectives: list[ObjectiveSpec]) ->
     if matrix.size == 0:
         return {
             "objectives": [item.model_dump() for item in objectives],
+            "dataset_hash": dataset.dataset_hash,
+            "source_simulation_ids": [], "source_design_ids": [],
             "pareto_optimal": [], "dominated": [],
             "warnings": ["No complete objective rows."],
         }
@@ -215,6 +231,10 @@ def pareto_front(dataset: ExperimentDataset, objectives: list[ObjectiveSpec]) ->
     observations.sort(key=lambda item: (item["design_id"] or "", item["simulation_id"]))
     return {
         "objectives": [item.model_dump() for item in objectives],
+        "objective_directions": {item.column:item.direction for item in objectives},
+        "dataset_hash": dataset.dataset_hash,
+        "source_simulation_ids": sorted(row.simulation_id for row in rows),
+        "source_design_ids": sorted({row.design_id for row in rows if row.design_id}),
         "pareto_optimal": [item for item in observations if item["is_pareto_optimal"]],
         "dominated": [item for item in observations if not item["is_pareto_optimal"]],
         "warnings": ["Pareto membership describes the selected objectives only; it is not a universal optimum."],
@@ -224,7 +244,8 @@ def pareto_front(dataset: ExperimentDataset, objectives: list[ObjectiveSpec]) ->
 def weighted_ranking(dataset: ExperimentDataset, objectives: list[ObjectiveSpec]) -> dict:
     matrix, rows = _objective_matrix(dataset, objectives)
     if matrix.size == 0:
-        return {"ranking": [], "warnings": ["No complete objective rows."]}
+        return {"dataset_hash":dataset.dataset_hash,"objectives":[item.model_dump() for item in objectives],
+                "normalization_method":"min_max","ranking": [], "warnings": ["No complete objective rows."]}
     weights = np.asarray([item.weight for item in objectives], dtype=float)
     weights /= weights.sum()
     normalized = np.zeros_like(matrix, dtype=float)
@@ -252,7 +273,17 @@ def weighted_ranking(dataset: ExperimentDataset, objectives: list[ObjectiveSpec]
     ranking.sort(key=lambda item: (-item["score"], item["design_id"] or "", item["simulation_id"]))
     for index, item in enumerate(ranking, start=1):
         item["rank"] = index
-    return {"ranking": ranking, "normalized_weights": dict(zip([o.column for o in objectives], weights.tolist())), "warnings": warnings}
+    return {
+        "dataset_hash":dataset.dataset_hash,
+        "source_simulation_ids":sorted(row.simulation_id for row in rows),
+        "source_design_ids":sorted({row.design_id for row in rows if row.design_id}),
+        "objectives":[item.model_dump() for item in objectives],
+        "objective_directions":{item.column:item.direction for item in objectives},
+        "normalization_method":"min_max",
+        "ranking": ranking,
+        "normalized_weights": dict(zip([o.column for o in objectives], weights.tolist())),
+        "warnings": warnings,
+    }
 
 
 def grounded_recommendations(
@@ -297,6 +328,8 @@ def grounded_recommendations(
                 "method": method, "coefficient": coefficient,
                 "sample_count": relationship["sample_count"],
                 "source_simulation_ids": relationship["evidence_simulation_ids"],
+                "source_ids": relationship.get("evidence_ids", []),
+                "dataset_hash": relationship.get("dataset_hash"),
             },
             "confidence": "not_quantified",
             "warnings": ["This association is not evidence of causation."],
@@ -316,6 +349,8 @@ def grounded_recommendations(
                 "standardized_coefficient": strongest["standardized_coefficient"],
                 "r_squared": sensitivity_result["r_squared"],
                 "source_simulation_ids": sensitivity_result["evidence_simulation_ids"],
+                "source_ids": sensitivity_result.get("evidence_ids", []),
+                "dataset_hash": sensitivity_result.get("dataset_hash"),
             },
             "confidence": "bounded_by_model_fit_and_diagnostics",
             "warnings": list(sensitivity_result["warnings"]),

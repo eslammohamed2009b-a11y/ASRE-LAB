@@ -8,6 +8,10 @@ from collections import defaultdict
 
 from app.core.repository import PersistenceRepository
 from app.module3_analysis.schemas import DatasetQualityReport, DatasetRow, ExperimentDataset
+from app.module2_simulation.source_resolution import resolve_simulation_source
+from app.v2.evidence_integrity import records_by_type
+from app.v2.evidence_models import EvidenceType
+from app.v2.repository import EvidenceRepository
 
 MAX_ROWS = 5000
 MAX_COLUMNS = 256
@@ -16,6 +20,27 @@ VALID_RESULT_STATUSES = {"completed", "partial_failure"}
 
 class DatasetBuildError(ValueError):
     pass
+
+
+def scientific_dataset_hash(
+    experiment_id: str, rows: list[DatasetRow], columns: list[str], units: dict[str, str],
+) -> str:
+    """Hash scientific row identity only; operational metadata is intentionally absent."""
+    canonical_rows = [{
+        "design_id": row.design_id,
+        "simulation_id": row.simulation_id,
+        "solver_id": row.solver_id,
+        "solver_version": row.solver_version,
+        "values": dict(sorted(row.values.items())),
+        "converged": row.converged,
+    } for row in sorted(rows, key=lambda item: item.simulation_id)]
+    canonical = {
+        "experiment_id": experiment_id, "version": "2.0", "rows": canonical_rows,
+        "columns": sorted(columns), "units": dict(sorted(units.items())),
+    }
+    return hashlib.sha256(json.dumps(
+        canonical, sort_keys=True, separators=(",", ":"), allow_nan=False,
+    ).encode("utf-8")).hexdigest()
 
 
 def _number(value: object) -> float | None:
@@ -61,6 +86,7 @@ def build_experiment_dataset(
     user_id: str,
     *,
     include_nonconverged: bool = False,
+    require_authoritative_evidence: bool | None = None,
 ) -> ExperimentDataset:
     experiment = repository.get_experiment(experiment_id)
     if experiment is None or experiment.user_id != user_id:
@@ -79,7 +105,12 @@ def build_experiment_dataset(
     duplicates: list[str] = []
     warnings: list[str] = []
 
-    for job in sorted(jobs, key=lambda item: (item.created_at, item.id)):
+    evidence_repository = EvidenceRepository(repository=repository)
+    if require_authoritative_evidence is None:
+        require_authoritative_evidence = bool(evidence_repository.list(
+            user_id, "scientific_numerical_result", experiment_id=experiment_id,
+        ))
+    for job in sorted(jobs, key=lambda item: item.id):
         if job.id in seen_simulations:
             duplicates.append(job.id)
             excluded += 1
@@ -134,6 +165,40 @@ def build_experiment_dataset(
                 values[column] = float(value)
                 units_seen[column].add(field_result.unit)
 
+        evidence_ids: list[str]
+        if require_authoritative_evidence:
+            source = resolve_simulation_source(
+                job.id, user_id, require_completed_result=True, repository=repository,
+            )
+            grouped = records_by_type(evidence_repository, user_id, source)
+            if not grouped.get(EvidenceType.NUMERICAL_RESULT):
+                raise DatasetBuildError(
+                    f"Simulation {job.id} lacks authoritative numerical-result evidence"
+                )
+            persisted_field_checksums = {
+                model.checksum_sha256
+                for _, model in grouped.get(EvidenceType.FIELD_RESULT, [])
+            }
+            missing_field_evidence = [
+                item.id for item in field_records
+                if item.checksum_sha256 not in persisted_field_checksums
+            ]
+            if missing_field_evidence:
+                raise DatasetBuildError(
+                    f"Simulation {job.id} has field data without authoritative field evidence"
+                )
+            evidence_ids = sorted({
+                record["id"] for evidence_type, items in grouped.items()
+                if evidence_type in {
+                    EvidenceType.NUMERICAL_RESULT, EvidenceType.FIELD_RESULT,
+                    EvidenceType.VALIDITY, EvidenceType.RUN_CONVERGENCE,
+                    EvidenceType.BENCHMARK, EvidenceType.REFINEMENT_CONVERGENCE,
+                }
+                for record, _ in items
+            })
+        else:
+            evidence_ids = []
+
         rows.append(DatasetRow(
             design_id=job.design_id,
             simulation_id=job.id,
@@ -142,10 +207,7 @@ def build_experiment_dataset(
             values=dict(sorted(values.items())),
             converged=result.converged,
             simulation_status=job.status,
-            evidence_ids=(
-                [job.id] + ([job.design_id] if job.design_id else [])
-                + [field_result.id for field_result in field_records]
-            ),
+            evidence_ids=evidence_ids,
         ))
 
     all_columns = sorted({name for row in rows for name in row.values})
@@ -178,19 +240,11 @@ def build_experiment_dataset(
         column: next(iter(units_seen[column])) if len(units_seen[column]) == 1 else "incompatible"
         for column in all_columns
     }
-    canonical = {
-        "experiment_id": experiment_id,
-        "version": "1.0",
-        "rows": [row.model_dump() for row in rows],
-        "columns": all_columns,
-        "units": units,
-    }
-    dataset_hash = hashlib.sha256(
-        json.dumps(canonical, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
-    ).hexdigest()
+    dataset_hash = scientific_dataset_hash(experiment_id, rows, all_columns, units)
 
     return ExperimentDataset(
         experiment_id=experiment_id,
+        version="2.0",
         rows=rows,
         columns=all_columns,
         units=units,

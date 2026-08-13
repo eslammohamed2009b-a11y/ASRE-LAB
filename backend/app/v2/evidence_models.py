@@ -74,6 +74,18 @@ class RunConvergenceEvidence(EvidenceBase):
     passed: bool | None = None
     status: ConvergenceEvidenceStatus
 
+    @model_validator(mode="after")
+    def status_matches_result(self):
+        expected = {
+            ConvergenceEvidenceStatus.COMPLETED: True,
+            ConvergenceEvidenceStatus.NOT_CONVERGED: False,
+            ConvergenceEvidenceStatus.NOT_RUN: None,
+            ConvergenceEvidenceStatus.NOT_APPLICABLE: None,
+        }[self.status]
+        if self.passed is not expected:
+            raise ValueError("Run-convergence status must agree with passed")
+        return self
+
 class NumericalResultEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.NUMERICAL_RESULT
     summary_metrics: dict[str, float]
@@ -98,11 +110,21 @@ class RefinementLevel(BaseModel):
     level: Literal["coarse", "medium", "fine"]
     simulation_id: str
     value: float | None = None
+    refinement_value: float | None = None
+    input_fingerprint: str | None = None
+    solver_id: str | None = None
+    solver_version: str | None = None
     configuration: dict[str, Any] = Field(default_factory=dict)
 
 class RefinementConvergenceEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.REFINEMENT_CONVERGENCE
     selected_metric: str
+    refinement_parameter: str | None = None
+    comparison_hash: str | None = None
+    convergence_threshold: float | None = Field(default=None, gt=0, le=1)
+    coarse_to_medium_change: float | None = None
+    medium_to_fine_change: float | None = None
+    passed: bool | None = None
     levels: list[RefinementLevel]
     status: ConvergenceEvidenceStatus
 
@@ -110,11 +132,16 @@ class RefinementConvergenceEvidence(EvidenceBase):
     def has_exact_refinement_levels(self):
         if [item.level for item in self.levels] != ["coarse", "medium", "fine"]:
             raise ValueError("Refinement evidence requires ordered coarse, medium, and fine levels")
+        if self.passed is not None and self.passed != (self.status == ConvergenceEvidenceStatus.COMPLETED):
+            raise ValueError("Refinement status must agree with passed")
         return self
 
 class AnalysisEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.ANALYSIS
     analysis_id: str; dataset_hash: str
+    analysis_type: str
+    source_simulation_ids: list[str] = Field(min_length=1)
+    provenance: dict[str, Any]
     status: ResultEvidenceStatus
 
 EVIDENCE_MODELS = {

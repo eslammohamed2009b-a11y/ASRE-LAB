@@ -1,9 +1,11 @@
 import pytest
 import numpy as np
+import hashlib
 
 from app.core.repository import LocalSQLiteRepository, SimulationResultRecord
 from app.core.storage import LocalFileStorage
 from app.module2_simulation.field_results import persist_field_result
+from app.v2.repository import EvidenceRepository
 
 pytestmark = pytest.mark.integration
 
@@ -20,9 +22,13 @@ def _seed(repo: LocalSQLiteRepository, storage: LocalFileStorage):
         repo.record_simulation_input(
             simulation_id, "steel", {"density": 7800.0}, {"density": "kg/m^3"}, {}, {}, {},
         )
+        fingerprint=hashlib.sha256(f"input:{simulation_id}".encode()).hexdigest()
+        result_hash=hashlib.sha256(f"result:{simulation_id}".encode()).hexdigest()
         repo.record_simulation_result(SimulationResultRecord(
             simulation_id=simulation_id, solver_id="structural_linear_static", solver_version="1.0",
             converged=True, summary_metrics={"strength_pa": index * 10.0, "mass_kg": 10.0 - index},
+            numerical_method="bounded_integration_fixture",reproducibility_hash=result_hash,
+            validation_metadata={"input_fingerprint":fingerprint,"material_properties_used":{"density":7800.0}},
         ))
         repo.update_simulation_job(simulation_id, status="completed", progress_percent=100)
         if index == 1:
@@ -33,6 +39,24 @@ def _seed(repo: LocalSQLiteRepository, storage: LocalFileStorage):
                 values=np.array([0.0, 1e-6, 2e-6]), solver_id="structural_linear_static",
                 solver_version="1.0", grid_metadata={"converged": True, "assumptions": ["linear elastic"]},
             )
+        evidence=EvidenceRepository(repository=repo)
+        numerical=evidence.create_scientific_evidence("user-test",{
+            "evidence_type":"numerical_result","schema_version":"2.0","experiment_id":experiment_id,
+            "design_id":design_id,"simulation_id":simulation_id,"solver_id":"structural_linear_static",
+            "solver_version":"1.0","input_fingerprint":fingerprint,"result_hash":result_hash,
+            "status":"completed","summary_metrics":{"strength_pa":index*10.0,"mass_kg":10.0-index},
+            "material_snapshot":{"density":7800.0},"numerical_method":"bounded_integration_fixture",
+            "convergence":{"converged":True},
+        })
+        for field in repo.list_field_results(simulation_id):
+            evidence.create_scientific_evidence("user-test",{
+                "evidence_type":"field_result","schema_version":"2.0","experiment_id":experiment_id,
+                "design_id":design_id,"simulation_id":simulation_id,"solver_id":"structural_linear_static",
+                "solver_version":"1.0","input_fingerprint":fingerprint,"result_hash":result_hash,
+                "source_ids":[numerical["id"]],"status":"completed","variable_name":field.variable_name,
+                "unit":field.unit,"array_shape":field.array_shape,"checksum_sha256":field.checksum_sha256,
+                "format":field.format,"format_version":field.format_version,
+            })
     return experiment_id
 
 
