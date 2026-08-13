@@ -218,7 +218,13 @@ def test_dataset_hash_excludes_operational_metadata(operational):
 def test_claim_integrity_rejects_missing_cross_owner_and_legacy(tmp_path):
     case=_case(tmp_path); simulation,numerical,*_=_simulation(case)
     repo=EvidenceRepository(repository=case[0])
-    assert classify_claim(repo,case[1],"Temperature is 50 C",[numerical["id"]])["classification"] == "finding"
+    context={"experiment_id":case[2],"candidates":[{
+        "design_id":numerical["payload"]["design_id"],
+        "metric_assertions":[{"metric_name":"temperature_c","value":50.0}],
+        "evidence_ids":[numerical["id"]],
+    }]}
+    assert classify_claim(repo,case[1],"Temperature is 50 C",[numerical["id"]],semantic_context=context)["classification"] == "finding"
+    assert classify_claim(repo,case[1],"Temperature is 50 C",[numerical["id"]])["classification"] == "insufficient_evidence"
     assert classify_claim(repo,case[1],"Temperature is 50 C",["missing"])["classification"] == "insufficient_evidence"
     assert classify_claim(repo,"owner-b","Temperature is 50 C",[numerical["id"]])["classification"] == "insufficient_evidence"
     legacy=repo.create(case[1],{"record_type":"legacy_result","status":"completed","experiment_id":case[2],"simulation_id":simulation,"parent_record_id":None,"payload":{}})

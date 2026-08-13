@@ -70,7 +70,19 @@ def test_real_solver_to_evidence_trust_analysis_and_claim_chain(tmp_path):
             ObjectiveSpec(column="metric.mean_velocity_m_s",direction="maximize",weight=1),
         ]),repo,
     )
-    claim=classify_claim(scientific,owner,"The declared objective has a deterministic ranked candidate.",[analysis.analysis_evidence_id])
+    best=analysis.result["ranking"]["ranking"][0]
+    claim=classify_claim(
+        scientific,owner,"The declared objective has a deterministic ranked candidate.",
+        [analysis.analysis_evidence_id],semantic_context={
+            "experiment_id":experiment,"candidates":[{
+                "design_id":best["design_id"],"evidence_ids":[analysis.analysis_evidence_id],
+                "metric_assertions":[
+                    {"metric_name":name.removeprefix("metric."),"value":value}
+                    for name,value in best["objective_values"].items()
+                ],
+            }],
+        },
+    )
 
     assert fine_source.result.validation_metadata["input_fingerprint"]
     assert fine_source.result.reproducibility_hash

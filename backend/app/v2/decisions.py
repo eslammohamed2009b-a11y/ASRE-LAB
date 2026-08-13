@@ -6,6 +6,7 @@ from typing import Any
 import numpy as np
 from scipy import stats
 from app.core.config import settings
+from app.core.repository import get_repository
 from app.v2.repository import EvidenceRepository
 
 METRICS={
@@ -122,11 +123,35 @@ def analyse(designs,objectives,constraints):
         "warnings":[] if len(feasible)>=2 else ["Too few feasible designs for strong trade-off evidence."]}
 
 class DecisionService:
-    def __init__(self,repo=None):self.repo=repo or EvidenceRepository()
+    def __init__(self,repo=None):self.repo=repo or EvidenceRepository(repository=get_repository())
     def create(self,user_id,experiment_id,designs,objectives,constraints,sensitivity_spec=None):
         result=analyse(designs,objectives,constraints);result["sensitivity"]=sensitivity(designs,**sensitivity_spec) if sensitivity_spec else None
         selected=result["ranking"][0] if result["ranking"] else None
-        result["recommendation"]={"selected_design":selected["design_id"] if selected else None,"statement":"Best trade-off under the selected objectives, constraints, and weights." if selected else "No feasible design can be recommended.","ranking_score":selected["score"] if selected else None,"contribution_breakdown":selected["contributions"] if selected else [],"evidence_ids":selected["evidence_ids"] if selected else [],"confidence":"bounded_by_declared_objectives_and_evidence" if selected else "insufficient_evidence","reason_codes":["FEASIBILITY_FIRST_WEIGHTED_RANKING"] if selected else ["NO_FEASIBLE_DESIGN"],"warnings":result["warnings"],"limitations":["Ranking depends on user-selected weights and available evidence."],"suggested_next_action":"Review and accept, reject, or request modification." if selected else "Correct failed constraints or collect evidence.","status":"proposed"}
+        active_metric_codes={item["metric_code"] for item in objectives if item.get("enabled",True)}
+        active_metric_codes.update(
+            item["metric_code"] for item in constraints
+            if item.get("enabled",True)
+        )
+        candidates=[]
+        relevant_design_ids={item["design_id"] for item in result["ranking"]}
+        for item in designs:
+            if item["design_id"] not in relevant_design_ids:
+                continue
+            assertions=[
+                {"metric_name":name,"value":(
+                    item.get("confidence") if name=="confidence"
+                    else item.get("validity_status") if name=="validity_status"
+                    else item.get("metrics",{}).get(name)
+                )}
+                for name in sorted(active_metric_codes)
+                if name in item.get("metrics",{}) or name in {"confidence","validity_status"}
+            ]
+            candidates.append({
+                "design_id":item["design_id"],"metric_assertions":assertions,
+                "evidence_ids":sorted(set(item.get("evidence_ids",[]))),
+            })
+        cited_ids=sorted({evidence_id for item in candidates for evidence_id in item["evidence_ids"]})
+        result["recommendation"]={"selected_design":selected["design_id"] if selected else None,"statement":"Best trade-off under the selected objectives, constraints, and weights." if selected else "No feasible design can be recommended.","ranking_score":selected["score"] if selected else None,"contribution_breakdown":selected["contributions"] if selected else [],"evidence_ids":cited_ids if selected else [],"claim_context":{"experiment_id":experiment_id,"candidates":candidates} if selected else None,"confidence":"bounded_by_declared_objectives_and_evidence" if selected else "insufficient_evidence","reason_codes":["FEASIBILITY_FIRST_WEIGHTED_RANKING"] if selected else ["NO_FEASIBLE_DESIGN"],"warnings":result["warnings"],"limitations":["Ranking depends on user-selected weights and available evidence."],"suggested_next_action":"Review and accept, reject, or request modification." if selected else "Correct failed constraints or collect evidence.","status":"proposed"}
         payload={"decision_id":str(uuid.uuid4()),"experiment_id":experiment_id,"status":"proposed","created_at":now(),**result}
         return self.repo.create(user_id,{"record_type":"engineering_decision","status":"proposed","experiment_id":experiment_id,"simulation_id":None,"parent_record_id":None,"payload":payload})
     def get(self,id,user):

@@ -5,6 +5,7 @@ from app.core.auth import get_current_user
 from app.v2.execution import (
     ExecutionError,ExecutionService,InvalidTransition,NotFoundError,RESOURCE_POLICY,failure,
 )
+from app.v2.reasoning_reports import public_record
 
 router=APIRouter(prefix="/api/v2/execution",tags=["Backend V2 - Reproducible Execution"])
 class ManifestRequest(BaseModel): data:dict[str,Any]
@@ -17,7 +18,7 @@ class RetryRequest(BaseModel): idempotency_key:str=Field(min_length=1,max_length
 class CheckpointRequest(BaseModel): state:dict[str,Any];artifacts:list[dict[str,Any]]=Field(default_factory=list)
 
 def _call(function,*args):
-    try:return function(*args)
+    try:return public_record(function(*args))
     except NotFoundError as exc:raise HTTPException(404,"Execution record not found") from exc
     except (ExecutionError,InvalidTransition) as exc:raise HTTPException(409,str(exc)) from exc
 

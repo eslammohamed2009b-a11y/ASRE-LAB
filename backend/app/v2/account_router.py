@@ -11,6 +11,7 @@ from app.core.auth import get_current_user
 from app.core.persistence import persistence_service
 from app.core.repository import default_local_db_path
 from app.v2.repository import EvidenceRepository
+from app.v2.reasoning_reports import public_record
 
 router = APIRouter(prefix="/api/v2", tags=["Backend V2 - Account and Collections"])
 
@@ -123,7 +124,7 @@ def _account_response(user: dict[str, Any]) -> AccountResponse:
 def _collection(record_type: str, user_id: str, limit: int, offset: int) -> CollectionResponse:
     rows = EvidenceRepository().list_page(user_id, record_type, limit + 1, offset)
     return CollectionResponse(
-        items=rows[:limit], limit=limit, offset=offset, has_more=len(rows) > limit
+        items=public_record(rows[:limit]), limit=limit, offset=offset, has_more=len(rows) > limit
     )
 
 
@@ -163,13 +164,13 @@ def evidence_collection(
 @router.get("/dashboard")
 def dashboard(user: dict[str, Any] = Depends(get_current_user)) -> dict[str, Any]:
     repo = EvidenceRepository()
-    return {
+    return public_record({
         "account": _account_response(user).model_dump(),
         "attempts": repo.list_page(user["id"], "job_attempt", 10, 0),
         "manifests": repo.list_page(user["id"], "run_manifest", 10, 0),
         "decisions": repo.list_page(user["id"], "engineering_decision", 10, 0),
         "reports": repo.list_page(user["id"], "research_report", 10, 0),
-    }
+    })
 
 @router.get("/decisions", response_model=CollectionResponse)
 def decisions(limit:int=Query(20,ge=1,le=100),offset:int=Query(0,ge=0,le=10_000),user:dict[str,Any]=Depends(get_current_user)):

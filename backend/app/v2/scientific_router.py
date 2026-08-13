@@ -14,7 +14,7 @@ from app.v2.refinement import create_refinement_evidence
 from app.v2.trust_v2 import derive_trust_record
 from app.v2.evidence_integrity import records_by_type
 from app.v2.evidence_models import EvidenceType
-from app.v2.claim_integrity import classify_claim
+from app.v2.claim_integrity import is_authoritative_evidence
 
 router=APIRouter(prefix="/api/v2/scientific",tags=["Backend V2 - Scientific Trust"])
 class Inputs(BaseModel): inputs:dict[str,Any]
@@ -126,6 +126,6 @@ def get_trust(record_id:str,user:dict=Depends(get_current_user)):
     evidence=EvidenceRepository(repository=get_repository())
     row=evidence.get(record_id,user["id"])
     if row is None or row["record_type"]!="scientific_trust":raise HTTPException(404,"Scientific trust record not found")
-    if classify_claim(evidence,user["id"],"Scientific trust classification",[record_id])["classification"]!="finding":
+    if not is_authoritative_evidence(evidence,user["id"],row):
         raise HTTPException(422,"Scientific trust record provenance is invalid or legacy")
     return row

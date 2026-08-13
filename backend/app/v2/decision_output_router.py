@@ -3,7 +3,7 @@ from fastapi import APIRouter,Depends,HTTPException,Response
 from pydantic import BaseModel,Field
 from app.core.auth import get_current_user
 from app.v2.decisions import DecisionError,DecisionNotFound,DecisionService,analyse,feasibility,lhs,sensitivity,validate_constraints,validate_objectives
-from app.v2.reasoning_reports import OutputNotFound,ReasoningError,ReasoningService,ReportService
+from app.v2.reasoning_reports import OutputNotFound,ReasoningError,ReasoningService,ReportService,public_record
 router=APIRouter(prefix="/api/v2",tags=["Backend V2 - Decisions and Research"])
 class DecisionRequest(BaseModel):
     experiment_id:str;designs:list[dict[str,Any]];objectives:list[dict[str,Any]];constraints:list[dict[str,Any]]=Field(default_factory=list);sensitivity_spec:dict[str,Any]|None=None
@@ -48,7 +48,7 @@ def report(p:ReportRequest,user:dict=Depends(get_current_user)):return call(Repo
 @router.get("/reports/{id}")
 def get_report(id:str,user:dict=Depends(get_current_user)):return call(ReportService().get,id,user["id"])
 @router.get("/reports/{id}/artifacts")
-def report_artifacts(id:str,user:dict=Depends(get_current_user)):return {"artifacts":call(ReportService().get,id,user["id"])["payload"]["artifacts"]}
+def report_artifacts(id:str,user:dict=Depends(get_current_user)):return {"artifacts":public_record(call(ReportService().get,id,user["id"])["payload"]["artifacts"])}
 @router.get("/reports/{id}/exports/{fmt}")
 def export(id:str,fmt:str,user:dict=Depends(get_current_user)):
     data,meta=call(ReportService().download,id,user["id"],fmt)

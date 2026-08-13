@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from app.core.auth import get_current_user
 from app.core.repository import ExperimentRecord, get_repository
 from app.v2.repository import EvidenceRepository
+from app.v2.reasoning_reports import public_record
 from app.comparative_service import ComparativeRunRequest, build_comparison_plan, create_comparative_batch
 from app.module2_simulation.materials import MaterialNotFoundError, MaterialPropertyNotFoundError
 from app.module2_simulation.solvers.base_solver import SolverValidationError
@@ -119,7 +120,7 @@ def _study_graph(record: ExperimentRecord) -> dict[str, Any]:
         item["fields"] = [asdict(field) for field in repo.list_field_results(job.id)]
         simulation_items.append(item)
 
-    return {
+    return public_record({
         "designs": [
             {
                 **asdict(item),
@@ -133,7 +134,7 @@ def _study_graph(record: ExperimentRecord) -> dict[str, Any]:
         "evidence": evidence,
         "decisions": [item for item in evidence if item["record_type"] == "engineering_decision"],
         "reports": [item for item in evidence if item["record_type"] == "research_report"],
-    }
+    })
 
 
 def _summary(record: ExperimentRecord) -> dict[str, Any]:

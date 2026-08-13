@@ -8,13 +8,20 @@ from app.core.repository import get_repository
 from app.core.storage import FileStorage,build_simulation_object_key,get_storage
 from app.v2.execution import canonical_bytes,normalize
 from app.v2.repository import EvidenceRepository
-from app.v2.claim_integrity import classify_claim
+from app.v2.claim_integrity import classify_claim,is_authoritative_evidence
 
 LEVELS={"simple","engineering","research"}
 STAGES={"workflow_planned","design_generation_planned","validity_check_started","validity_check_completed","job_queued","geometry_generated","solver_started","solver_progress","convergence_checked","scientific_trust_completed","design_classified","sensitivity_completed","pareto_completed","recommendation_produced","recommendation_approved","recommendation_rejected","reproduction_completed","report_generated","failure_occurred","cancellation_completed"}
 def now():return datetime.now(timezone.utc).isoformat()
 class ReasoningError(ValueError):pass
 class OutputNotFound(LookupError):pass
+def public_record(value):
+    """Remove server-internal storage locators recursively from API representations."""
+    if isinstance(value,dict):
+        private={"object_key","storage_object_key","result_object_keys"}
+        return {key:public_record(item) for key,item in value.items() if key not in private}
+    if isinstance(value,list):return [public_record(item) for item in value]
+    return value
 def _safe_evidence(repo,user,ids):
     records=[]
     for id in ids:
@@ -59,9 +66,12 @@ class ReasoningService:
         for row in records:
             if row["record_type"]=="engineering_decision":
                 rec=row["payload"].get("recommendation",{})
-                assessments[row["id"]]=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]))
+                assessments[row["id"]]=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]),semantic_context=rec.get("claim_context"))
             elif row["record_type"]=="scientific_trust":
-                assessments[row["id"]]=classify_claim(self.repo,user,"Scientific trust classification",[row["id"]])
+                assessments[row["id"]]={
+                    "classification":"finding" if is_authoritative_evidence(self.repo,user,row) else "insufficient_evidence",
+                    "evidence_ids":[row["id"]] if is_authoritative_evidence(self.repo,user,row) else [],
+                }
         snapshot=explain(stage,level,records,assessments)
         payload={"event_id":str(uuid.uuid4()),"experiment_id":experiment,"stage":stage,"status":"completed",
             "summary_code":stage.upper(),"title":stage.replace("_"," ").title(),"reason_codes":[],
@@ -93,7 +103,7 @@ class ReportService:
         records=_safe_evidence(self.repo,user,evidence_ids)
         if len(records)!=len(evidence_ids):raise ReasoningError("All report evidence must exist and be owner-accessible")
         existing=next((x for x in self.repo.list(user,"research_report") if x["payload"].get("evidence_ids")==evidence_ids and x["payload"].get("title")==title),None)
-        if existing:return existing
+        if existing:return public_record(existing)
         sections={"title":{"text":title,"evidence_ids":[]},"experiment":{"id":experiment,"evidence_ids":[]}}
         experiment_record=self.core_repo.get_experiment(experiment)
         if experiment_record is not None and experiment_record.user_id != user:
@@ -157,11 +167,11 @@ class ReportService:
             elif kind=="run_manifest":sections["reproducibility"]={"data":p,"evidence_ids":[row["id"]]}
             elif kind=="engineering_decision":
                 rec=p.get("recommendation",{})
-                assessment=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]))
+                assessment=classify_claim(self.repo,user,rec.get("statement","") or "",rec.get("evidence_ids",[]),semantic_context=rec.get("claim_context"))
                 sections["decision_analysis"]={"data":p,"evidence_ids":[row["id"]],"claim_integrity":assessment}
             elif kind=="reasoning_event":sections["explanation"]={"data":p["snapshot"],"evidence_ids":[row["id"]]}
             elif kind=="job_attempt" and p.get("failure"):sections["failure"]={"data":p["failure"],"evidence_ids":[row["id"]]}
-        report={"report_version":"2.0","generated_at":now(),"title":title,"experiment_id":experiment,"sections":sections,"evidence_ids":evidence_ids}
+        report=public_record({"report_version":"2.0","generated_at":now(),"title":title,"experiment_id":experiment,"sections":sections,"evidence_ids":evidence_ids})
         json_bytes=canonical_bytes(report);rows=[]
         decision=sections.get("decision_analysis",{}).get("data",{})
         for item in decision.get("ranking",[]):rows.append({"table":"ranking","design_id":item["design_id"],"rank":item["rank"],"score":item["score"]})
@@ -175,13 +185,15 @@ class ReportService:
             finally:path.unlink(missing_ok=True)
             artifacts.append({"format":fmt,"object_key":key,"checksum_sha256":hashlib.sha256(content).hexdigest(),"byte_size":len(content),"content_type":media,"private":True})
         payload={"report_id":report_id,"title":title,"experiment_id":experiment,"status":"completed","report":report,"artifacts":artifacts,"evidence_ids":evidence_ids,"report_checksum":hashlib.sha256(json_bytes).hexdigest(),"created_at":now()}
-        return self.repo.create(user,{"record_type":"research_report","status":"completed","experiment_id":experiment,"simulation_id":None,"parent_record_id":None,"payload":payload})
-    def get(self,id,user):
+        return public_record(self.repo.create(user,{"record_type":"research_report","status":"completed","experiment_id":experiment,"simulation_id":None,"parent_record_id":None,"payload":payload}))
+    def _get_internal(self,id,user):
         row=self.repo.get(id,user)
         if not row or row["record_type"]!="research_report":raise OutputNotFound(id)
         return row
+    def get(self,id,user):
+        return public_record(self._get_internal(id,user))
     def download(self,id,user,fmt):
-        row=self.get(id,user);artifact=next((x for x in row["payload"]["artifacts"] if x["format"]==fmt),None)
+        row=self._get_internal(id,user);artifact=next((x for x in row["payload"]["artifacts"] if x["format"]==fmt),None)
         if not artifact:raise OutputNotFound(fmt)
         data=self.storage.open_bytes(artifact["object_key"])
         if hashlib.sha256(data).hexdigest()!=artifact["checksum_sha256"]:raise ReasoningError("Report artifact integrity failure")
