@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import math
+from dataclasses import dataclass
 from typing import Any, Callable
 
 import cadquery as cq
@@ -25,8 +26,31 @@ class SemanticTopologyError(ValueError):
         self.tag = tag
 
 
+@dataclass(frozen=True)
+class ResolvedSemanticGeometry:
+    """Kernel-resident resolution used by downstream engineering adapters.
+
+    Public scientific contracts contain signatures, never OpenCascade face
+    indices.  Keeping the actual shapes here lets a mesher bind those stable
+    semantic declarations to boundary facets without reconstructing geometry.
+    """
+
+    tag: str
+    body_id: str
+    status: SemanticIdentityStatus
+    topology_kind: str
+    topology_signatures: tuple[str, ...]
+    shapes: tuple[Any, ...]
+
+
 def _rounded(value: float) -> float:
-    return float(format(float(value), ".12g"))
+    # OCC may return numerically equivalent topology centres/normals with
+    # sub-nanometre kernel noise across calls.  Signatures are a scientific
+    # semantic identity, not a record of floating-point jitter.
+    number = float(value)
+    if abs(number) < 5e-7:
+        return 0.0
+    return round(number, 6)
 
 
 def _signature(shape: Any, kind: str) -> str:
@@ -160,8 +184,48 @@ def resolve_semantic_regions(
     tolerance_mm: float,
     fail_on_lost: bool = True,
 ) -> list[ResolvedSemanticRegion]:
-    resolved: list[ResolvedSemanticRegion] = []
+    geometry = resolve_semantic_geometry(
+        document,
+        bodies,
+        resolve_length_mm=resolve_length_mm,
+        tolerance_mm=tolerance_mm,
+        fail_on_lost=fail_on_lost,
+    )
+    return [
+        ResolvedSemanticRegion(
+            tag=item.tag,
+            body_id=item.body_id,
+            status=item.status,
+            topology_kind=item.topology_kind,
+            topology_signatures=list(item.topology_signatures),
+            diagnostic=(
+                "The declared selector no longer matches geometry"
+                if item.status == SemanticIdentityStatus.LOST else None
+            ),
+        )
+        for item in geometry
+    ]
+
+
+def resolve_semantic_geometry(
+    document: EngineeringDesignDocumentV2,
+    bodies: dict[str, cq.Workplane],
+    *,
+    resolve_length_mm: Callable[[Any], float],
+    tolerance_mm: float,
+    fail_on_lost: bool = True,
+) -> list[ResolvedSemanticGeometry]:
+    """Resolve declarations to real kernel shapes for trusted adapters.
+
+    This is deliberately an internal API.  Raw kernel identity and topology
+    ordering never escape into persisted/public scientific data.
+    """
+    resolved: list[ResolvedSemanticGeometry] = []
     for region in document.semantic_regions:
+        if region.body_id not in bodies:
+            raise SemanticTopologyError(
+                "SEMANTIC_BODY_MISSING", f"Semantic region '{region.tag}' references a missing body", region.tag
+            )
         kind, shapes, status = _resolve_one(
             region,
             bodies[region.body_id],
@@ -173,21 +237,22 @@ def resolve_semantic_regions(
                 raise SemanticTopologyError(
                     "SEMANTIC_REGION_LOST", f"Semantic region '{region.tag}' could not be resolved", region.tag
                 )
-            resolved.append(ResolvedSemanticRegion(
+            resolved.append(ResolvedSemanticGeometry(
                 tag=region.tag,
                 body_id=region.body_id,
                 status=SemanticIdentityStatus.LOST,
                 topology_kind=kind,
-                topology_signatures=[],
-                diagnostic="The declared selector no longer matches geometry",
+                topology_signatures=(),
+                shapes=(),
             ))
             continue
-        signatures = sorted(_signature(item, kind) for item in shapes)
-        resolved.append(ResolvedSemanticRegion(
+        signatures = tuple(sorted(_signature(item, kind) for item in shapes))
+        resolved.append(ResolvedSemanticGeometry(
             tag=region.tag,
             body_id=region.body_id,
             status=status,
             topology_kind=kind,
             topology_signatures=signatures,
+            shapes=tuple(shapes),
         ))
     return resolved

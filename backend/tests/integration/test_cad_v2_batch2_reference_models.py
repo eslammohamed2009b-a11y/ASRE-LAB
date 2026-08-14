@@ -6,6 +6,8 @@ import pytest
 
 from app.module1_design.cad_v2_compiler import compile_design, export_compiled_design
 from app.module1_design.cad_v2_schemas import EngineeringDesignDocumentV2, ValidationStatus
+from app.module2_simulation.geometry_physics_schemas import MeshSpecification, PhysicsDomain
+from app.module2_simulation.meshing import generate_mesh
 
 pytestmark = pytest.mark.integration
 
@@ -143,3 +145,47 @@ def test_advanced_reference_models_compile_validate_and_export(name, builder, tm
     assert changed.design_hash != compiled.design_hash
     assert all(item["status"] != "LOST" for item in changed.semantic_regions)
     assert elapsed < 20
+
+
+def test_reference_enclosure_authoritative_brep_meshes_and_maps_mounting_floor():
+    compiled = compile_design(_enclosure())
+    mesh = generate_mesh(
+        compiled,
+        [PhysicsDomain(domain_id="enclosure_solid", source_body_id="enclosure", domain_kind="solid")],
+        MeshSpecification(target_size=q(15)),
+    )
+    assert mesh.metadata.design_hash == compiled.design_hash
+    mapping = next(item for item in mesh.metadata.semantic_mappings if item.semantic_region == "mounting_floor")
+    assert mapping.boundary_facet_ids
+    assert "open_rim" in " ".join(mesh.metadata.warnings)
+
+
+def test_reference_manifold_authoritative_brep_meshes_and_maps_cylindrical_ports():
+    compiled = compile_design(_manifold())
+    body_id = compiled.document.output_body_ids[0]
+    mesh = generate_mesh(
+        compiled,
+        [PhysicsDomain(domain_id="manifold_solid", source_body_id=body_id, domain_kind="solid")],
+        MeshSpecification(target_size=q(15), semantic_sizing=[{
+            "semantic_region": "fluid_ports", "target_size": q(7.5),
+        }]),
+    )
+    ports = next(item for item in mesh.metadata.semantic_mappings if item.semantic_region == "fluid_ports")
+    assert ports.boundary_facet_ids
+    assert ports.cad_resolution_status == "RESELECTED"
+
+
+def test_reference_multi_body_mesh_retains_independent_domain_identity():
+    compiled = compile_design(_assembly())
+    mesh = generate_mesh(
+        compiled,
+        [
+            PhysicsDomain(domain_id="rail_domain", source_body_id="rail", domain_kind="solid"),
+            PhysicsDomain(domain_id="pin_domain", source_body_id="pin", domain_kind="solid"),
+        ],
+        MeshSpecification(target_size=q(10)),
+    )
+    assert {item.domain_id for item in mesh.metadata.domains} == {"rail_domain", "pin_domain"}
+    assert all(item.volume_element_ids for item in mesh.metadata.domains)
+    mount = next(item for item in mesh.metadata.semantic_mappings if item.semantic_region == "rail_mount")
+    assert mount.domain_ids == ["rail_domain"]

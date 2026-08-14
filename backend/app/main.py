@@ -22,6 +22,7 @@ from app.v2.account_router import router as account_v2_router
 from app.study_router import router as study_router
 from app.capabilities_router import router as capabilities_router
 from app.capability_validation import validate_capability_consistency
+from app.module2_simulation.geometry_physics_router import router as geometry_physics_router
 
 logger = logging.getLogger("asre_lab")
 
@@ -59,6 +60,7 @@ app.include_router(decision_output_v2_router)
 app.include_router(account_v2_router)
 app.include_router(study_router)
 app.include_router(capabilities_router)
+app.include_router(geometry_physics_router)
 
 
 @app.on_event("startup")

@@ -268,6 +268,10 @@ class CapabilityEntry(BaseModel):
     supported_geometry: list[str] = Field(default_factory=list)
     geometry_limitations: str
     consumes_cad_geometry: bool = False
+    consumes_authoritative_cad: bool = False
+    required_mesh_dimension: int | None = Field(default=None, ge=1, le=3)
+    accepted_element_types: list[str] = Field(default_factory=list)
+    supported_domain_types: list[str] = Field(default_factory=list)
     geometry_dependency_description: str = "not_available"
     supported_materials: list[str]
     supported_boundary_conditions: list[str]
