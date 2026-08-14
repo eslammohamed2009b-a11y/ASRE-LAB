@@ -108,6 +108,16 @@ def _snapshot(material_name: str, family: AnalysisFamilyV1) -> MaterialSnapshot:
             name=name, value=prop.value, unit=prop.unit, source=prop.source,
             valid_range=prop.valid_range, notes=prop.notes,
         ))
+    # Yield strength is not required to solve linear elasticity, but when the
+    # authoritative library supplies it the immutable snapshot makes a clearly
+    # labelled factor-of-safety diagnostic possible.
+    if family == AnalysisFamilyV1.STRUCTURAL and "yield_strength" in library:
+        prop = library["yield_strength"]
+        if prop.unit == "Pa" and math.isfinite(prop.value) and prop.value > 0:
+            properties.append(MaterialPropertySnapshot(
+                name="yield_strength", value=prop.value, unit=prop.unit, source=prop.source,
+                valid_range=prop.valid_range, notes=prop.notes,
+            ))
     identity = {
         "material_name": material_name.lower().strip(),
         "properties": [item.model_dump(mode="json") for item in properties],

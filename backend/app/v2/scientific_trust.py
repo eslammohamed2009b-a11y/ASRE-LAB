@@ -33,6 +33,9 @@ def _acoustic(x): return x.get("speed_m_s", 343.0) / (2 * x["length_m"])
 def _electrostatic(x): return abs(x["right_v"] - x["left_v"]) / x["width_m"]
 def _channel(x): return -(x["pressure_gradient_pa_m"]) * x["height_m"] ** 2 / (8 * x["viscosity_pa_s"])
 def _coupling(x): return x["youngs_modulus_pa"] * x["alpha_1_k"] * x["delta_temperature_k"]
+def _thermal_fem_3d(x): return x["cold_k"] + (x["hot_k"] - x["cold_k"]) * x.get("position_fraction", .5)
+def _structural_fem_3d(x): return x["load_n"] * x["length_m"] / (x["youngs_modulus_pa"] * x["area_m2"])
+def _modal_fem_3d(x): return 1.875104068711961 ** 2 / (2 * math.pi) * math.sqrt(x["youngs_modulus_pa"] * x["inertia_m4"] / (x["density_kg_m3"] * x["area_m2"] * x["length_m"] ** 4))
 
 
 _COMMON_ASSUMPTIONS = {
@@ -79,6 +82,12 @@ _DEFINITIONS = [
         ("one-way coupling only","mean nodal temperature mapping","fully restrained linear thermal strain"),
         {"temperature":"degC","stress":"Pa"},{"num_elements":(2,200)},
         "coupling_restrained_expansion","Analytical restrained thermal stress","thermal_stress_pa",1e-8,_coupling,False),
+    TrustCapability("thermal_fem_3d_v1", "Authoritative TET4 steady conduction", ("steady state", "isotropic conductivity", "linear TET4"),
+        {"temperature":"K","conductivity":"W/(m K)"}, {"nodes":(4,5000)}, "thermal_fem_linear_prism", "Analytical linear temperature field on CAD-derived prism", "temperature_k", 1e-8, _thermal_fem_3d),
+    TrustCapability("structural_linear_elasticity_3d_v1", "Authoritative TET4 small-strain elasticity", ("linear elasticity", "isotropic material", "constant strain TET4"),
+        {"displacement":"m","stress":"Pa"}, {"nodes":(4,5000)}, "structural_fem_axial_prism", "Analytical axial-prism displacement", "displacement_m", 5e-2, _structural_fem_3d),
+    TrustCapability("modal_fem_3d_v1", "Authoritative TET4 undamped modal analysis", ("linear modes", "consistent mass", "mass normalization"),
+        {"frequency":"Hz"}, {"nodes":(4,5000)}, "modal_fem_cantilever", "Euler-Bernoulli cantilever first frequency", "frequency_hz", 3e-1, _modal_fem_3d),
 ]
 
 # Exact, machine-verifiable association to the solver registry evidence.  The
@@ -92,6 +101,9 @@ _SOLVER_BENCHMARK_ASSOCIATIONS = {
     "acoustic_duct_1d_v1": "tests/integration/test_acoustic_solver.py (analytical sine-profile benchmark)",
     "electrostatic_rectangular_2d_v1": "tests/integration/test_electrostatic_solver.py (parallel-plate linear-potential benchmark)",
     "cfd_laminar_channel_2d_v1": "tests/integration/test_channel_flow_solver.py (analytical plane-Poiseuille profile and refinement)",
+    "thermal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_thermal_linear_cube_benchmark",
+    "structural_linear_elasticity_3d_v1": "tests/integration/test_cad_fem_3d.py::test_structural_axial_prism_benchmark_and_pressure_direction",
+    "modal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency",
 }
 
 

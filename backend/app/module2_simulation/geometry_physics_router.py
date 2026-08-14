@@ -6,7 +6,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Response
+from fastapi import APIRouter, Depends, Header, HTTPException, Response
 
 from app.core.auth import get_current_user
 from app.core.repository import get_repository
@@ -18,9 +18,13 @@ from app.module2_simulation.geometry_physics_schemas import (
     MeshCreateRequest,
     PhysicsCreateRequest,
     PhysicsModelV1,
+    PhysicsExecutionRequest,
+    PhysicsExecutionResult,
 )
-from app.module2_simulation.meshing import MeshingError, generate_mesh, prepare_geometry, write_gmsh22
+from app.module2_simulation.meshing import GeneratedMesh, MeshingError, generate_mesh, prepare_geometry, write_gmsh22
 from app.module2_simulation.physics_model import PhysicsValidationError, build_physics_model
+from app.module2_simulation.cad_fem_execution import FEMExecutionError, execute_cad_fem
+from app.module2_simulation.fem_core import FEMError
 
 
 router = APIRouter(
@@ -141,6 +145,29 @@ def _load_json(record_id: str, owner_id: str) -> dict:
         raise HTTPException(status_code=503, detail="Scientific record is temporarily unavailable") from exc
 
 
+def _load_mesh(mesh_id: str, owner_id: str) -> GeneratedMesh:
+    metadata = MeshArtifact.model_validate(_load_json(_private_id(owner_id, "mesh-metadata", mesh_id), owner_id))
+    artifact = get_repository().get_design_file(metadata.artifact_id or "")
+    if artifact is None or artifact.owner_id != owner_id:
+        raise HTTPException(status_code=404, detail="Scientific record not found")
+    try:
+        lines = get_storage().open_bytes(artifact.object_key).decode("utf-8").splitlines()
+        nodes_start = lines.index("$Nodes") + 2; nodes_end = lines.index("$EndNodes")
+        nodes_by_id = {int(parts[0]): tuple(float(value) for value in parts[1:4]) for parts in (line.split() for line in lines[nodes_start:nodes_end])}
+        if sorted(nodes_by_id) != list(range(1, len(nodes_by_id) + 1)):
+            raise ValueError("Mesh node identities are not contiguous")
+        elements_start = lines.index("$Elements") + 2; elements_end = lines.index("$EndElements")
+        triangles, tetrahedra = [], []
+        for line in lines[elements_start:elements_end]:
+            values = [int(value) for value in line.split()]; kind, tags = values[1], values[2]; vertices = tuple(value - 1 for value in values[3 + tags:])
+            if kind == 2: triangles.append(vertices)
+            elif kind == 4: tetrahedra.append(vertices)
+        return GeneratedMesh(metadata=metadata, nodes_m=tuple(nodes_by_id[index] for index in range(1, len(nodes_by_id) + 1)),
+            tetrahedra=tuple(tetrahedra), boundary_facets=tuple(triangles))
+    except (StorageError, ValueError, UnicodeError, IndexError) as exc:
+        raise HTTPException(status_code=503, detail="Stored authoritative mesh is invalid or unavailable") from exc
+
+
 @router.post("/geometry/prepare", response_model=GeometryPreparationResult)
 def prepare_cad_geometry(payload: MeshCreateRequest, current_user: dict = Depends(get_current_user)):
     _owned_experiment(payload.experiment_id, current_user["id"])
@@ -207,6 +234,27 @@ def get_physics(physics_model_id: str, current_user: dict = Depends(get_current_
         raise HTTPException(status_code=503, detail="Stored physics metadata is invalid") from exc
 
 
+@router.post("/physics/{physics_model_id}/execute", response_model=PhysicsExecutionResult)
+def execute_physics(physics_model_id: str, payload: PhysicsExecutionRequest,
+                    idempotency_key: str = Header(..., alias="Idempotency-Key"),
+                    current_user: dict = Depends(get_current_user)):
+    try:
+        model = PhysicsModelV1.model_validate(_load_json(_private_id(current_user["id"], "physics-model", physics_model_id), current_user["id"]))
+        mesh = _load_mesh(model.mesh_id, current_user["id"])
+        mesh_record = get_repository().get_design_file(_private_id(current_user["id"], "mesh-metadata", model.mesh_id))
+        if mesh_record is None:
+            raise HTTPException(status_code=404, detail="Scientific record not found")
+        simulation_id = execute_cad_fem(repository=get_repository(), storage=get_storage(), user_id=current_user["id"],
+            experiment_id=mesh_record.experiment_id, design_id=None, mesh=mesh, model=model,
+            solver_id=payload.solver_id, idempotency_key=idempotency_key)
+        job = get_repository().get_simulation_job(simulation_id)
+        return PhysicsExecutionResult(simulation_id=simulation_id, solver_id=payload.solver_id, status=job.status if job else "failed")
+    except FEMExecutionError as exc:
+        raise HTTPException(status_code=422, detail={"code": "FEM_EXECUTION_REJECTED", "message": str(exc)}) from exc
+    except FEMError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
 @router.get("/artifacts/{artifact_id}/download", response_class=Response)
 def download_mesh_artifact(artifact_id: str, current_user: dict = Depends(get_current_user)):
     record = get_repository().get_design_file(artifact_id)
@@ -215,4 +263,3 @@ def download_mesh_artifact(artifact_id: str, current_user: dict = Depends(get_cu
     return get_storage().create_download_response(
         record.object_key, f"{artifact_id}.msh", "application/vnd.gmsh"
     )
-

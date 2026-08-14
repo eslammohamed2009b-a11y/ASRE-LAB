@@ -1,7 +1,7 @@
 {
   "contract_version": "3.3.0-advanced-cad-assemblies",
-  "openapi_sha256": "1c219dd8b60b25a45f269724570d74d0594c8cc307bff56e0a51375335770da0",
-  "path_count": 111,
+  "openapi_sha256": "4168e051d8be07396983f50fbfcb2e724274309385a1a0c5c093761da999f535",
+  "path_count": 112,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
@@ -89,6 +89,7 @@
     "/api/simulations/{simulation_id}/fields/{field_result_id}/download",
     "/api/simulations/{simulation_id}/results",
     "/api/simulations/{simulation_id}/export/{fmt}",
+    "/api/geometry-physics/physics/{physics_model_id}/execute",
     "/health",
     "/version"
   ]

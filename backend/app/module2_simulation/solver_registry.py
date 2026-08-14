@@ -266,6 +266,72 @@ SOLVER_REGISTRY: dict[str, CapabilityEntry] = {
     ),
 }
 
+# Phase 3B authoritative CAD-mesh FEM capabilities.  These are deliberately
+# separate from legacy bounded solvers; only this execution family consumes a
+# PhysicsModelV1 and the Phase 3A TET4 artifact.
+SOLVER_REGISTRY.update({
+    "thermal_fem_3d_v1": CapabilityEntry(
+        solver_id="thermal_fem_3d_v1", family=SolverFamily.THERMAL, version="1.0.0",
+        implementation_status=ImplementationStatus.REAL, validation_status=ValidationStatus.PARTIALLY_VALIDATED,
+        governing_equations=["-div(k grad(T)) = q, steady isotropic conduction"],
+        numerical_method="Sparse TET4 Galerkin assembly with scipy.sparse direct solve",
+        discretization="Authoritative Phase 3A SI tetra4 mesh; exact constant-gradient volume integration and triangle facet integration",
+        supported_dimensions=["3d"], supported_geometry=["authoritative_cad_tetra4"],
+        geometry_limitations="Closed solid, conforming TET4 domains only; no contact resistance, radiation, transient behavior, or anisotropy.",
+        consumes_cad_geometry=True, consumes_authoritative_cad=True, required_mesh_dimension=3,
+        accepted_element_types=["tetra4"], supported_domain_types=["solid", "fluid"],
+        geometry_dependency_description="Consumes GeneratedMesh nodes, tetrahedra, semantic facet groups, mesh hash, and PhysicsModelV1 directly.",
+        supported_materials=["materials with thermal_conductivity"], supported_boundary_conditions=["temperature", "heat_flux", "convection", "volumetric_heat_source"],
+        required_inputs=["PhysicsModelV1", "matching authoritative mesh", "material snapshots", "semantic facet mappings"],
+        output_metrics=["temperature field", "temperature gradient", "energy balance", "algebraic residual"],
+        validity_envelope={"nodes": "<= 5000", "elements": "<= 20000", "mesh": "valid SI TET4"},
+        convergence_requirements="Normalized sparse algebraic residual and independent global energy-balance error are both reported.",
+        implementation_reference="app.module2_simulation.cad_fem_solvers.solve_thermal_fem_3d",
+        known_limitations=["No transient heat capacity model.", "No nonconforming interfaces or thermal contact resistance."],
+        benchmark_references=["tests/integration/test_cad_fem_3d.py::test_thermal_linear_cube_benchmark"],
+    ),
+    "structural_linear_elasticity_3d_v1": CapabilityEntry(
+        solver_id="structural_linear_elasticity_3d_v1", family=SolverFamily.STRUCTURAL, version="1.0.0",
+        implementation_status=ImplementationStatus.REAL, validation_status=ValidationStatus.PARTIALLY_VALIDATED,
+        governing_equations=["small-strain linear elasticity: div(sigma)+b=0", "sigma = D epsilon"],
+        numerical_method="Sparse TET4 displacement FEM with scipy.sparse direct solve",
+        discretization="Authoritative Phase 3A SI tetra4 mesh; constant-strain TET4 and triangle-distributed surface loads",
+        supported_dimensions=["3d"], supported_geometry=["authoritative_cad_tetra4"],
+        geometry_limitations="Isotropic small-strain solids only; no contact, plasticity, geometric nonlinearity, buckling, or stress-singularity convergence claims.",
+        consumes_cad_geometry=True, consumes_authoritative_cad=True, required_mesh_dimension=3,
+        accepted_element_types=["tetra4"], supported_domain_types=["solid"],
+        geometry_dependency_description="Consumes authoritative mesh and semantic CAD-to-facet mappings; no scalar geometry reconstruction.",
+        supported_materials=["materials with elastic_modulus, poisson_ratio, density"], supported_boundary_conditions=["fixed_support", "displacement", "force", "pressure", "gravity"],
+        required_inputs=["PhysicsModelV1", "matching authoritative mesh", "semantic supports and loads"],
+        output_metrics=["displacement", "strain", "stress", "von Mises stress", "reactions", "equilibrium residual"],
+        validity_envelope={"nodes": "<= 5000", "structural_dofs": "<= 15000", "poisson_ratio": "-1 < nu < 0.5"},
+        convergence_requirements="Normalized sparse algebraic residual and independent global force-equilibrium residual are both reported.",
+        implementation_reference="app.module2_simulation.cad_fem_solvers.solve_structural_fem_3d",
+        known_limitations=["TET4 bending is mesh-sensitive.", "Surface force is uniformly distributed over target facets; no point-load shortcut."],
+        benchmark_references=["tests/integration/test_cad_fem_3d.py::test_structural_axial_prism_benchmark_and_pressure_direction"],
+    ),
+    "modal_fem_3d_v1": CapabilityEntry(
+        solver_id="modal_fem_3d_v1", family=SolverFamily.MODAL, version="1.0.0",
+        implementation_status=ImplementationStatus.REAL, validation_status=ValidationStatus.PARTIALLY_VALIDATED,
+        governing_equations=["K phi = lambda M phi", "f = sqrt(lambda)/(2*pi)"],
+        numerical_method="Generalized sparse eigenproblem via scipy eigsh; bounded dense eigh only for small systems",
+        discretization="Shared authoritative TET4 structural stiffness with consistent tetrahedral mass matrix",
+        supported_dimensions=["3d"], supported_geometry=["authoritative_cad_tetra4"],
+        geometry_limitations="Undamped linear modes of constrained isotropic solids only; no frequency response, damping, prestress, or participation factors.",
+        consumes_cad_geometry=True, consumes_authoritative_cad=True, required_mesh_dimension=3,
+        accepted_element_types=["tetra4"], supported_domain_types=["solid"],
+        geometry_dependency_description="Reuses the authoritative TET4 structural assembly and support facet mappings.",
+        supported_materials=["materials with elastic_modulus, poisson_ratio, density"], supported_boundary_conditions=["fixed_support", "displacement"],
+        required_inputs=["PhysicsModelV1", "matching authoritative mesh", "requested_modes", "support constraints"],
+        output_metrics=["natural frequencies", "mass-normalized mode shapes", "eigenpair residuals"],
+        validity_envelope={"nodes": "<= 5000", "structural_dofs": "<= 15000", "modes": "1 to free_dofs-1"},
+        convergence_requirements="Every returned mass-normalized generalized eigenpair includes its relative residual; non-positive modes fail.",
+        implementation_reference="app.module2_simulation.cad_fem_solvers.solve_modal_fem_3d",
+        known_limitations=["Unconstrained/rigid-body systems fail explicitly.", "No damping or modal participation factors."],
+        benchmark_references=["tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency"],
+    ),
+})
+
 # Kept beside the registry entries so the public contract is fully typed while
 # avoiding duplicate execution metadata in individual solver classes.
 _CONTRACT_DETAILS: dict[str, dict] = {

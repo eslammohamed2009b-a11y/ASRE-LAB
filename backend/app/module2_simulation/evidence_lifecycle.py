@@ -25,7 +25,10 @@ def _convergence_semantics(result) -> tuple[str, str, str, bool | None]:
         return "direct_solver", "iterative convergence is not applicable", "not_applicable", None
     metric_types = {
         "thermal_conduction_v1": "algebraic_residual",
+        "thermal_fem_3d_v1": "algebraic_residual",
         "structural_linear_1d_v1": "algebraic_residual",
+        "structural_linear_elasticity_3d_v1": "algebraic_residual",
+        "modal_fem_3d_v1": "generalized_eigenpair_residual",
         "acoustic_duct_1d_v1": "algebraic_system_residual",
         "electrostatic_rectangular_2d_v1": "algebraic_residual",
         "cfd_laminar_channel_2d_v1": "bounded_mass_and_momentum_residual",

@@ -177,7 +177,7 @@ def test_thermal_and_structural_models_are_solver_ready_and_hash_deterministical
     structural = build_physics_model(solid_mesh, structural_request)
     assert structural.validation_status == "VALID"
     names = {prop.name for prop in structural.materials[0].properties}
-    assert names == {"elastic_modulus", "poisson_ratio", "density"}
+    assert names == {"elastic_modulus", "poisson_ratio", "density", "yield_strength"}
     assert structural.physics_hash != thermal.physics_hash
 
 
@@ -258,10 +258,20 @@ def test_authenticated_api_persists_opaque_owner_scoped_mesh_and_physics(tmp_pat
         assert physics.status_code == 200, physics.text
         physics_body = physics.json()
         assert client.get(f"/api/geometry-physics/physics/{physics_body['physics_model_id']}").status_code == 200
+        executed = client.post(
+            f"/api/geometry-physics/physics/{physics_body['physics_model_id']}/execute",
+            json={"solver_id": "thermal_fem_3d_v1"}, headers={"Idempotency-Key": "phase3b-thermal"},
+        )
+        assert executed.status_code == 200, executed.text
+        assert executed.json()["status"] == "completed"
 
         app.dependency_overrides[get_current_user] = lambda: {"id": owner_b}
         assert client.get(f"/api/geometry-physics/meshes/{body['mesh_id']}").status_code == 404
         assert client.get(f"/api/geometry-physics/artifacts/{body['artifact_id']}/download").status_code == 404
         assert client.get(f"/api/geometry-physics/physics/{physics_body['physics_model_id']}").status_code == 404
+        assert client.post(
+            f"/api/geometry-physics/physics/{physics_body['physics_model_id']}/execute",
+            json={"solver_id": "thermal_fem_3d_v1"}, headers={"Idempotency-Key": "phase3b-other"},
+        ).status_code == 404
     finally:
         app.dependency_overrides.clear()

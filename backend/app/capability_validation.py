@@ -9,6 +9,7 @@ from app.module1_design.schemas import DesignParameters
 from app.module2_simulation.schemas import ImplementationStatus, ValidationStatus
 from app.module2_simulation.solver_registry import SOLVER_REGISTRY
 from app.module2_simulation.service import SOLVER_CLASSES
+from app.module2_simulation.cad_fem_solvers import CAD_FEM_SOLVERS
 from app.module3_analysis.capability_registry import ANALYSIS_CAPABILITY_REGISTRY
 from app.v2.scientific_trust import REGISTRY as TRUST_REGISTRY
 
@@ -31,7 +32,7 @@ def capability_consistency_errors() -> list[str]:
         if not entry.solver_id or entry.solver_id != solver_id:
             errors.append(f"invalid solver id: {solver_id}")
         if entry.implementation_status == ImplementationStatus.REAL:
-            if solver_id not in SOLVER_CLASSES:
+            if solver_id not in SOLVER_CLASSES and solver_id not in CAD_FEM_SOLVERS:
                 errors.append(f"real solver missing implementation: {solver_id}")
             if not entry.version:
                 errors.append(f"real solver missing version: {solver_id}")

@@ -388,3 +388,12 @@ class MeshCreateRequest(StrictModel):
 class PhysicsCreateRequest(MeshCreateRequest):
     physics: PhysicsModelRequest
 
+
+class PhysicsExecutionRequest(StrictModel):
+    solver_id: Literal["thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"]
+
+
+class PhysicsExecutionResult(StrictModel):
+    simulation_id: str
+    solver_id: str
+    status: Literal["completed", "failed", "queued", "running"]
