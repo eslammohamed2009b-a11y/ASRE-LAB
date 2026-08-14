@@ -28,6 +28,25 @@ def _remove_path(value: dict, dotted: str):
     return result, float(refinement_value)
 
 
+def _fem_refinement_comparable(value: dict, dotted: str) -> tuple[dict, float] | None:
+    """Normalize only the authoritative mesh identity in a CAD-FEM study.
+
+    The surrounding immutable PhysicsModel is mesh-bound by design; its hash
+    therefore cannot be compared verbatim across valid refinement levels.
+    """
+    context = value.get("geometry", {}).get("fem_refinement")
+    if not isinstance(context, dict) or not dotted.startswith("geometry.fem_refinement.mesh.specification."):
+        return None
+    comparable, refinement = _remove_path(value, dotted)
+    mesh = comparable["geometry"]["fem_refinement"].pop("mesh", None)
+    if not isinstance(mesh, dict) or not mesh.get("mesh_id") or not mesh.get("mesh_hash"):
+        raise ValueError("FEM refinement source lacks authoritative mesh provenance")
+    geometry = comparable["geometry"]
+    for key in ("mesh_id", "mesh_hash", "physics_model_hash"):
+        geometry.pop(key, None)
+    return comparable, refinement
+
+
 def create_refinement_evidence(
     user_id: str, simulation_ids: list[str], selected_metric: str,
     refinement_parameter: str, threshold: float = .02, *, repository=None,
@@ -49,7 +68,7 @@ def create_refinement_evidence(
         raise ValueError("Refinement sources must belong to the same experiment and design")
 
     scientific = EvidenceRepository(repository=repository)
-    physical_hashes, refinements, numerical_ids = [], [], []
+    physical_hashes, refinements, numerical_ids, mesh_hashes = [], [], [], []
     for source in sources:
         simulation_input = repository.get_simulation_input(source.simulation_id)
         if simulation_input is None:
@@ -57,7 +76,10 @@ def create_refinement_evidence(
         input_data = asdict(simulation_input)
         input_data.pop("simulation_id", None)
         input_data.pop("created_at", None)
-        comparable, refinement_value = _remove_path(input_data, refinement_parameter)
+        normalized = _fem_refinement_comparable(input_data, refinement_parameter)
+        if normalized is not None:
+            mesh_hashes.append(input_data["geometry"]["fem_refinement"]["mesh"]["mesh_hash"])
+        comparable, refinement_value = normalized or _remove_path(input_data, refinement_parameter)
         physical_hashes.append(hashlib.sha256(json.dumps(
             comparable, sort_keys=True, separators=(",", ":"), ensure_ascii=True,
         ).encode()).hexdigest())
@@ -68,11 +90,18 @@ def create_refinement_evidence(
         numerical_ids.append(sorted(candidates, key=lambda x: (x[0].get("created_at", ""), x[0]["id"]))[-1][0]["id"])
     if len(set(physical_hashes)) != 1:
         raise ValueError("Refinement sources do not represent the same physical setup")
-    if not refinements[0] < refinements[1] < refinements[2]:
+    if mesh_hashes and len(set(mesh_hashes)) != 3:
+        raise ValueError("FEM refinement sources must use three distinct authoritative meshes")
+    ordered = refinements[0] > refinements[1] > refinements[2] if mesh_hashes else refinements[0] < refinements[1] < refinements[2]
+    if not ordered:
         raise ValueError("Refinement parameter must progress from coarse to medium to fine")
 
     values = [float(item.result.summary_metrics[selected_metric]) for item in sources]
-    changes = [abs(values[index] - values[index - 1]) / max(abs(values[index]), 1e-15) for index in (1, 2)]
+    changes = [
+        0.0 if abs(values[index] - values[index - 1]) <= 1e-12 * max(abs(values[index]), abs(values[index - 1]), 1.0)
+        else abs(values[index] - values[index - 1]) / max(abs(values[index]), 1e-15)
+        for index in (1, 2)
+    ]
     passed = changes[1] <= threshold and changes[1] <= changes[0]
     fingerprint = sources[-1].result.validation_metadata.get("input_fingerprint")
     payload = {

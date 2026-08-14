@@ -97,6 +97,14 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
         "mesh_id": model.mesh_id, "material_snapshots": material_snapshots,
         "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
         "numerical_settings": model.numerical_settings.model_dump(mode="json")}
+    input_payload["fem_refinement"] = {
+        "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
+        "analysis_family": model.analysis_family.value, "materials": material_snapshots,
+        "boundary_conditions": input_payload["boundary_conditions"],
+        "numerical_settings": input_payload["numerical_settings"],
+        "mesh": {"mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash,
+                 "specification": mesh.metadata.specification.model_dump(mode="json")},
+    }
     repository.record_simulation_input(simulation_id, "PhysicsModelV1", material_snapshots, {"length": "m"}, {},
         input_payload["boundary_conditions"], input_payload["numerical_settings"], input_payload)
     try:
