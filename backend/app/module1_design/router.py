@@ -23,6 +23,12 @@ from app.module1_design.cad_v2_schemas import (
     DesignV2ValidationResponse,
     EngineeringDesignDocumentV2,
 )
+from app.module1_design.cad_v2_design_space import (
+    V2DesignSpacePreview,
+    V2DesignSpaceRequest,
+    build_design_variants,
+)
+from app.module1_design.cad_v2_plan import DesignIntentPlan, DesignPlanAssessment, assess_design_plan
 from app.core.config import settings
 from app.core.repository import get_repository
 from app.core.storage import build_object_key, get_storage
@@ -145,6 +151,33 @@ def validate_v2_document(payload: EngineeringDesignDocumentV2) -> DesignV2Valida
 
 
 @router.post(
+    "/v2/design-space/preview",
+    response_model=V2DesignSpacePreview,
+    summary="Preview a deterministic generic V2 design-variable space",
+)
+def preview_v2_design_space(payload: V2DesignSpaceRequest) -> V2DesignSpacePreview:
+    try:
+        variants = build_design_variants(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return V2DesignSpacePreview(
+        variant_count=len(variants),
+        chunk_size=payload.chunk_size,
+        variant_ids=[item.variant_id for item in variants],
+        parameter_values=[item.parameter_values for item in variants],
+    )
+
+
+@router.post(
+    "/v2/plan/validate",
+    response_model=DesignPlanAssessment,
+    summary="Validate a non-authoritative typed CAD design-intent plan",
+)
+def validate_v2_design_plan(payload: DesignIntentPlan) -> DesignPlanAssessment:
+    return assess_design_plan(payload)
+
+
+@router.post(
     "/v2/compile",
     response_model=DesignV2CompileResponse,
     summary="Compile, validate, and privately store a typed CAD V2 design",
@@ -161,6 +194,8 @@ def compile_v2_document(
             "code": exc.code,
             "message": str(exc),
             "feature_id": exc.feature_id,
+            "body_id": exc.body_id,
+            "suggested_correction": exc.suggested_correction,
         }
         if exc.validation is not None:
             detail["validation"] = exc.validation.model_dump(mode="json")
@@ -192,6 +227,13 @@ def compile_v2_document(
                 "geometry_fingerprint": compiled.geometry_fingerprint,
                 "feature_order": compiled.feature_order,
                 "semantic_regions": compiled.semantic_regions,
+                "sketch_solve_results": [
+                    item.model_dump(mode="json") for item in compiled.sketch_solve_results
+                ],
+                "assembly_validation": (
+                    compiled.assembly.validation.model_dump(mode="json") if compiled.assembly else None
+                ),
+                "feature_hashes": compiled.feature_hashes,
                 "validation": compiled.validation.model_dump(mode="json"),
             },
             units=payload.unit_policy.model_dump(mode="json"),

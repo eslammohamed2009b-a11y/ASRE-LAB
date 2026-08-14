@@ -34,11 +34,14 @@ from app.module1_design.cad_v2_schemas import (
     GeometryDiagnostic,
     GeometryValidationResult,
     IntersectionFeature,
+    GridPatternFeature,
+    HoleFeature,
     LengthUnit,
     LengthVector3,
     LineEntity,
     LinearPatternFeature,
     LoftFeature,
+    MirrorFeature,
     MeasureInput,
     ParameterDefinition,
     ParameterReference,
@@ -48,12 +51,20 @@ from app.module1_design.cad_v2_schemas import (
     Quantity,
     RectangleEntity,
     RevolveFeature,
+    ShellFeature,
+    SketchSolveResult,
+    SketchSolveState,
+    SplitFeature,
     StandardPlane,
     SubtractFeature,
     TransformFeature,
     UnionFeature,
     ValidationStatus,
+    SweepFeature,
 )
+from app.module1_design.cad_v2_constraints import ConstraintSolveOutput, solve_sketch_constraints
+from app.module1_design.cad_v2_assembly import CompiledAssembly, compile_assembly
+from app.module1_design.cad_v2_semantics import SemanticTopologyError, resolve_semantic_regions
 
 
 LENGTH_TO_METRES: dict[LengthUnit, float] = {
@@ -77,18 +88,22 @@ class CADCompilationError(ValueError):
         *,
         feature_id: str | None = None,
         validation: GeometryValidationResult | None = None,
+        body_id: str | None = None,
+        suggested_correction: str | None = None,
     ):
         super().__init__(message)
         self.code = code
         self.feature_id = feature_id
         self.validation = validation
+        self.body_id = body_id
+        self.suggested_correction = suggested_correction
 
 
 @dataclass(frozen=True)
 class ResolvedParameter:
     name: str
     parameter_type: ParameterType
-    canonical_value: float | int | bool
+    canonical_value: float | int | bool | str
     design_variable: bool
 
 
@@ -96,6 +111,19 @@ class ResolvedParameter:
 class ExportedArtifact:
     metadata: ArtifactMetadata
     path: Path
+
+
+@dataclass
+class FeatureCompilationCache:
+    """Single-process cache keyed only by canonical feature/dependency input."""
+
+    bodies: dict[str, cq.Workplane] = field(default_factory=dict)
+
+    def get(self, feature_hash: str) -> cq.Workplane | None:
+        return self.bodies.get(feature_hash)
+
+    def put(self, feature_hash: str, body: cq.Workplane) -> None:
+        self.bodies[feature_hash] = body
 
 
 @dataclass
@@ -109,6 +137,11 @@ class CompiledDesign:
     validation: GeometryValidationResult
     geometry_signature: dict[str, Any]
     semantic_regions: list[dict[str, Any]]
+    sketch_solve_results: list[SketchSolveResult] = field(default_factory=list)
+    assembly: CompiledAssembly | None = None
+    feature_hashes: dict[str, str] = field(default_factory=dict)
+    cache_hits: list[str] = field(default_factory=list)
+    repair_provenance: list[dict[str, Any]] = field(default_factory=list)
     artifacts: list[ExportedArtifact] = field(default_factory=list)
 
     def metadata(self) -> CompileMetadata:
@@ -120,6 +153,12 @@ class CompiledDesign:
             unit_policy=self.document.unit_policy,
             tolerance_policy=_normalized_tolerance(self.document),
             validation=self.validation,
+            sketch_solve_results=self.sketch_solve_results,
+            semantic_regions=self.semantic_regions,
+            assembly_validation=self.assembly.validation if self.assembly else None,
+            feature_hashes=self.feature_hashes,
+            cache_hits=self.cache_hits,
+            repair_provenance=self.repair_provenance,
             artifacts=[item.metadata for item in self.artifacts],
         )
 
@@ -128,11 +167,15 @@ CAD_V2_CAPABILITY_CONTRACT: dict[str, Any] = {
     "schema_version": "2.0",
     "architecture": "typed_feature_graph",
     "implemented_features": [
-        "extrude", "revolve", "loft", "union", "subtract", "intersection", "transform",
-        "fillet", "chamfer", "linear_pattern", "circular_pattern",
+        "extrude", "revolve", "loft", "sweep", "union", "subtract", "intersection", "split",
+        "transform", "mirror", "fillet", "chamfer", "shell", "hole",
+        "linear_pattern", "circular_pattern", "grid_pattern",
     ],
     "sketch_entities": ["rectangle", "circle", "line", "polyline", "arc"],
-    "sketch_constraints": ["fixed"],
+    "sketch_constraints": [
+        "fixed", "coincident", "horizontal", "vertical", "parallel", "perpendicular", "equal",
+        "distance", "length", "radius", "diameter", "angle",
+    ],
     "supported_length_units": [item.value for item in LengthUnit],
     "supported_angle_units": [item.value for item in AngleUnit],
     "canonical_units": {"length": "m", "angle": "rad"},
@@ -141,16 +184,16 @@ CAD_V2_CAPABILITY_CONTRACT: dict[str, Any] = {
         "step": {"length_unit": "mm"},
         "stl": {"unitless_coordinates_are": "mm"},
     },
-    "multi_body": "supported through named immutable feature outputs and explicit output bodies",
+    "multi_body": "named immutable feature outputs, components, hierarchical instances, and interference checks",
     "semantic_regions": (
-        "bounded tags and deterministic selector intent are preserved; persistent face identity "
-        "across arbitrary topology-changing edits is not guaranteed"
+        "deterministic geometry selectors resolve to topology signatures with exact/derived/reselected/lost states"
     ),
     "geometry_validation": "OpenCascade validity, solids, volume, finite bounds, and scale checks",
     "known_limitations": [
-        "No arbitrary freeform or surface-class modeling",
-        "No assembly mates",
-        "No general sketch constraint solver; fixed explicit-coordinate entities only",
+        "No arbitrary freeform or Class-A surface modeling",
+        "Assembly relationships are validated metadata over deterministic placements, not a general mate solver",
+        "No general sketch constraint solver; the implemented adapter is deliberately bounded to supported line/arc/circle constraints",
+        "Constraint-driven sketches are called fully constrained only when all variable entities are fixed",
         "No guaranteed persistent topological naming across arbitrary topology changes",
         "No arbitrary expressions or executable user code",
     ],
@@ -174,7 +217,7 @@ def _angle_radians(value: float, unit: AngleUnit) -> float:
 def resolve_parameters(document: EngineeringDesignDocumentV2) -> dict[str, ResolvedParameter]:
     resolved: dict[str, ResolvedParameter] = {}
     for parameter in document.parameters:
-        value: float | int | bool
+        value: float | int | bool | str
         if parameter.parameter_type == ParameterType.LENGTH:
             assert isinstance(parameter.unit, LengthUnit)
             value = _length_metres(float(parameter.value), parameter.unit)
@@ -185,8 +228,10 @@ def resolve_parameters(document: EngineeringDesignDocumentV2) -> dict[str, Resol
             value = float(parameter.value)
         elif parameter.parameter_type == ParameterType.INTEGER:
             value = int(parameter.value)
-        else:
+        elif parameter.parameter_type == ParameterType.BOOLEAN:
             value = bool(parameter.value)
+        else:
+            value = str(parameter.value)
         resolved[parameter.name] = ResolvedParameter(
             name=parameter.name,
             parameter_type=parameter.parameter_type,
@@ -308,7 +353,9 @@ def _plane_for_sketch(document: EngineeringDesignDocumentV2, plane_ref: Standard
     return cq.Plane(origin=origin, xDir=x_direction, normal=normal)
 
 
-def _build_sketch(document, sketch, parameters) -> cq.Workplane:
+def _build_sketch(
+    document, sketch, parameters, solved: ConstraintSolveOutput | None = None
+) -> cq.Workplane:
     plane = _plane_for_sketch(document, sketch.plane, parameters)
     minimum = _minimum_feature_mm(document)
     wires: list[Any] = []
@@ -318,6 +365,7 @@ def _build_sketch(document, sketch, parameters) -> cq.Workplane:
         if entity.construction:
             continue
         workplane = cq.Workplane(plane)
+        solved_entity = solved.entities.get(entity.entity_id) if solved else None
         if isinstance(entity, RectangleEntity):
             width = _positive_feature(resolve_length_mm(entity.width, parameters), "rectangle width", minimum)
             height = _positive_feature(resolve_length_mm(entity.height, parameters), "rectangle height", minimum)
@@ -325,9 +373,14 @@ def _build_sketch(document, sketch, parameters) -> cq.Workplane:
                 workplane = workplane.center(*_point(entity.center, parameters))
             wires.append(workplane.rect(width, height).val())
         elif isinstance(entity, CircleEntity):
-            radius = _positive_feature(resolve_length_mm(entity.radius, parameters), "circle radius", minimum)
-            if entity.center:
-                workplane = workplane.center(*_point(entity.center, parameters))
+            if solved_entity and solved_entity.geometry_type == "circle":
+                center, solved_radius = solved_entity.data
+                radius = _positive_feature(float(solved_radius), "circle radius", minimum)
+                workplane = workplane.center(*center)
+            else:
+                radius = _positive_feature(resolve_length_mm(entity.radius, parameters), "circle radius", minimum)
+                if entity.center:
+                    workplane = workplane.center(*_point(entity.center, parameters))
             wires.append(workplane.circle(radius).val())
         elif isinstance(entity, PolylineEntity):
             points = [_point(item, parameters) for item in entity.points]
@@ -341,14 +394,20 @@ def _build_sketch(document, sketch, parameters) -> cq.Workplane:
                 values = workplane.vals()
                 loose_edges.extend(values)
         elif isinstance(entity, LineEntity):
-            start, end = _point(entity.start, parameters), _point(entity.end, parameters)
+            if solved_entity and solved_entity.geometry_type == "line":
+                start, end = solved_entity.data
+            else:
+                start, end = _point(entity.start, parameters), _point(entity.end, parameters)
             if math.dist(start, end) < minimum:
                 raise CADCompilationError("INVALID_SKETCH", "Line is shorter than minimum feature size")
             loose_edges.extend(workplane.moveTo(*start).lineTo(*end).vals())
         elif isinstance(entity, ArcEntity):
-            start = _point(entity.start, parameters)
-            midpoint = _point(entity.midpoint, parameters)
-            end = _point(entity.end, parameters)
+            if solved_entity and solved_entity.geometry_type == "arc":
+                start, midpoint, end = solved_entity.data
+            else:
+                start = _point(entity.start, parameters)
+                midpoint = _point(entity.midpoint, parameters)
+                end = _point(entity.end, parameters)
             if len({start, midpoint, end}) < 3:
                 raise CADCompilationError("INVALID_SKETCH", "Arc points must be distinct")
             arc = workplane.moveTo(*start).threePointArc(midpoint, end)
@@ -420,11 +479,71 @@ def _combine_pattern(shapes: list[Any], combine: bool) -> cq.Workplane:
     return fused
 
 
+def _build_path(document, path_id: str, parameters):
+    path = next(item for item in document.paths if item.path_id == path_id)
+    points = [cq.Vector(*_vector(item, parameters)) for item in path.points]
+    if any((points[index] - points[index - 1]).Length < _minimum_feature_mm(document) for index in range(1, len(points))):
+        raise CADCompilationError("INVALID_SWEEP_PATH", "Sweep path contains a degenerate segment")
+    try:
+        return cq.Wire.makePolygon(points, close=path.closed)
+    except Exception as exc:
+        raise CADCompilationError("INVALID_SWEEP_PATH", "Sweep path could not be constructed") from exc
+
+
+def _hole_tool(feature: HoleFeature, source: cq.Workplane, parameters, document) -> cq.Workplane:
+    minimum = _minimum_feature_mm(document)
+    diameter = _positive_feature(resolve_length_mm(feature.diameter, parameters), "hole diameter", minimum)
+    radius = diameter / 2.0
+    direction = _unit_vector(feature.axis_direction, "hole axis")
+    center = _vector(feature.center, parameters)
+    box = source.val().BoundingBox()
+    span = math.sqrt(box.xlen**2 + box.ylen**2 + box.zlen**2) + 10 * minimum
+    if feature.hole_type == "through" or (feature.hole_type == "simple" and feature.depth is None):
+        depth = span * 2
+        start = tuple(center[index] - direction[index] * span for index in range(3))
+    else:
+        if feature.depth is None:
+            raise CADCompilationError("INVALID_HOLE", "Blind and finished holes require an explicit depth")
+        depth = _positive_feature(resolve_length_mm(feature.depth, parameters), "hole depth", minimum)
+        start = center
+    cutters = [cq.Solid.makeCylinder(radius, depth, start, direction)]
+    if feature.hole_type == "counterbore":
+        if feature.counterbore_diameter is None or feature.counterbore_depth is None:
+            raise CADCompilationError(
+                "INVALID_COUNTERBORE", "Counterbore diameter and depth are required"
+            )
+        outer_radius = resolve_length_mm(feature.counterbore_diameter, parameters) / 2.0
+        counter_depth = resolve_length_mm(feature.counterbore_depth, parameters)
+        if outer_radius <= radius or counter_depth < minimum or counter_depth >= depth:
+            raise CADCompilationError("INVALID_COUNTERBORE", "Counterbore dimensions are incompatible")
+        cutters.append(cq.Solid.makeCylinder(outer_radius, counter_depth, center, direction))
+    elif feature.hole_type == "countersink":
+        if feature.countersink_diameter is None or feature.countersink_angle is None:
+            raise CADCompilationError(
+                "INVALID_COUNTERSINK", "Countersink diameter and angle are required"
+            )
+        outer_radius = resolve_length_mm(feature.countersink_diameter, parameters) / 2.0
+        included_angle = resolve_angle_degrees(feature.countersink_angle, parameters)
+        if outer_radius <= radius or included_angle <= 0 or included_angle >= 180:
+            raise CADCompilationError("INVALID_COUNTERSINK", "Countersink dimensions are incompatible")
+        cone_depth = (outer_radius - radius) / math.tan(math.radians(included_angle / 2.0))
+        if cone_depth < minimum or cone_depth >= depth:
+            raise CADCompilationError("INVALID_COUNTERSINK", "Countersink depth is incompatible with hole depth")
+        cutters.append(cq.Solid.makeCone(outer_radius, radius, cone_depth, center, direction))
+    tool = _workplane_from_shapes([cutters[0]])
+    for cutter in cutters[1:]:
+        tool = tool.union(_workplane_from_shapes([cutter]), clean=True)
+    return tool
+
+
 def _execute_feature(feature, sketches, bodies, parameters, document) -> cq.Workplane:
     minimum = _minimum_feature_mm(document)
     if isinstance(feature, ExtrudeFeature):
         distance = _positive_feature(resolve_length_mm(feature.distance, parameters), "extrude distance", minimum)
-        result = sketches[feature.sketch_id].extrude(distance, both=feature.symmetric)
+        taper = resolve_angle_degrees(feature.taper_angle, parameters) if feature.taper_angle else None
+        if taper is not None and abs(taper) >= 45:
+            raise CADCompilationError("INVALID_DRAFT", "Extrusion taper must be less than 45 degrees")
+        result = sketches[feature.sketch_id].extrude(distance, both=feature.symmetric, taper=taper)
     elif isinstance(feature, RevolveFeature):
         angle = resolve_angle_degrees(feature.angle, parameters)
         if angle <= 0 or angle > 360 + 1e-9:
@@ -435,6 +554,10 @@ def _execute_feature(feature, sketches, bodies, parameters, document) -> cq.Work
             raise CADCompilationError("INVALID_AXIS", "Revolve axis must be non-zero")
         result = sketches[feature.sketch_id].revolve(angle, axisStart=axis_start, axisEnd=axis_end)
     elif isinstance(feature, LoftFeature):
+        if not feature.make_solid:
+            raise CADCompilationError("SURFACE_NOT_SUPPORTED", "Lofted surface bodies are not enabled")
+        if feature.transition != "right":
+            raise CADCompilationError("UNSUPPORTED_LOFT_TRANSITION", "This kernel loft supports the right transition only")
         wires = []
         for sketch_id in feature.sketch_ids:
             wires.extend(sketches[sketch_id].vals())
@@ -442,12 +565,34 @@ def _execute_feature(feature, sketches, bodies, parameters, document) -> cq.Work
             result = cq.Workplane("XY").newObject(wires).toPending().loft(ruled=feature.ruled)
         except Exception as exc:
             raise CADCompilationError("LOFT_FAILURE", "Loft profiles could not be joined") from exc
+    elif isinstance(feature, SweepFeature):
+        if not feature.make_solid:
+            raise CADCompilationError("SURFACE_NOT_SUPPORTED", "Swept surface bodies are not enabled")
+        path = _build_path(document, feature.path_id, parameters)
+        wires = [wire for sketch_id in feature.sketch_ids for wire in sketches[sketch_id].vals()]
+        try:
+            result = cq.Workplane("XY").newObject(wires).toPending().sweep(
+                path,
+                multisection=len(feature.sketch_ids) > 1,
+                makeSolid=True,
+                isFrenet=feature.is_frenet,
+                combine=True,
+                transition=feature.transition,
+            )
+        except Exception as exc:
+            raise CADCompilationError("SWEEP_FAILURE", "Sweep profiles and path are incompatible") from exc
     elif isinstance(feature, UnionFeature):
         result = bodies[feature.target_body].union(bodies[feature.tool_body], clean=True)
     elif isinstance(feature, SubtractFeature):
         result = bodies[feature.target_body].cut(bodies[feature.tool_body], clean=True)
     elif isinstance(feature, IntersectionFeature):
         result = bodies[feature.target_body].intersect(bodies[feature.tool_body], clean=True)
+    elif isinstance(feature, SplitFeature):
+        result = (
+            bodies[feature.target_body].cut(bodies[feature.tool_body], clean=True)
+            if feature.keep == "outside"
+            else bodies[feature.target_body].intersect(bodies[feature.tool_body], clean=True)
+        )
     elif isinstance(feature, TransformFeature):
         translation = _vector(feature.translation, parameters)
         shapes = []
@@ -461,12 +606,25 @@ def _execute_feature(feature, sketches, bodies, parameters, document) -> cq.Work
                 transformed = transformed.rotate(axis_origin, axis_end, angle)
             shapes.append(transformed)
         result = _workplane_from_shapes(shapes)
+    elif isinstance(feature, MirrorFeature):
+        plane = feature.plane.value if isinstance(feature.plane, StandardPlane) else feature.plane
+        if plane not in {item.value for item in StandardPlane}:
+            raise CADCompilationError("UNSUPPORTED_MIRROR_PLANE", "Mirror currently requires XY, XZ, or YZ")
+        result = bodies[feature.source_body].mirror(plane, union=feature.union)
     elif isinstance(feature, FilletFeature):
         radius = _positive_feature(resolve_length_mm(feature.radius, parameters), "fillet radius", minimum)
         result = _selected_edges(bodies[feature.source_body], feature.edge_selector).fillet(radius)
     elif isinstance(feature, ChamferFeature):
         distance = _positive_feature(resolve_length_mm(feature.distance, parameters), "chamfer distance", minimum)
         result = _selected_edges(bodies[feature.source_body], feature.edge_selector).chamfer(distance)
+    elif isinstance(feature, ShellFeature):
+        thickness = _positive_feature(resolve_length_mm(feature.thickness, parameters), "shell thickness", minimum)
+        selector = {
+            "max_x": ">X", "min_x": "<X", "max_y": ">Y", "min_y": "<Y",
+            "max_z": ">Z", "min_z": "<Z",
+        }[feature.remove_faces]
+        signed = -thickness if feature.inward else thickness
+        result = bodies[feature.source_body].faces(selector).shell(signed, kind=feature.kind)
     elif isinstance(feature, LinearPatternFeature):
         count = resolve_integer(feature.count, parameters)
         if count < 1 or count > 10_000:
@@ -478,6 +636,30 @@ def _execute_feature(feature, sketches, bodies, parameters, document) -> cq.Work
             offset = cq.Vector(*(component * spacing * index for component in direction))
             shapes.extend(shape.translate(offset) for shape in _shape_objects(bodies[feature.source_body]))
         result = _combine_pattern(shapes, feature.combine)
+    elif isinstance(feature, GridPatternFeature):
+        x_count = resolve_integer(feature.x_count, parameters)
+        y_count = resolve_integer(feature.y_count, parameters)
+        if not (1 <= x_count <= 1000 and 1 <= y_count <= 1000 and x_count * y_count <= 10_000):
+            raise CADCompilationError("INVALID_PATTERN", "Grid pattern count exceeds the bounded limit")
+        x_spacing = _positive_feature(resolve_length_mm(feature.x_spacing, parameters), "x spacing", minimum)
+        y_spacing = _positive_feature(resolve_length_mm(feature.y_spacing, parameters), "y spacing", minimum)
+        x_direction = _unit_vector(feature.x_direction, "grid x direction")
+        y_direction = _unit_vector(feature.y_direction, "grid y direction")
+        dot = sum(a * b for a, b in zip(x_direction, y_direction))
+        if abs(dot) > 1e-7:
+            raise CADCompilationError("INVALID_PATTERN", "Grid directions must be perpendicular")
+        shapes = []
+        for x_index in range(x_count):
+            for y_index in range(y_count):
+                offset = cq.Vector(*(
+                    x_direction[index] * x_spacing * x_index + y_direction[index] * y_spacing * y_index
+                    for index in range(3)
+                ))
+                shapes.extend(shape.translate(offset) for shape in _shape_objects(bodies[feature.source_body]))
+        result = _combine_pattern(shapes, feature.combine)
+    elif isinstance(feature, HoleFeature):
+        tool = _hole_tool(feature, bodies[feature.source_body], parameters, document)
+        result = bodies[feature.source_body].cut(tool, clean=True)
     elif isinstance(feature, CircularPatternFeature):
         count = resolve_integer(feature.count, parameters)
         if count < 1 or count > 10_000:
@@ -588,6 +770,9 @@ def scientific_design_state(document: EngineeringDesignDocumentV2) -> dict[str, 
         "datum_planes": [
             _canonical_model(item, parameters) for item in sorted(document.datum_planes, key=lambda x: x.datum_id)
         ],
+        "paths": [
+            _canonical_model(item, parameters) for item in sorted(document.paths, key=lambda x: x.path_id)
+        ],
         "bodies": [
             _canonical_model(item, parameters) for item in sorted(document.bodies, key=lambda x: x.body_id)
         ],
@@ -601,7 +786,59 @@ def scientific_design_state(document: EngineeringDesignDocumentV2) -> dict[str, 
         "semantic_regions": [
             _canonical_model(item, parameters) for item in sorted(document.semantic_regions, key=lambda x: x.tag)
         ],
+        "engineering_interfaces": [
+            _canonical_model(item, parameters)
+            for item in sorted(document.engineering_interfaces, key=lambda x: x.interface_id)
+        ],
+        "components": [
+            _canonical_model(item, parameters) for item in sorted(document.components, key=lambda x: x.component_id)
+        ],
+        "component_instances": [
+            _canonical_model(item, parameters)
+            for item in sorted(document.component_instances, key=lambda x: x.instance_id)
+        ],
+        "assembly_relationships": [
+            _canonical_model(item, parameters)
+            for item in sorted(document.assembly_relationships, key=lambda x: x.relationship_id)
+        ],
+        "detect_interference": document.detect_interference,
     }
+
+
+def feature_input_hashes(document: EngineeringDesignDocumentV2) -> dict[str, str]:
+    """Canonical per-feature hashes with transitive dependency invalidation."""
+    from app.v2.execution import digest
+
+    parameters = resolve_parameters(document)
+    sketch_by_id = {item.sketch_id: item for item in document.sketches}
+    path_by_id = {item.path_id: item for item in document.paths}
+    feature_by_id = {item.feature_id: item for item in document.features}
+    producer = {item.output_body: item.feature_id for item in document.features}
+    hashes: dict[str, str] = {}
+    for feature_id in document.deterministic_feature_order():
+        feature = feature_by_id[feature_id]
+        dependency_ids = set(feature.dependencies)
+        for field_name in ("source_body", "target_body", "tool_body"):
+            body_id = getattr(feature, field_name, None)
+            if body_id in producer:
+                dependency_ids.add(producer[body_id])
+        sketch_ids = []
+        if hasattr(feature, "sketch_id"):
+            sketch_ids.append(feature.sketch_id)
+        sketch_ids.extend(getattr(feature, "sketch_ids", []))
+        payload = {
+            "feature": _canonical_model(feature, parameters),
+            "sketches": [
+                _canonical_model(sketch_by_id[item], parameters) for item in sorted(sketch_ids)
+            ],
+            "path": (
+                _canonical_model(path_by_id[feature.path_id], parameters)
+                if hasattr(feature, "path_id") else None
+            ),
+            "dependency_hashes": [hashes[item] for item in sorted(dependency_ids)],
+        }
+        hashes[feature_id] = digest(payload)
+    return hashes
 
 
 def design_hash(document: EngineeringDesignDocumentV2) -> str:
@@ -681,20 +918,53 @@ def validate_geometry(
     return result, signature
 
 
-def compile_design(document: EngineeringDesignDocumentV2) -> CompiledDesign:
+def compile_design(
+    document: EngineeringDesignDocumentV2,
+    cache: FeatureCompilationCache | None = None,
+    *,
+    strict_semantics: bool = True,
+) -> CompiledDesign:
     parameters = resolve_parameters(document)
-    sketches = {
-        sketch.sketch_id: _build_sketch(document, sketch, parameters) for sketch in document.sketches
-    }
+    solve_outputs: dict[str, ConstraintSolveOutput] = {}
+    sketches: dict[str, cq.Workplane] = {}
+    tolerance_mm = _length_metres(
+        document.tolerance_policy.geometric_equality_absolute.value,
+        document.tolerance_policy.geometric_equality_absolute.unit,  # type: ignore[arg-type]
+    ) * 1000.0
+    for sketch in document.sketches:
+        solved = solve_sketch_constraints(
+            sketch,
+            point=lambda value: _point(value, parameters),
+            length=lambda value: resolve_length_mm(value, parameters),
+            angle=lambda value: resolve_angle_degrees(value, parameters),
+            residual_tolerance=tolerance_mm,
+        )
+        solve_outputs[sketch.sketch_id] = solved
+        if solved.result.state in {SketchSolveState.OVERCONSTRAINED, SketchSolveState.INVALID}:
+            raise CADCompilationError(
+                "SKETCH_CONSTRAINT_FAILURE",
+                f"Sketch '{sketch.sketch_id}' constraint system is {solved.result.state.value.lower()}",
+                suggested_correction="Remove conflicting constraints or fully specify supported entities.",
+            )
+        sketches[sketch.sketch_id] = _build_sketch(document, sketch, parameters, solved)
     feature_by_id = {item.feature_id: item for item in document.features}
     order = document.deterministic_feature_order()
+    input_hashes = feature_input_hashes(document)
     bodies: dict[str, cq.Workplane] = {}
+    cache_hits: list[str] = []
     for feature_id in order:
         feature = feature_by_id[feature_id]
         try:
-            bodies[feature.output_body] = _execute_feature(
-                feature, sketches, bodies, parameters, document
-            )
+            cached = cache.get(input_hashes[feature_id]) if cache else None
+            if cached is not None:
+                bodies[feature.output_body] = cached
+                cache_hits.append(feature_id)
+            else:
+                bodies[feature.output_body] = _execute_feature(
+                    feature, sketches, bodies, parameters, document
+                )
+                if cache:
+                    cache.put(input_hashes[feature_id], bodies[feature.output_body])
         except CADCompilationError as exc:
             if exc.feature_id is None:
                 exc.feature_id = feature_id
@@ -712,6 +982,43 @@ def compile_design(document: EngineeringDesignDocumentV2) -> CompiledDesign:
         )
     from app.v2.execution import digest
 
+    try:
+        semantics = resolve_semantic_regions(
+            document,
+            bodies,
+            resolve_length_mm=lambda value: resolve_length_mm(value, parameters),
+            tolerance_mm=tolerance_mm,
+            fail_on_lost=strict_semantics,
+        )
+    except SemanticTopologyError as exc:
+        raise CADCompilationError(
+            exc.code,
+            str(exc),
+            suggested_correction="Refine the semantic selector so it resolves exactly one intended region.",
+        ) from exc
+    canonical_state = scientific_design_state(document)
+    try:
+        assembly = compile_assembly(
+            document,
+            bodies,
+            vector=lambda value: _vector(value, parameters),
+            angle=lambda value: resolve_angle_degrees(value, parameters),
+            minimum_interference_volume_mm3=_minimum_feature_mm(document) ** 3,
+            identity_payload={
+                key: canonical_state[key]
+                for key in (
+                    "components", "component_instances", "assembly_relationships",
+                    "detect_interference",
+                )
+            },
+        )
+    except ValueError as exc:
+        raise CADCompilationError(
+            "ASSEMBLY_VALIDATION_FAILURE",
+            str(exc),
+            suggested_correction="Check component placements and assembly relationship inputs.",
+        ) from exc
+
     return CompiledDesign(
         document=document,
         bodies=bodies,
@@ -721,14 +1028,22 @@ def compile_design(document: EngineeringDesignDocumentV2) -> CompiledDesign:
         normalized_parameters=normalized_parameter_state(document),
         validation=validation,
         geometry_signature=signature,
-        semantic_regions=[item.model_dump(mode="json") for item in document.semantic_regions],
+        semantic_regions=[item.model_dump(mode="json") for item in semantics],
+        sketch_solve_results=[solve_outputs[item.sketch_id].result for item in document.sketches],
+        assembly=assembly,
+        feature_hashes=input_hashes,
+        cache_hits=cache_hits,
     )
 
 
 def _compound_for_outputs(compiled: CompiledDesign):
     shapes: list[Any] = []
-    for body_id in compiled.document.output_body_ids:
-        shapes.extend(_shape_objects(compiled.bodies[body_id]))
+    if compiled.assembly is not None:
+        for instance_id in sorted(compiled.assembly.instance_shapes):
+            shapes.extend(_shape_objects(compiled.assembly.instance_shapes[instance_id]))
+    else:
+        for body_id in compiled.document.output_body_ids:
+            shapes.extend(_shape_objects(compiled.bodies[body_id]))
     if not shapes:
         raise CADCompilationError("EMPTY_EXPORT", "No validated geometry is available for export")
     return shapes[0] if len(shapes) == 1 else cq.Compound.makeCompound(shapes)
@@ -743,7 +1058,9 @@ def _checksum(path: Path) -> str:
 
 
 def export_compiled_design(
-    compiled: CompiledDesign, directory: Path | None = None
+    compiled: CompiledDesign,
+    directory: Path | None = None,
+    formats: tuple[Literal["step", "stl"], ...] = ("step", "stl"),
 ) -> list[ExportedArtifact]:
     if compiled.validation.status == ValidationStatus.INVALID:
         raise CADCompilationError("INVALID_EXPORT", "Invalid geometry cannot be exported")
@@ -751,10 +1068,14 @@ def export_compiled_design(
     export_dir.mkdir(parents=True, exist_ok=True)
     shape = _compound_for_outputs(compiled)
     artifacts: list[ExportedArtifact] = []
-    for file_format, media_type, coordinate_unit in (
-        ("step", "model/step", "mm"),
-        ("stl", "model/stl", "unitless; coordinates are mm"),
-    ):
+    if not formats or len(formats) != len(set(formats)):
+        raise CADCompilationError("INVALID_EXPORT_REQUEST", "Export formats must be unique and non-empty")
+    supported = {
+        "step": ("model/step", "mm"),
+        "stl": ("model/stl", "unitless; coordinates are mm"),
+    }
+    for file_format in formats:
+        media_type, coordinate_unit = supported[file_format]
         artifact_id = str(uuid.uuid4())
         path = export_dir / f"{artifact_id}.{file_format}"
         try:

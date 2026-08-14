@@ -57,3 +57,29 @@ def test_v2_compile_contract_exposes_only_opaque_artifact_ids_not_storage_keys()
     assert operation["responses"]["200"]["content"]["application/json"]["schema"] == {
         "$ref": "#/components/schemas/DesignV2CompileResponse"
     }
+
+
+def test_v2_design_space_and_plan_boundaries_are_authenticated_and_typed():
+    payload = _payload()
+    payload["parameters"][0]["design_variable"] = True
+    client = TestClient(app)
+    assert client.post("/api/design/v2/design-space/preview", json={
+        "document": payload,
+        "sweeps": [{"parameter_name": "width", "method": "linear", "start": {"value": 80, "unit": "mm"}, "stop": {"value": 120, "unit": "mm"}, "count": 3}],
+    }).status_code == 401
+    app.dependency_overrides[get_current_user] = lambda: {"id": "cad-v2-user"}
+    try:
+        preview = TestClient(app).post("/api/design/v2/design-space/preview", json={
+            "document": payload,
+            "sweeps": [{"parameter_name": "width", "method": "linear", "start": {"value": 80, "unit": "mm"}, "stop": {"value": 120, "unit": "mm"}, "count": 3}],
+        })
+        plan = TestClient(app).post("/api/design/v2/plan/validate", json={
+            "questions": ["Which wall thickness is authoritative?"]
+        })
+    finally:
+        app.dependency_overrides.clear()
+    assert preview.status_code == 200
+    assert preview.json()["variant_count"] == 3
+    assert len(set(preview.json()["variant_ids"])) == 3
+    assert plan.status_code == 200
+    assert plan.json()["ready_for_translation"] is False
