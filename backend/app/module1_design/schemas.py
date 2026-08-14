@@ -268,3 +268,14 @@ class JobResultsResponse(BaseModel):
     job_id: str
     status: str
     designs: list[JobDesignSummary]
+
+
+# Additive public schema surface for the general feature-based CAD path. The
+# legacy models above remain unchanged and continue to back existing clients.
+from app.module1_design.cad_v2_schemas import (  # noqa: E402,F401
+    EngineeringDesignDocumentV2,
+    GeometryValidationResult,
+    ParameterDefinition,
+    ParameterReference,
+    Quantity,
+)

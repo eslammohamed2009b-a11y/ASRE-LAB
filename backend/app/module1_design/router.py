@@ -10,6 +10,19 @@ from app.module1_design.capability_registry import GeometryClassificationError
 from app.module1_design.cadquery_engine import generate_model
 from app.module1_design.multiprocessing_generator import generate_design_matrix
 from app.module1_design.design_space import build_design_space
+from app.module1_design.cad_v2_compiler import (
+    CADCompilationError,
+    CAD_V2_CAPABILITY_CONTRACT,
+    compile_design,
+    design_hash as v2_design_hash,
+    export_compiled_design,
+    normalized_parameter_state,
+)
+from app.module1_design.cad_v2_schemas import (
+    DesignV2CompileResponse,
+    DesignV2ValidationResponse,
+    EngineeringDesignDocumentV2,
+)
 from app.core.config import settings
 from app.core.repository import get_repository
 from app.core.storage import build_object_key, get_storage
@@ -107,6 +120,127 @@ def parse_prompt(payload: PromptRequest):
     except GeometryClassificationError as exc:
         raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
     return ParseResponse(params=params)
+
+
+@router.get(
+    "/v2/capabilities",
+    summary="Get the truthful general CAD V2 capability contract",
+)
+def v2_capabilities() -> dict:
+    return CAD_V2_CAPABILITY_CONTRACT
+
+
+@router.post(
+    "/v2/validate",
+    response_model=DesignV2ValidationResponse,
+    summary="Validate and normalize a typed CAD V2 design document",
+)
+def validate_v2_document(payload: EngineeringDesignDocumentV2) -> DesignV2ValidationResponse:
+    return DesignV2ValidationResponse(
+        valid=True,
+        design_hash=v2_design_hash(payload),
+        feature_order=payload.deterministic_feature_order(),
+        normalized_parameters=normalized_parameter_state(payload),
+    )
+
+
+@router.post(
+    "/v2/compile",
+    response_model=DesignV2CompileResponse,
+    summary="Compile, validate, and privately store a typed CAD V2 design",
+)
+def compile_v2_document(
+    payload: EngineeringDesignDocumentV2,
+    current_user: dict = Depends(get_current_user),
+) -> DesignV2CompileResponse:
+    try:
+        compiled = compile_design(payload)
+        artifacts = export_compiled_design(compiled)
+    except CADCompilationError as exc:
+        detail = {
+            "code": exc.code,
+            "message": str(exc),
+            "feature_id": exc.feature_id,
+        }
+        if exc.validation is not None:
+            detail["validation"] = exc.validation.model_dump(mode="json")
+        raise HTTPException(status_code=422, detail=detail) from exc
+
+    repo = get_repository()
+    storage = get_storage()
+    experiment_id: str | None = None
+    design_model_id: str | None = None
+    saved_keys: list[str] = []
+    try:
+        experiment_id = repo.create_experiment(
+            user_id=current_user["id"],
+            name=f"CAD V2: {payload.document_id}",
+            input_specification={
+                "schema_version": payload.schema_version,
+                "design_document": payload.model_dump(mode="json"),
+                "design_hash": compiled.design_hash,
+            },
+        )
+        design_model_id = repo.create_design_model(
+            experiment_id=experiment_id,
+            user_id=current_user["id"],
+            geometry_family="engineering_design_v2",
+            parameters={
+                "schema_version": payload.schema_version,
+                "normalized_parameters": compiled.normalized_parameters,
+                "design_hash": compiled.design_hash,
+                "geometry_fingerprint": compiled.geometry_fingerprint,
+                "feature_order": compiled.feature_order,
+                "semantic_regions": compiled.semantic_regions,
+                "validation": compiled.validation.model_dump(mode="json"),
+            },
+            units=payload.unit_policy.model_dump(mode="json"),
+            variation_index=0,
+            generation_status="completed",
+            cadquery_version=getattr(__import__("cadquery"), "__version__", "unknown"),
+        )
+        pending_records: list[tuple] = []
+        for artifact in artifacts:
+            metadata = artifact.metadata
+            object_key = build_object_key(
+                current_user["id"], experiment_id, design_model_id, artifact.path.name
+            )
+            storage.save_file(object_key, artifact.path)
+            saved_keys.append(object_key)
+            pending_records.append((metadata, object_key))
+        for metadata, object_key in pending_records:
+            repo.record_design_file(
+                design_id=metadata.artifact_id,
+                owner_id=current_user["id"],
+                experiment_id=experiment_id,
+                design_model_id=design_model_id,
+                file_format=metadata.file_format,
+                storage_provider="supabase" if type(storage).__name__ == "SupabaseStorage" else "local",
+                object_key=object_key,
+                file_size_bytes=metadata.byte_size,
+                checksum_sha256=metadata.checksum_sha256,
+                media_type=metadata.media_type,
+            )
+    except Exception:
+        for object_key in saved_keys:
+            storage.delete_file(object_key)
+        if design_model_id is not None:
+            repo.update_design_model_status(design_model_id, "failed")
+        logger.error("Failed to persist CAD V2 artifacts", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail="The validated design could not be stored; no artifact is available.",
+        )
+    finally:
+        for artifact in artifacts:
+            artifact.path.unlink(missing_ok=True)
+
+    assert experiment_id is not None and design_model_id is not None
+    return DesignV2CompileResponse(
+        design_id=design_model_id,
+        experiment_id=experiment_id,
+        metadata=compiled.metadata(),
+    )
 
 
 @router.post(
