@@ -12,10 +12,11 @@ import json
 import shutil
 import subprocess
 import tempfile
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable
+from typing import Callable, Iterator
 
 from app.module2_simulation.cad_fem_solvers import (
     FEMSolution,
@@ -68,6 +69,7 @@ class SolverExecutionPlanV1:
     analysis_family: str
     backend_id: str
     backend_version: str
+    backend_availability: BackendAvailability
     execution_mode: str
     mesh_id: str
     mesh_hash: str
@@ -166,11 +168,37 @@ def _material_snapshot(model: PhysicsModelV1) -> list[dict]:
     return [item.model_dump(mode="json") for item in model.materials]
 
 
+def scientific_execution_fingerprint(
+    solver_id: str,
+    backend_id: str,
+    backend_version: str | None,
+    mesh: GeneratedMesh,
+    model: PhysicsModelV1,
+) -> str:
+    """Hash the complete scientific state consumed by a fixed execution."""
+    entry = SOLVER_REGISTRY.get(solver_id)
+    if entry is None:
+        raise SolverOrchestrationError("UNKNOWN_SOLVER", f"Solver '{solver_id}' is not registered")
+    return _canonical_hash({
+        "solver_id": solver_id, "solver_version": entry.version, "backend_id": backend_id,
+        "backend_version": backend_version, "physics_hash": model.physics_hash,
+        "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
+        "mesh_id": mesh.metadata.mesh_id, "mesh_hash": mesh.metadata.mesh_hash,
+        "material_snapshots": _material_snapshot(model),
+        "domains": [item.model_dump(mode="json") for item in model.domains],
+        "material_assignments": [item.model_dump(mode="json") for item in model.material_assignments],
+        "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
+        "numerical_settings": model.numerical_settings.model_dump(mode="json"),
+    })
+
+
 def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1, limits: ExecutionResourceLimits, backend: BackendCapability) -> list[str]:
     entry = SOLVER_REGISTRY.get(solver_id)
     if entry is None or solver_id not in FIXED_SOLVER_ADAPTERS:
         return ["UNKNOWN_SOLVER"]
     errors: list[str] = []
+    if backend.backend_id != FIXED_SOLVER_ADAPTERS[solver_id].backend_id:
+        errors.append("SOLVER_BACKEND_MISMATCH")
     if entry.implementation_status != ImplementationStatus.REAL:
         errors.append("SOLVER_NOT_IMPLEMENTED")
     if entry.family.value != model.analysis_family.value:
@@ -211,19 +239,13 @@ def create_execution_plan(solver_id: str, mesh: GeneratedMesh, model: PhysicsMod
     errors = _preflight_errors(solver_id, mesh, model, limits, active_backend)
     if adapter is None or entry is None:
         raise SolverOrchestrationError("UNKNOWN_SOLVER", f"Solver '{solver_id}' has no fixed authoritative adapter")
-    fingerprint = _canonical_hash({
-        "solver_id": solver_id, "solver_version": entry.version, "backend_id": adapter.backend_id,
-        "backend_version": active_backend.detected_version, "physics_hash": model.physics_hash,
-        "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
-        "mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash, "material_snapshots": _material_snapshot(model),
-        "domains": [item.model_dump(mode="json") for item in model.domains],
-        "material_assignments": [item.model_dump(mode="json") for item in model.material_assignments],
-        "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
-        "numerical_settings": model.numerical_settings.model_dump(mode="json"),
-    })
+    fingerprint = scientific_execution_fingerprint(
+        solver_id, active_backend.backend_id, active_backend.detected_version, mesh, model
+    )
     return SolverExecutionPlanV1(
         solver_id=solver_id, solver_version=entry.version, analysis_family=model.analysis_family.value,
-        backend_id=adapter.backend_id, backend_version=active_backend.detected_version or "unavailable",
+        backend_id=active_backend.backend_id, backend_version=active_backend.detected_version or "unavailable",
+        backend_availability=active_backend.status,
         execution_mode="fixed_python_callable", mesh_id=mesh.metadata.mesh_id, mesh_hash=mesh.metadata.mesh_hash,
         physics_model_id=model.physics_model_id, physics_hash=model.physics_hash, request_fingerprint=fingerprint,
         preflight_status=PreflightStatus.PASS if not errors else PreflightStatus.FAIL, resource_limits=limits,
@@ -239,8 +261,14 @@ def dispatch(plan: SolverExecutionPlanV1, mesh: GeneratedMesh, model: PhysicsMod
     adapter = FIXED_SOLVER_ADAPTERS.get(plan.solver_id)
     if adapter is None or adapter.backend_id != plan.backend_id:
         raise SolverOrchestrationError("SOLVER_BACKEND_UNAVAILABLE", "Fixed adapter is unavailable; no fallback solver was selected")
-    if plan.mesh_hash != mesh.metadata.mesh_hash or plan.physics_hash != model.physics_hash:
-        raise SolverOrchestrationError("PLAN_INPUT_MISMATCH", "Plan does not match the supplied scientific inputs")
+    active_backend = local_fem_backend()
+    if active_backend.backend_id != plan.backend_id or active_backend.detected_version != plan.backend_version:
+        raise SolverOrchestrationError("SOLVER_BACKEND_MISMATCH", "The active fixed backend no longer matches the execution plan")
+    recomputed = scientific_execution_fingerprint(
+        plan.solver_id, active_backend.backend_id, active_backend.detected_version, mesh, model
+    )
+    if recomputed != plan.request_fingerprint:
+        raise SolverOrchestrationError("PLAN_INPUT_MISMATCH", "Plan does not match the supplied complete scientific inputs")
     return adapter.callable(mesh, model)
 
 
@@ -255,14 +283,26 @@ class OpenFOAMAdapterFoundation:
 
     def __init__(self, config: OpenFOAMExecutionConfig = OpenFOAMExecutionConfig()):
         self.config = config
+        self._authorized_workspaces: set[Path] = set()
+
+    @contextmanager
+    def case_workspace(self) -> Iterator[Path]:
+        """Create the only case directory this adapter will execute."""
+        with tempfile.TemporaryDirectory(prefix="asre-openfoam-") as directory:
+            workspace = Path(directory).resolve()
+            self._authorized_workspaces.add(workspace)
+            try:
+                yield workspace
+            finally:
+                self._authorized_workspaces.discard(workspace)
 
     def run_fixed_case(self, case_directory: Path) -> subprocess.CompletedProcess[str]:
         executable = shutil.which(self.executable)
         if executable is None:
             raise SolverOrchestrationError("SOLVER_BACKEND_UNAVAILABLE", "OpenFOAM simpleFoam is not installed")
         case = case_directory.resolve()
-        if not case.is_dir():
-            raise SolverOrchestrationError("INVALID_EXTERNAL_WORKDIR", "OpenFOAM case directory must exist")
+        if not case.is_dir() or case not in self._authorized_workspaces:
+            raise SolverOrchestrationError("INVALID_EXTERNAL_WORKDIR", "OpenFOAM case directory is not an adapter-controlled workspace")
         # The only command is a literal executable plus the generated case path.
         try:
             completed = subprocess.run([executable, "-case", str(case)], shell=False, capture_output=True, text=True, timeout=self.config.timeout_seconds, check=False)
@@ -273,4 +313,5 @@ class OpenFOAMAdapterFoundation:
         return completed
 
     def isolated_workdir(self) -> tempfile.TemporaryDirectory[str]:
+        """Deprecated helper; use ``case_workspace`` for executable cases."""
         return tempfile.TemporaryDirectory(prefix="asre-openfoam-")

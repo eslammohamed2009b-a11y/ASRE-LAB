@@ -110,31 +110,64 @@ def test_resource_bound_backend_unavailable_and_fingerprint_identity(mesh):
     assert create_execution_plan("thermal_fem_3d_v1", mesh, thermal).request_fingerprint != create_execution_plan("thermal_fem_3d_v1", mesh, changed).request_fingerprint
 
 
+def test_dispatch_recomputes_complete_fingerprint_for_stale_plan(mesh, monkeypatch):
+    original = model(mesh, "thermal")
+    plan = create_execution_plan("thermal_fem_3d_v1", mesh, original)
+    mutated = original.model_copy(update={"boundary_conditions": [
+        *original.boundary_conditions[:-1], original.boundary_conditions[-1].model_copy(update={"heat_flux_w_m2": 7.0}),
+    ]})
+    assert mutated.physics_hash == original.physics_hash
+    called = []
+    module = __import__("app.module2_simulation.solver_orchestrator", fromlist=["FIXED_SOLVER_ADAPTERS"])
+    adapter = module.FIXED_SOLVER_ADAPTERS["thermal_fem_3d_v1"]
+    monkeypatch.setitem(module.FIXED_SOLVER_ADAPTERS, "thermal_fem_3d_v1", replace(adapter, callable=lambda *_: called.append(True)))
+    with pytest.raises(SolverOrchestrationError) as exc:
+        dispatch(plan, mesh, mutated)
+    assert exc.value.code == "PLAN_INPUT_MISMATCH"
+    assert not called
+
+
+def test_backend_identity_mismatch_is_not_an_executable_plan(mesh):
+    injected = BackendCapability("openfoam", BackendAvailability.AVAILABLE, "fake", "test", "test")
+    plan = create_execution_plan("thermal_fem_3d_v1", mesh, model(mesh, "thermal"), backend=injected)
+    assert plan.backend_id == "openfoam" and plan.backend_version == "fake"
+    assert plan.preflight_status == PreflightStatus.FAIL
+    assert plan.diagnostics == ("SOLVER_BACKEND_MISMATCH",)
+
+
 def test_openfoam_foundation_uses_fixed_safe_command_and_isolation(monkeypatch, tmp_path):
     adapter = OpenFOAMAdapterFoundation(OpenFOAMExecutionConfig(timeout_seconds=7))
     calls = []
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/simpleFoam")
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.subprocess.run", lambda args, **kwargs: calls.append((args, kwargs)) or CompletedProcess(args, 17, "", "failure"))
-    case = tmp_path / "case;not-a-command"; case.mkdir()
+    arbitrary = tmp_path / "case;not-a-command"; arbitrary.mkdir()
     with pytest.raises(SolverOrchestrationError) as exc:
-        adapter.run_fixed_case(case)
+        adapter.run_fixed_case(arbitrary)
+    assert exc.value.code == "INVALID_EXTERNAL_WORKDIR"
+    with adapter.case_workspace() as case:
+        with pytest.raises(SolverOrchestrationError) as exc:
+            adapter.run_fixed_case(case)
     assert exc.value.code == "SOLVER_EXTERNAL_FAILED"
-    assert calls[0][0] == ["/fixed/simpleFoam", "-case", str(case.resolve())]
+    assert calls[0][0] == ["/fixed/simpleFoam", "-case", str(case)]
     assert calls[0][1]["shell"] is False and calls[0][1]["timeout"] == 7
-    with adapter.isolated_workdir() as first, adapter.isolated_workdir() as second:
+    with adapter.case_workspace() as first, adapter.case_workspace() as second:
         assert Path(first).is_dir() and Path(second).is_dir() and first != second
 
 
 def test_openfoam_missing_executable_fails_closed(monkeypatch, tmp_path):
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: None)
-    with pytest.raises(SolverOrchestrationError) as exc:
-        OpenFOAMAdapterFoundation().run_fixed_case(tmp_path)
+    adapter = OpenFOAMAdapterFoundation()
+    with adapter.case_workspace() as workspace:
+        with pytest.raises(SolverOrchestrationError) as exc:
+            adapter.run_fixed_case(workspace)
     assert exc.value.code == "SOLVER_BACKEND_UNAVAILABLE"
 
 
 def test_openfoam_timeout_is_typed(monkeypatch, tmp_path):
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/simpleFoam")
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.subprocess.run", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutExpired(args[0], kwargs["timeout"])))
-    with pytest.raises(SolverOrchestrationError) as exc:
-        OpenFOAMAdapterFoundation().run_fixed_case(tmp_path)
+    adapter = OpenFOAMAdapterFoundation()
+    with adapter.case_workspace() as workspace:
+        with pytest.raises(SolverOrchestrationError) as exc:
+            adapter.run_fixed_case(workspace)
     assert exc.value.code == "SOLVER_TIMEOUT"
