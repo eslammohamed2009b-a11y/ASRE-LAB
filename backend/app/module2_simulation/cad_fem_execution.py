@@ -7,12 +7,17 @@ import json
 import numpy as np
 
 from app.core.repository import SimulationResultRecord
-from app.module2_simulation.cad_fem_solvers import CAD_FEM_SOLVERS, FEMError
+from app.module2_simulation.cad_fem_solvers import FEMError
 from app.module2_simulation.evidence_lifecycle import persist_automatic_evidence
 from app.module2_simulation.field_results import persist_field_result
 from app.module2_simulation.geometry_physics_schemas import PhysicsModelV1
 from app.module2_simulation.meshing import GeneratedMesh
 from app.module2_simulation.solver_registry import SOLVER_REGISTRY
+from app.module2_simulation.solver_orchestrator import (
+    SolverOrchestrationError,
+    create_execution_plan,
+    dispatch,
+)
 from app.module2_simulation.schemas import ImplementationStatus
 
 
@@ -61,7 +66,7 @@ def _scientific_request(model: PhysicsModelV1, mesh: GeneratedMesh, solver_id: s
 
 def _validate_solver(solver_id: str, model: PhysicsModelV1, mesh: GeneratedMesh) -> None:
     entry = SOLVER_REGISTRY.get(solver_id)
-    if solver_id not in CAD_FEM_SOLVERS or entry is None or entry.implementation_status != ImplementationStatus.REAL:
+    if solver_id not in _FAMILY_BY_SOLVER or entry is None or entry.implementation_status != ImplementationStatus.REAL:
         raise FEMExecutionError("Requested solver is not an implemented authoritative CAD FEM solver")
     if _FAMILY_BY_SOLVER[solver_id] != model.analysis_family.value:
         raise FEMExecutionError("Requested solver is incompatible with this PhysicsModel analysis family")
@@ -125,7 +130,10 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
     repository.record_simulation_input(simulation_id, "PhysicsModelV1", material_snapshots, {"length": "m"}, {},
         input_payload["boundary_conditions"], input_payload["numerical_settings"], input_payload)
     try:
-        solution = getattr(__import__("app.module2_simulation.cad_fem_solvers", fromlist=[CAD_FEM_SOLVERS[solver_id]]), CAD_FEM_SOLVERS[solver_id])(mesh, model)
+        try:
+            solution = dispatch(create_execution_plan(solver_id, mesh, model), mesh, model)
+        except SolverOrchestrationError as exc:
+            raise FEMExecutionError(str(exc)) from exc
         residual_key = "maximum_eigenpair_residual" if solver_id == "modal_fem_3d_v1" else "algebraic_residual"
         residual = float(solution.diagnostics[residual_key])
         tolerance = float(getattr(model.numerical_settings, "tolerance", 1e-8))
@@ -149,7 +157,7 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
         if residual <= tolerance:
             persist_automatic_evidence(repository, simulation_id)
         return simulation_id
-    except (FEMError, FEMExecutionError, ValueError) as exc:
+    except (FEMError, FEMExecutionError, SolverOrchestrationError, ValueError) as exc:
         repository.update_simulation_job(simulation_id, status="failed", progress_percent=100,
             error_code=getattr(exc, "code", "FEM_EXECUTION_FAILED"), safe_error_message=str(exc))
         raise
