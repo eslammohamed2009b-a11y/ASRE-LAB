@@ -8,7 +8,7 @@ from app.module2_simulation.source_resolution import resolve_simulation_source
 from app.v2.evidence_integrity import records_by_type, validate_scientific_record
 from app.v2.evidence_models import EvidenceType
 from app.v2.repository import EvidenceRepository
-from app.v2.scientific_trust import REGISTRY
+from app.v2.scientific_trust import compatible_benchmarks
 
 TRUST_VERSION = "2.0"
 
@@ -32,15 +32,11 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
     grouped = records_by_type(evidence, user_id, source)
 
     validity_item = _latest(grouped.get(EvidenceType.VALIDITY, []))
-    try:
-        capability = REGISTRY.get(source.solver_id)
-        benchmark_candidates = [item for item in grouped.get(EvidenceType.BENCHMARK, []) if (
-            item[1].benchmark_id == capability.benchmark_id
-            and item[1].metric_name == capability.benchmark_metric
-            and item[1].tolerance == capability.benchmark_tolerance
-        )]
-    except KeyError:
-        benchmark_candidates = []
+    definitions = compatible_benchmarks(source.solver_id)
+    benchmark_candidates = [item for item in grouped.get(EvidenceType.BENCHMARK, []) if (
+        item[1].benchmark_id in definitions
+        and definitions[item[1].benchmark_id] == (item[1].metric_name, item[1].tolerance)
+    )]
     benchmark_item = _latest(benchmark_candidates)
     convergence_item = _latest(grouped.get(EvidenceType.RUN_CONVERGENCE, []))
     refinement_item = _latest(grouped.get(EvidenceType.REFINEMENT_CONVERGENCE, []))
@@ -56,8 +52,8 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
         warning="Authoritative validity evidence is missing." if not validity_item else None,
     )
 
-    if benchmark_item:
-        benchmark_state = "PASS" if benchmark_item[1].status.value == "pass" else "FAIL"
+    if benchmark_candidates:
+        benchmark_state = "FAIL" if any(item[1].status.value == "fail" for item in benchmark_candidates) else "PASS"
         benchmark_dimension = _dimension(
             benchmark_state, benchmark_item,
             warning="Benchmark evidence carries a warning state." if benchmark_item[1].status.value == "warning" else None,

@@ -30,6 +30,22 @@ def _stable_hash(value: object) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()).hexdigest()
 
 
+def _scientific_request(model: PhysicsModelV1, mesh: GeneratedMesh, solver_id: str) -> tuple[dict, dict, dict]:
+    material_snapshots = {item.material_name: item.model_dump(mode="json") for item in model.materials}
+    payload = {"solver_id": solver_id, "solver_version": SOLVER_REGISTRY[solver_id].version,
+        "physics_model_hash": model.physics_hash, "design_hash": model.design_hash,
+        "geometry_fingerprint": model.geometry_fingerprint, "mesh_hash": model.mesh_hash,
+        "mesh_id": model.mesh_id, "material_snapshots": material_snapshots,
+        "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
+        "numerical_settings": model.numerical_settings.model_dump(mode="json")}
+    payload["fem_refinement"] = {"design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
+        "analysis_family": model.analysis_family.value, "materials": material_snapshots,
+        "boundary_conditions": payload["boundary_conditions"], "numerical_settings": payload["numerical_settings"],
+        "mesh": {"mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash, "specification": mesh.metadata.specification.model_dump(mode="json")}}
+    evidence = {f"{item.material_name}.{property_.name}": property_.value for item in model.materials for property_ in item.properties}
+    return payload, material_snapshots, evidence
+
+
 def _validate_solver(solver_id: str, model: PhysicsModelV1, mesh: GeneratedMesh) -> None:
     entry = SOLVER_REGISTRY.get(solver_id)
     if solver_id not in CAD_FEM_SOLVERS or entry is None or entry.implementation_status != ImplementationStatus.REAL:
@@ -64,7 +80,8 @@ def _fields(solution, mesh: GeneratedMesh):
                 yield f"mode_shape_{index + 1:03d}", unit, mode, "nodal", {
                     "location_type": "nodal", "mode_index": index + 1,
                     "natural_frequency_hz": float(frequencies[index]), "eigenvalue": float(eigenvalues[index]),
-                    "normalization": solution.diagnostics["normalization"], "mesh_hash": mesh.metadata.mesh_hash,
+                    "normalization": solution.diagnostics["normalization"],
+                    "quantity": solution.diagnostics["mode_shape_quantity"], "mesh_hash": mesh.metadata.mesh_hash,
                 }
         elif name not in {"natural_frequencies", "eigenvalues"}:
             location = "nodal" if name in {"temperature", "displacement"} else "elemental"
@@ -76,10 +93,15 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
                     mesh: GeneratedMesh, model: PhysicsModelV1, solver_id: str, idempotency_key: str) -> str:
     """Run once per stable scientific identity and repair missing fields/evidence on retry."""
     _validate_solver(solver_id, model, mesh)
+    input_payload, material_snapshots, evidence_material_properties = _scientific_request(model, mesh, solver_id)
+    request_fingerprint = _stable_hash(input_payload)
     existing = repository.get_simulation_job_by_idempotency_key(user_id, idempotency_key)
     if existing is not None:
         if existing.solver_id != solver_id or existing.experiment_id != experiment_id:
             raise FEMExecutionError("Idempotency key belongs to a different scientific request")
+        previous = repository.get_simulation_input(existing.id)
+        if previous is None or _stable_hash(previous.geometry) != request_fingerprint:
+            raise FEMExecutionError("Idempotency key belongs to a different scientific identity")
         if repository.get_simulation_result(existing.id) is not None:
             if not repository.list_field_results(existing.id):
                 raise FEMExecutionError("A legacy partial FEM result cannot be repaired without its field solution")
@@ -87,24 +109,6 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
         return existing.id
     simulation_id = repository.create_simulation_job(user_id, solver_id, experiment_id, design_id, idempotency_key)
     repository.update_simulation_job(simulation_id, status="running", progress_percent=5)
-    material_snapshots = {item.material_name: item.model_dump(mode="json") for item in model.materials}
-    evidence_material_properties = {
-        f"{item.material_name}.{property_.name}": property_.value
-        for item in model.materials for property_ in item.properties
-    }
-    input_payload = {"physics_model_hash": model.physics_hash, "design_hash": model.design_hash,
-        "geometry_fingerprint": model.geometry_fingerprint, "mesh_hash": model.mesh_hash,
-        "mesh_id": model.mesh_id, "material_snapshots": material_snapshots,
-        "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
-        "numerical_settings": model.numerical_settings.model_dump(mode="json")}
-    input_payload["fem_refinement"] = {
-        "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
-        "analysis_family": model.analysis_family.value, "materials": material_snapshots,
-        "boundary_conditions": input_payload["boundary_conditions"],
-        "numerical_settings": input_payload["numerical_settings"],
-        "mesh": {"mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash,
-                 "specification": mesh.metadata.specification.model_dump(mode="json")},
-    }
     repository.record_simulation_input(simulation_id, "PhysicsModelV1", material_snapshots, {"length": "m"}, {},
         input_payload["boundary_conditions"], input_payload["numerical_settings"], input_payload)
     try:
@@ -114,7 +118,7 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
         tolerance = float(getattr(model.numerical_settings, "tolerance", 1e-8))
         result_hash = _stable_hash({"input": input_payload, "solver_id": solver_id, "summary": solution.summary,
             "residual": residual, "fields": {name: hashlib.sha256(np.asarray(value[1], dtype='<f8').tobytes()).hexdigest() for name, value in solution.fields.items()}})
-        metadata = {"input_fingerprint": _stable_hash(input_payload), "material_properties_used": evidence_material_properties,
+        metadata = {"input_fingerprint": request_fingerprint, "material_properties_used": evidence_material_properties,
             "validation_status": SOLVER_REGISTRY[solver_id].validation_status.value, "physics_model_hash": model.physics_hash,
             "mesh_hash": model.mesh_hash, "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
             "convergence_metric": "generalized_eigenpair_residual" if solver_id == "modal_fem_3d_v1" else "algebraic_residual"}

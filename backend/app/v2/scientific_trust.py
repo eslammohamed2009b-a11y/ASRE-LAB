@@ -106,6 +106,21 @@ _SOLVER_BENCHMARK_ASSOCIATIONS = {
     "modal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency",
 }
 
+# Multiple bounded analytical cases can be authoritative for one solver.  This
+# registry is deliberately explicit; evidence IDs alone are never eligibility.
+TRUST_BENCHMARK_DEFINITIONS = {
+    "thermal_fem_3d_v1": {
+        "thermal_fem_linear_prism": ("temperature_k", 1e-8),
+        "thermal_fem_uniform_generation_prism": ("normalized_l2_error", 1e-2),
+    },
+}
+
+
+def compatible_benchmarks(solver_id: str) -> dict[str, tuple[str, float]]:
+    item = REGISTRY.get(solver_id) if "REGISTRY" in globals() else None
+    fallback = {item.benchmark_id: (item.benchmark_metric, item.benchmark_tolerance)} if item else {}
+    return {**fallback, **TRUST_BENCHMARK_DEFINITIONS.get(solver_id, {})}
+
 
 class TrustRegistry:
     def __init__(self):

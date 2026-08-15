@@ -40,10 +40,7 @@ def validate_simulation_record(record: dict, source, *, expected_type: EvidenceT
             raise EvidenceIntegrityError("Evidence provenance hashes contradict the persisted result")
         if actual_type == EvidenceType.NUMERICAL_RESULT and model.summary_metrics != result.summary_metrics:
             raise EvidenceIntegrityError("Numerical evidence metrics contradict the persisted result")
-        if actual_type == EvidenceType.BENCHMARK and (
-            model.metric_name not in result.summary_metrics
-            or float(model.computed_value) != float(result.summary_metrics[model.metric_name])
-        ):
+        if actual_type == EvidenceType.BENCHMARK and model.metric_name in result.summary_metrics and float(model.computed_value) != float(result.summary_metrics[model.metric_name]):
             raise EvidenceIntegrityError("Benchmark evidence contradicts the persisted result metric")
     return model
 

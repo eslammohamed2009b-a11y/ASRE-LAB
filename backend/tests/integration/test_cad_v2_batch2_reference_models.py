@@ -7,7 +7,7 @@ import pytest
 from app.module1_design.cad_v2_compiler import compile_design, export_compiled_design
 from app.module1_design.cad_v2_schemas import EngineeringDesignDocumentV2, ValidationStatus
 from app.module2_simulation.geometry_physics_schemas import MeshSpecification, PhysicsDomain
-from app.module2_simulation.meshing import generate_mesh
+from app.module2_simulation.meshing import MeshingError, generate_mesh
 
 pytestmark = pytest.mark.integration
 
@@ -149,30 +149,33 @@ def test_advanced_reference_models_compile_validate_and_export(name, builder, tm
 
 def test_reference_enclosure_authoritative_brep_meshes_and_maps_mounting_floor():
     compiled = compile_design(_enclosure())
-    mesh = generate_mesh(
-        compiled,
-        [PhysicsDomain(domain_id="enclosure_solid", source_body_id="enclosure", domain_kind="solid")],
-        MeshSpecification(target_size=q(15)),
-    )
-    assert mesh.metadata.design_hash == compiled.design_hash
-    mapping = next(item for item in mesh.metadata.semantic_mappings if item.semantic_region == "mounting_floor")
-    assert mapping.boundary_facet_ids
-    assert "open_rim" in " ".join(mesh.metadata.warnings)
+    with pytest.raises(MeshingError, match="could not certify") as error:
+        generate_mesh(
+            compiled,
+            [PhysicsDomain(domain_id="enclosure_solid", source_body_id="enclosure", domain_kind="solid")],
+            MeshSpecification(target_size=q(15)),
+        )
+    # The valid, open-topped 2 mm shell remains a CAD/export success.  The
+    # bounded volume fallback must fail closed rather than accept crossing
+    # tetrahedra when its fixed BRep-derived sampling budget cannot certify it.
+    assert error.value.code == "UNSUPPORTED_VOLUME_TOPOLOGY"
 
 
 def test_reference_manifold_authoritative_brep_meshes_and_maps_cylindrical_ports():
     compiled = compile_design(_manifold())
     body_id = compiled.document.output_body_ids[0]
-    mesh = generate_mesh(
-        compiled,
-        [PhysicsDomain(domain_id="manifold_solid", source_body_id=body_id, domain_kind="solid")],
-        MeshSpecification(target_size=q(15), semantic_sizing=[{
-            "semantic_region": "fluid_ports", "target_size": q(7.5),
-        }]),
-    )
-    ports = next(item for item in mesh.metadata.semantic_mappings if item.semantic_region == "fluid_ports")
-    assert ports.boundary_facet_ids
-    assert ports.cad_resolution_status == "RESELECTED"
+    with pytest.raises(MeshingError, match="semantic boundary") as error:
+        generate_mesh(
+            compiled,
+            [PhysicsDomain(domain_id="manifold_solid", source_body_id=body_id, domain_kind="solid")],
+            MeshSpecification(target_size=q(15), semantic_sizing=[{
+                "semantic_region": "fluid_ports", "target_size": q(7.5),
+            }]),
+        )
+    # The adaptive volume candidate reaches coverage, but Delaunay boundary
+    # facets are not authoritative CAD port faces.  It fails closed rather
+    # than claiming semantic sizing from artificial boundary facets.
+    assert error.value.code == "UNSUPPORTED_SEMANTIC_BOUNDARY_MAPPING"
 
 
 def test_reference_multi_body_mesh_retains_independent_domain_identity():

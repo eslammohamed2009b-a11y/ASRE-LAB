@@ -47,6 +47,8 @@ from app.module2_simulation.geometry_physics_schemas import (
 MESHER_ID = "asre-occ-scipy-tet"
 MESHER_VERSION = f"1.0+scipy-{scipy.__version__}"
 MM_TO_M = 1e-3
+_FALLBACK_REFINEMENT_FACTORS = (1.0, 0.75, 0.5, 0.375)
+_COVERAGE_TOLERANCE = 0.15
 
 
 class MeshingError(ValueError):
@@ -209,53 +211,105 @@ def _tet_volume(points: np.ndarray) -> float:
     return float(np.linalg.det(np.stack((points[1] - points[0], points[2] - points[0], points[3] - points[0]))) / 6.0)
 
 
-def _tetrahedralize(solid: Any, points_mm: np.ndarray, size_mm: float) -> list[tuple[int, int, int, int]]:
+def _tetra_solid(points_mm: np.ndarray):
+    """Build an OCC tetrahedron solely for authoritative Boolean containment."""
+    import cadquery as cq
+    faces = [cq.Face.makeFromWires(cq.Wire.makePolygon([tuple(points_mm[index]) for index in face], close=True))
+             for face in ((0, 1, 2), (0, 3, 1), (0, 2, 3), (1, 3, 2))]
+    return cq.Solid.makeSolid(cq.Shell.makeShell(faces))
+
+
+def _contained_tetrahedron(solid: Any, points_mm: np.ndarray, *, absolute_tolerance_mm3: float,
+                           relative_tolerance: float = 1e-7) -> bool:
+    volume = abs(_tet_volume(points_mm))
+    if volume <= absolute_tolerance_mm3:
+        return False
+    try:
+        intersection = float(_tetra_solid(points_mm).intersect(solid).Volume())
+    except Exception:
+        return False
+    return abs(intersection - volume) <= max(absolute_tolerance_mm3, relative_tolerance * volume)
+
+
+def _tetrahedralize(
+    solid: Any, points_mm: np.ndarray, size_mm: float, maximum_elements: int = 300_000,
+    *, return_metrics: bool = False,
+) -> list[tuple[int, int, int, int]] | tuple[list[tuple[int, int, int, int]], dict[str, float | int]]:
     if len(points_mm) < 4:
         raise MeshingError("EMPTY_VOLUME_MESH", "Fewer than four distinct CAD-derived points are available")
     try:
         raw = Delaunay(points_mm, qhull_options="Qbb Qc Qz Q12").simplices
     except QhullError as exc:
         raise MeshingError("TETRAHEDRALIZATION_FAILED", "CAD-derived points could not form a 3D tetrahedralization") from exc
-    tolerance = max(size_mm * 1e-5, 1e-6)
+    if len(raw) > maximum_elements:
+        raise MeshingError("MESH_RESOURCE_LIMIT", "Fallback Delaunay connectivity exceeds the configured element limit")
     volume_tolerance_mm3 = max(size_mm**3 * 1e-12, 1e-18)
-    # A full Delaunay tessellation of a convex authoritative solid has no
-    # artificial internal boundary.  Detect convexity from deterministic BRep
-    # point-pair samples, then retain all nondegenerate tetrahedra.  Concave
-    # shapes retain the conservative centroid-in-BRep filter below.
-    sample_indices = np.linspace(0, len(points_mm) - 1, min(len(points_mm), 40), dtype=int)
-    sample_points = points_mm[sample_indices]
-    convex = all(
-        _inside(solid, (first + second) / 2.0, tolerance)
-        for offset, first in enumerate(sample_points) for second in sample_points[offset:]
-    )
-    # An exact BRep volume/bounding-box match is a stronger deterministic
-    # certificate for a rectangular solid, including arbitrary CAD-authored
-    # prism dimensions.  It avoids surface-point classifier noise rejecting a
-    # plainly convex benchmark domain.
-    box = solid.BoundingBox()
-    box_volume = float(box.xlen * box.ylen * box.zlen)
-    if box_volume > 0 and abs(float(solid.Volume()) - box_volume) <= max(box_volume * 1e-9, 1e-9):
-        convex = True
     kept: list[tuple[int, int, int, int]] = []
     for simplex in raw:
         ids = [int(value) for value in simplex]
         tet = points_mm[ids]
-        # The centroid is checked against the authoritative BRep.  Boundary
-        # candidate points are tessellation samples and may sit numerical ulps
-        # outside the analytic surface; classifying their connecting edges or
-        # faces would incorrectly carve internal boundaries from a valid mesh.
-        samples = [] if convex else [tet.mean(axis=0)]
-        if samples and not all(_inside(solid, sample, tolerance) for sample in samples):
-            continue
         signed = _tet_volume(tet)
         if abs(signed) <= volume_tolerance_mm3:
             continue
         if signed < 0:
             ids[2], ids[3] = ids[3], ids[2]
+            tet = points_mm[ids]
+        if not _contained_tetrahedron(solid, tet, absolute_tolerance_mm3=volume_tolerance_mm3):
+            continue
         kept.append(tuple(ids))
     if not kept:
         raise MeshingError("EMPTY_VOLUME_MESH", "No positive-volume tetrahedra remained inside the authoritative BRep")
-    return sorted(set(kept))
+    total = sum(abs(_tet_volume(points_mm[list(item)])) for item in kept)
+    source_volume = float(solid.Volume())
+    coverage = total / source_volume
+    if abs(total - source_volume) > max(size_mm**3, _COVERAGE_TOLERANCE * source_volume):
+        raise MeshingError("UNSUPPORTED_VOLUME_TOPOLOGY", "Bounded OCC fallback cannot establish aggregate authoritative volume agreement")
+    result = sorted(set(kept))
+    metrics: dict[str, float | int] = {
+        "candidate_node_count": len(points_mm), "raw_delaunay_tetrahedron_count": len(raw),
+        "accepted_contained_tetrahedron_count": len(kept),
+        "rejected_crossing_tetrahedron_count": len(raw) - len(kept),
+        "brep_volume_mm3": source_volume, "retained_tetrahedron_volume_mm3": total,
+        "coverage_ratio": coverage, "aggregate_relative_volume_error": abs(total - source_volume) / source_volume,
+    }
+    return (result, metrics) if return_metrics else result
+
+
+def _fallback_mesh_with_adaptive_coverage(
+    solid: Any, requested_size_mm: float, maximum_nodes: int, maximum_elements: int,
+) -> tuple[np.ndarray, list[tuple[int, int, int, int]], dict[str, float | int]]:
+    """Return the first certified bounded OCC/SciPy fallback attempt.
+
+    Candidate samples are regenerated from the BRep for every level.  The
+    sequence is deliberately short and deterministic; a geometry which cannot
+    attain 85% authoritative-volume coverage within these contracts is not
+    represented as a solver-grade mesh.
+    """
+    last_error: MeshingError | None = None
+    for attempt, factor in enumerate(_FALLBACK_REFINEMENT_FACTORS):
+        effective_size = requested_size_mm * factor
+        try:
+            points = _candidate_points(solid, effective_size, maximum_nodes)
+            tetrahedra, metrics = _tetrahedralize(
+                solid, points, effective_size, maximum_elements, return_metrics=True,
+            )
+        except MeshingError as exc:
+            last_error = exc
+            if exc.code in {"MESH_RESOURCE_LIMIT", "EMPTY_VOLUME_MESH", "UNSUPPORTED_VOLUME_TOPOLOGY"}:
+                continue
+            raise
+        metrics.update({
+            "requested_characteristic_size_mm": requested_size_mm,
+            "effective_characteristic_size_mm": effective_size,
+            "adaptive_attempt": attempt,
+        })
+        return points, tetrahedra, metrics
+    if last_error is not None and last_error.code == "MESH_RESOURCE_LIMIT":
+        raise last_error
+    raise MeshingError(
+        "UNSUPPORTED_VOLUME_TOPOLOGY",
+        "Bounded OCC fallback could not certify aggregate BRep volume coverage within its fixed sampling budget",
+    )
 
 
 def _canonicalize(
@@ -364,6 +418,7 @@ def generate_mesh(compiled: CompiledDesign, domains: list[PhysicsDomain], specif
     all_nodes: list[tuple[float, float, float]] = []
     all_tets: list[tuple[int, int, int, int]] = []
     domain_ranges: list[tuple[PhysicsDomain, int, int, int, int]] = []
+    fallback_provenance: list[dict[str, float | int | str]] = []
     for domain in domains:
         solids = _solids(compiled.bodies[domain.source_body_id])
         if len(solids) != 1:
@@ -373,8 +428,24 @@ def generate_mesh(compiled: CompiledDesign, domains: list[PhysicsDomain], specif
             )
         rectangular = _rectangular_brep_mesh(solids[0], size_mm, specification.maximum_nodes - len(all_nodes))
         if rectangular is None:
-            points_mm = _candidate_points(solids[0], size_mm, specification.maximum_nodes - len(all_nodes))
-            local_tets = _tetrahedralize(solids[0], points_mm, size_mm)
+            points_mm, local_tets, provenance = _fallback_mesh_with_adaptive_coverage(
+                solids[0], size_mm, specification.maximum_nodes - len(all_nodes),
+                specification.maximum_elements - len(all_tets),
+            )
+            fallback_provenance.append({"domain_id": domain.domain_id, **provenance})
+            # Delaunay boundary facets are not CAD-face entities.  A local
+            # semantic sizing request requires a certified boundary group, and
+            # this bounded fallback cannot manufacture one from its artificial
+            # cut facets.  Reject before emitting a mesh whose port sizing is
+            # only metadata rather than an actual proven boundary condition.
+            if any(
+                region.body_id == domain.source_body_id and region.tag in sizing_tags
+                for region in semantic_geometry
+            ):
+                raise MeshingError(
+                    "UNSUPPORTED_SEMANTIC_BOUNDARY_MAPPING",
+                    "Bounded OCC fallback cannot certify local semantic boundary facets on this nonrectangular BRep",
+                )
         else:
             points_mm, local_tets = rectangular
         nodes_m, local_tets = _canonicalize(points_mm, local_tets)
@@ -484,12 +555,13 @@ def generate_mesh(compiled: CompiledDesign, domains: list[PhysicsDomain], specif
         "tetra4": all_tets,
         "boundary_triangle3": facets,
         "semantic_mappings": [item.model_dump(mode="json") for item in semantic_mappings],
+        "fallback_provenance": fallback_provenance,
     }
     mesh_hash = _canonical_hash(identity)
     mesh_id = str(uuid.uuid5(uuid.NAMESPACE_URL, f"asre-lab:mesh:{mesh_hash}"))
     warnings = [
         "Bounded OCC/SciPy fallback is active; Gmsh is not installed in the deployment environment",
-        "This artifact establishes solver-ready topology and provenance; solver execution remains Phase 3B",
+        "Bounded OCC/SciPy volume fallback is active; arbitrary nonconforming, contact, and multi-body coupling meshes are unsupported",
     ]
     if ignored_non_surface_regions:
         warnings.append(
@@ -512,6 +584,7 @@ def generate_mesh(compiled: CompiledDesign, domains: list[PhysicsDomain], specif
         domains=domain_mappings,
         semantic_mappings=semantic_mappings,
         quality=quality,
+        fallback_provenance=fallback_provenance,
         validation_status=ValidationState.VALID_WITH_WARNINGS,
         warnings=warnings,
     )

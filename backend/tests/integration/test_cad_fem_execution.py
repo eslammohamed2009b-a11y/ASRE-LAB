@@ -10,6 +10,7 @@ from app.module2_simulation.geometry_physics_schemas import PhysicsModelRequest
 from app.module2_simulation.meshing import generate_mesh
 from app.module2_simulation.physics_model import build_physics_model
 from app.module2_simulation.evidence_lifecycle import list_simulation_evidence
+from app.module2_simulation.thermal_field_benchmark import persist_linear_prism_benchmark, persist_quadratic_prism_benchmark
 from app.v2.refinement import create_refinement_evidence
 from app.v2.scientific_router import BenchmarkRequest, execute_benchmark
 from app.v2.trust_v2 import derive_trust_record
@@ -47,13 +48,36 @@ def test_authoritative_thermal_execution_persists_fields_evidence_and_is_idempot
         design_id=None, mesh=mesh, model=model, solver_id="thermal_fem_3d_v1", idempotency_key="same-science")
     assert execute_cad_fem(repository=repo, storage=storage, user_id=owner, experiment_id=experiment,
         design_id=None, mesh=mesh, model=model, solver_id="thermal_fem_3d_v1", idempotency_key="same-science") == simulation
-    assert [field.variable_name for field in repo.list_field_results(simulation)] == ["temperature", "temperature_gradient"]
+    assert [field.variable_name for field in repo.list_field_results(simulation)] == ["heat_flux", "temperature", "temperature_gradient"]
     assert {item["record_type"] for item in list_simulation_evidence(repo, simulation, owner)} == {
         "scientific_numerical_result", "scientific_field_result", "scientific_validity", "scientific_run_convergence"}
     assert repo.get_simulation_result(simulation).validation_metadata["mesh_hash"] == mesh.metadata.mesh_hash
     with pytest.raises(FEMExecutionError):
         execute_cad_fem(repository=repo, storage=storage, user_id=owner, experiment_id=experiment,
             design_id=None, mesh=mesh, model=model, solver_id="structural_linear_elasticity_3d_v1", idempotency_key="bad")
+    changed = _model(mesh)
+    changed = changed.model_copy(update={"boundary_conditions": [
+        *changed.boundary_conditions[:-1], changed.boundary_conditions[-1].model_copy(update={"heat_flux_w_m2": 10})]})
+    with pytest.raises(FEMExecutionError, match="scientific identity"):
+        execute_cad_fem(repository=repo, storage=storage, user_id=owner, experiment_id=experiment,
+            design_id=None, mesh=mesh, model=changed, solver_id="thermal_fem_3d_v1", idempotency_key="same-science")
+
+
+def test_persisted_linear_thermal_field_benchmark_is_authoritative_and_idempotent(tmp_path):
+    repo = LocalSQLiteRepository(tmp_path / "records.sqlite"); storage = LocalFileStorage(tmp_path / "private")
+    owner = "fem-owner"; experiment = repo.create_experiment(owner, "FEM")
+    mesh = generate_mesh(compile_design(authoritative_box()), [domain()], mesh_spec())
+    simulation = execute_cad_fem(repository=repo, storage=storage, user_id=owner, experiment_id=experiment,
+        design_id=None, mesh=mesh, model=_model(mesh), solver_id="thermal_fem_3d_v1", idempotency_key="field-benchmark")
+    first = persist_linear_prism_benchmark(repository=repo, storage=storage, user_id=owner, simulation_id=simulation,
+        mesh=mesh, cold_k=300, hot_k=400)
+    second = persist_linear_prism_benchmark(repository=repo, storage=storage, user_id=owner, simulation_id=simulation,
+        mesh=mesh, cold_k=300, hot_k=400)
+    details = first["payload"]["benchmark_details"]
+    assert first["id"] == second["id"] and first["status"] == "pass"
+    assert details["node_count"] == len(mesh.nodes_m) and details["max_absolute_error_k"] < 1e-8
+    assert details["normalized_l2_error"] < 1e-8 and details["mesh_hash"] == mesh.metadata.mesh_hash
+    assert len(first["payload"]["source_ids"]) >= 2
 
 
 def test_structural_fields_are_explicit_and_owner_records_remain_private(tmp_path):
@@ -81,7 +105,8 @@ def test_modal_execution_persists_one_mass_normalized_field_per_mode(tmp_path):
         mesh=mesh, model=build_physics_model(mesh, request), solver_id="modal_fem_3d_v1", idempotency_key="modal")
     fields = repo.list_field_results(simulation)
     assert [field.variable_name for field in fields] == ["mode_shape_001", "mode_shape_002", "mode_shape_003"]
-    assert all(field.grid_metadata["normalization"] == "consistent-mass normalization (phi^T M phi = 1)" for field in fields)
+    assert all(field.unit == "kg^-1/2" and field.grid_metadata["normalization"] == "phi^T M phi = 1"
+               and field.grid_metadata["quantity"] == "mass_normalized_mode_shape" for field in fields)
     convergence = [record for record in list_simulation_evidence(repo, simulation, owner) if record["record_type"] == "scientific_run_convergence"][0]
     assert convergence["payload"]["metric_type"] == "generalized_eigenpair_residual"
 
@@ -112,6 +137,36 @@ def test_thermal_fem_persisted_benchmark_refinement_and_trust_chain(tmp_path, mo
     with pytest.raises(ValueError):
         create_refinement_evidence(owner, [simulations[0], simulations[0], simulations[2]], "temperature_k",
             "geometry.fem_refinement.mesh.specification.target_size.value", repository=repo)
+
+
+def test_quadratic_field_benchmark_refinement_and_trust(tmp_path, monkeypatch):
+    repo = LocalSQLiteRepository(tmp_path / "records.sqlite"); storage = LocalFileStorage(tmp_path / "private")
+    monkeypatch.setattr(source_resolution, "get_repository", lambda: repo)
+    owner = "fem-owner"; experiment = repo.create_experiment(owner, "quadratic")
+    simulations, benchmarks = [], []
+    for size in (20, 10, 7.5):
+        mesh = generate_mesh(compile_design(authoritative_box()), [domain()], mesh_spec(size))
+        payload = {"analysis_family": "thermal", "domains": [domain().model_dump(mode="json")],
+            "material_assignments": [{"domain_id": "solid_domain", "material_name": "steel"}],
+            "boundary_conditions": [{"bc_type": "temperature", "bc_id": "left", "semantic_region": "low_end", "temperature_k": 300},
+                {"bc_type": "temperature", "bc_id": "right", "semantic_region": "high_end", "temperature_k": 300},
+                {"bc_type": "heat_flux", "bc_id": "walls", "semantic_region": "walls", "heat_flux_w_m2": 0},
+                {"bc_type": "volumetric_heat_source", "bc_id": "source", "domain_id": "solid_domain", "heat_source_w_m3": 1_000_000}],
+            "numerical_settings": {"settings_type": "steady_thermal"}, "expected_outputs": ["temperature", "heat_flux"]}
+        simulation = execute_cad_fem(repository=repo, storage=storage, user_id=owner, experiment_id=experiment, design_id=None,
+            mesh=mesh, model=build_physics_model(mesh, PhysicsModelRequest.model_validate(payload)), solver_id="thermal_fem_3d_v1", idempotency_key=f"quadratic-{size}")
+        simulations.append(simulation)
+        benchmarks.append(persist_quadratic_prism_benchmark(repository=repo, storage=storage, user_id=owner, simulation_id=simulation,
+            mesh=mesh, temperature_k=300, source_w_m3=1_000_000, conductivity_w_m_k=45))
+    errors = [item["payload"]["computed_value"] for item in benchmarks]
+    assert errors[0] > errors[1] > errors[2] and errors[2] <= 5e-4
+    refinement = create_refinement_evidence(owner, simulations, "normalized_l2_error",
+        "geometry.fem_refinement.mesh.specification.target_size.value", threshold=5e-4,
+        benchmark_id="thermal_fem_uniform_generation_prism", repository=repo)
+    assert refinement["payload"]["passed"] is True
+    trust = derive_trust_record(owner, simulations[-1], repository=repo)
+    assert trust["payload"]["dimensions"]["benchmark"]["state"] == "PASS"
+    assert refinement["id"] in trust["payload"]["dimensions"]["refinement"]["evidence_ids"]
 
 
 def test_structural_and_modal_fem_results_participate_in_computed_benchmark_workflow(tmp_path, monkeypatch):

@@ -157,6 +157,11 @@ class MeshArtifact(StrictModel):
     domains: list[DomainMeshMapping]
     semantic_mappings: list[SemanticMeshMapping]
     quality: MeshQualityMetrics
+    # The OCC/SciPy adapter may make a bounded series of deterministic
+    # BRep-derived sampling attempts.  Keeping the selected attempt in the
+    # artifact prevents a nominal requested size from concealing the actual
+    # certified fallback resolution.
+    fallback_provenance: list[dict[str, Any]] = Field(default_factory=list)
     validation_status: ValidationState
     warnings: list[str] = Field(default_factory=list)
 

@@ -57,6 +57,7 @@ class BenchmarkEvidence(EvidenceBase):
     passed: bool
     source_simulation_id: str
     status: BenchmarkEvidenceStatus
+    benchmark_details: dict[str, Any] = Field(default_factory=dict)
 
     @model_validator(mode="after")
     def status_matches_result(self):
@@ -125,6 +126,8 @@ class RefinementConvergenceEvidence(EvidenceBase):
     coarse_to_medium_change: float | None = None
     medium_to_fine_change: float | None = None
     passed: bool | None = None
+    metric_source: Literal["simulation_summary", "benchmark_evidence"] = "simulation_summary"
+    benchmark_id: str | None = None
     levels: list[RefinementLevel]
     status: ConvergenceEvidenceStatus
 

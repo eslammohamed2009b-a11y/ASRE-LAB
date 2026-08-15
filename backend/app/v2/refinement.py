@@ -49,17 +49,15 @@ def _fem_refinement_comparable(value: dict, dotted: str) -> tuple[dict, float] |
 
 def create_refinement_evidence(
     user_id: str, simulation_ids: list[str], selected_metric: str,
-    refinement_parameter: str, threshold: float = .02, *, repository=None,
+    refinement_parameter: str, threshold: float = .02, *, benchmark_id: str | None = None, repository=None,
 ) -> dict:
     repository = repository or get_repository()
     if len(simulation_ids) != 3 or len(set(simulation_ids)) != 3:
         raise ValueError("Exactly three distinct coarse, medium, and fine simulations are required")
     if not 0 < threshold <= 1:
         raise ValueError("Refinement threshold must be in (0, 1]")
-    sources = [resolve_simulation_source(
-        item, user_id, require_completed_result=True,
-        required_summary_metric=selected_metric, repository=repository,
-    ) for item in simulation_ids]
+    sources = [resolve_simulation_source(item, user_id, require_completed_result=True,
+        required_summary_metric=None if benchmark_id else selected_metric, repository=repository) for item in simulation_ids]
     if len({item.solver_id for item in sources}) != 1:
         raise ValueError("Refinement sources must use the same solver")
     if len({item.solver_version for item in sources}) != 1:
@@ -68,7 +66,7 @@ def create_refinement_evidence(
         raise ValueError("Refinement sources must belong to the same experiment and design")
 
     scientific = EvidenceRepository(repository=repository)
-    physical_hashes, refinements, numerical_ids, mesh_hashes = [], [], [], []
+    physical_hashes, refinements, numerical_ids, mesh_hashes, values, benchmark_ids = [], [], [], [], [], []
     for source in sources:
         simulation_input = repository.get_simulation_input(source.simulation_id)
         if simulation_input is None:
@@ -88,6 +86,13 @@ def create_refinement_evidence(
         if not candidates:
             raise ValueError("Refinement source lacks authoritative numerical evidence")
         numerical_ids.append(sorted(candidates, key=lambda x: (x[0].get("created_at", ""), x[0]["id"]))[-1][0]["id"])
+        if benchmark_id:
+            benchmarks = [item for item in records_by_type(scientific, user_id, source).get(EvidenceType.BENCHMARK, [])
+                          if item[1].benchmark_id == benchmark_id and item[1].metric_name == selected_metric and item[1].status.value == "pass"]
+            if not benchmarks:
+                raise ValueError("Refinement source lacks a passed authoritative benchmark for the requested metric")
+            benchmark = sorted(benchmarks, key=lambda x: (x[0].get("created_at", ""), x[0]["id"]))[-1]
+            values.append(float(benchmark[1].computed_value)); benchmark_ids.append(benchmark[0]["id"])
     if len(set(physical_hashes)) != 1:
         raise ValueError("Refinement sources do not represent the same physical setup")
     if mesh_hashes and len(set(mesh_hashes)) != 3:
@@ -96,13 +101,14 @@ def create_refinement_evidence(
     if not ordered:
         raise ValueError("Refinement parameter must progress from coarse to medium to fine")
 
-    values = [float(item.result.summary_metrics[selected_metric]) for item in sources]
+    if not benchmark_id:
+        values = [float(item.result.summary_metrics[selected_metric]) for item in sources]
     changes = [
         0.0 if abs(values[index] - values[index - 1]) <= 1e-12 * max(abs(values[index]), abs(values[index - 1]), 1.0)
         else abs(values[index] - values[index - 1]) / max(abs(values[index]), 1e-15)
         for index in (1, 2)
     ]
-    passed = changes[1] <= threshold and changes[1] <= changes[0]
+    passed = (values[0] > values[1] > values[2] and values[2] <= threshold) if benchmark_id else changes[1] <= threshold and changes[1] <= changes[0]
     fingerprint = sources[-1].result.validation_metadata.get("input_fingerprint")
     payload = {
         "evidence_type": "refinement_convergence", "schema_version": "2.0",
@@ -110,8 +116,9 @@ def create_refinement_evidence(
         "simulation_id": sources[-1].simulation_id, "solver_id": sources[-1].solver_id,
         "solver_version": sources[-1].solver_version, "input_fingerprint": fingerprint,
         "result_hash": sources[-1].result.reproducibility_hash,
-        "source_ids": numerical_ids, "status": "completed" if passed else "not_converged",
+        "source_ids": numerical_ids + benchmark_ids, "status": "completed" if passed else "not_converged",
         "selected_metric": selected_metric, "refinement_parameter": refinement_parameter,
+        "metric_source": "benchmark_evidence" if benchmark_id else "simulation_summary", "benchmark_id": benchmark_id,
         "comparison_hash": physical_hashes[0], "convergence_threshold": threshold,
         "coarse_to_medium_change": changes[0], "medium_to_fine_change": changes[1],
         "passed": passed,
@@ -124,7 +131,7 @@ def create_refinement_evidence(
         } for name, source, value, refinement_value in zip(
             ("coarse", "medium", "fine"), sources, values, refinements,
         )],
-        "warnings": [] if passed else ["Medium-to-fine variation exceeds the declared bounded rule."],
+        "warnings": [] if passed else ["Authoritative refinement criterion was not satisfied."],
         "limitations": ["The conclusion applies only to the selected metric and declared refinement dimension."],
     }
     return scientific.create_scientific_evidence(user_id, payload)

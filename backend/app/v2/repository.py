@@ -20,11 +20,12 @@ class EvidenceRepository:
         EvidenceType.ANALYSIS,
     }
     _DEFINED_DEPENDENCIES = {
-        EvidenceType.BENCHMARK: {EvidenceType.NUMERICAL_RESULT},
+        EvidenceType.BENCHMARK: {EvidenceType.NUMERICAL_RESULT, EvidenceType.FIELD_RESULT},
         EvidenceType.FIELD_RESULT: {EvidenceType.NUMERICAL_RESULT},
         EvidenceType.REFINEMENT_CONVERGENCE: {
             EvidenceType.NUMERICAL_RESULT,
             EvidenceType.RUN_CONVERGENCE,
+            EvidenceType.BENCHMARK,
         },
         EvidenceType.ANALYSIS: {
             EvidenceType.NUMERICAL_RESULT,
@@ -112,7 +113,7 @@ class EvidenceRepository:
                 model.source_simulation_id,
                 user_id,
                 require_completed=True,
-                required_metric=model.metric_name,
+                required_metric=None if model.benchmark_details.get("field_checksum_sha256") else model.metric_name,
             )
             resolved_sources.append(source)
 
@@ -123,7 +124,7 @@ class EvidenceRepository:
                     level.simulation_id,
                     user_id,
                     require_completed=True,
-                    required_metric=model.selected_metric,
+                    required_metric=None if model.metric_source == "benchmark_evidence" else model.selected_metric,
                 )
                 resolved_sources.append(source)
             required = [

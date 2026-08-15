@@ -124,12 +124,13 @@ def solve_thermal_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolut
         geometry = tet4_geometry(nodes, tet); gradients.append(geometry.gradients_m_inv.T @ temperature[list(tet)])
     gradient_array = np.asarray(gradients)
     scale = max(abs(applied), abs(convection_loss), abs(reaction), 1.0)
+    heat_flux = np.asarray([-_property(model, domains[element_id], "thermal_conductivity") * gradient for element_id, gradient in enumerate(gradient_array)])
     return FEMSolution("thermal_fem_3d_v1", {
         "min_temperature_k": float(temperature.min()), "max_temperature_k": float(temperature.max()),
         "average_temperature_k": float(temperature.mean()), "temperature_k": float(temperature.mean()), "maximum_temperature_gradient_k_m": float(np.linalg.norm(gradient_array, axis=1).max()),
-        "total_applied_heat_w": applied, "total_boundary_heat_flow_w": convection_loss,
+        "total_applied_heat_w": applied, "convective_boundary_heat_flow_w": convection_loss,
         "energy_balance_error": abs(balance) / scale,
-    }, {"temperature": ("K", temperature), "temperature_gradient": ("K/m", gradient_array)}, {
+    }, {"temperature": ("K", temperature), "temperature_gradient": ("K/m", gradient_array), "heat_flux": ("W/m2", heat_flux)}, {
         "dof_count": count, "nonzero_count": int(matrix.nnz), "solver_method": "scipy.sparse.linalg.spsolve",
         "algebraic_residual": float(np.linalg.norm(residual[free]) / max(np.linalg.norm(load[free]), 1.0)),
         "energy_balance_w": balance, "solve_time_seconds": perf_counter() - started,
@@ -195,7 +196,8 @@ def solve_structural_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSo
         epsilon = b @ local; sigma = isotropic_elasticity_matrix(_property(model, domains[element_id], "elastic_modulus"), _property(model, domains[element_id], "poisson_ratio")) @ epsilon
         strain.append(epsilon); stress.append(sigma); sx, sy, sz, txy, tyz, tzx = sigma
         von_mises.append(float(np.sqrt(0.5*((sx-sy)**2+(sy-sz)**2+(sz-sx)**2)+3*(txy*txy+tyz*tyz+tzx*tzx))))
-    reaction = residual[list(prescribed)]; equilibrium = np.linalg.norm(reaction.reshape(-1, 3).sum(axis=0) + load.reshape(-1, 3).sum(axis=0)) / max(np.linalg.norm(load.reshape(-1, 3).sum(axis=0)), 1.0)
+    reaction = np.zeros_like(residual); reaction[list(prescribed)] = residual[list(prescribed)]
+    equilibrium = np.linalg.norm(reaction.reshape(-1, 3).sum(axis=0) + load.reshape(-1, 3).sum(axis=0)) / max(np.linalg.norm(load.reshape(-1, 3).sum(axis=0)), 1.0)
     summary = {"max_displacement_m": float(np.linalg.norm(displacement.reshape(-1, 3), axis=1).max()), "displacement_m": float(np.linalg.norm(displacement.reshape(-1, 3), axis=1).max()), "max_von_mises_stress_pa": max(von_mises), "strain_energy_j": float(0.5 * displacement @ (stiffness @ displacement)), "equilibrium_residual": float(equilibrium)}
     yields = []
     for assignment in model.material_assignments:
@@ -225,4 +227,4 @@ def solve_modal_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolutio
         modes[index, free] = vector
         residuals.append(float(np.linalg.norm(kff @ vector - value * (mff @ vector)) / max(np.linalg.norm(kff @ vector), 1.0)))
     frequencies = np.sqrt(values) / (2 * np.pi)
-    return FEMSolution("modal_fem_3d_v1", {"first_natural_frequency_hz": float(frequencies[0]), "frequency_hz": float(frequencies[0]), "maximum_natural_frequency_hz": float(frequencies[-1])}, {"mode_shapes": ("m_mass_normalized", modes.reshape(requested, -1, 3)), "natural_frequencies": ("Hz", frequencies), "eigenvalues": ("rad2/s2", values)}, {"dof_count": stiffness.shape[0], "nonzero_count": int(stiffness.nnz), "solver_method": "scipy.sparse.linalg.eigsh/eigh", "maximum_eigenpair_residual": max(residuals), "normalization": "consistent-mass normalization (phi^T M phi = 1)", "solve_time_seconds": perf_counter() - started})
+    return FEMSolution("modal_fem_3d_v1", {"first_natural_frequency_hz": float(frequencies[0]), "frequency_hz": float(frequencies[0]), "maximum_natural_frequency_hz": float(frequencies[-1])}, {"mode_shapes": ("kg^-1/2", modes.reshape(requested, -1, 3)), "natural_frequencies": ("Hz", frequencies), "eigenvalues": ("rad2/s2", values)}, {"dof_count": stiffness.shape[0], "nonzero_count": int(stiffness.nnz), "solver_method": "scipy.sparse.linalg.eigsh/eigh", "maximum_eigenpair_residual": max(residuals), "normalization": "phi^T M phi = 1", "mode_shape_quantity": "mass_normalized_mode_shape", "solve_time_seconds": perf_counter() - started})
