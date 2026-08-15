@@ -1,9 +1,15 @@
-from typing import Any
+from typing import Any,Literal
 from fastapi import APIRouter,Depends,HTTPException
 from pydantic import BaseModel,Field
 from app.core.auth import get_current_user
 from app.v2.repository import EvidenceRepository
 from app.core.repository import get_repository
+from app.core.storage import get_storage
+from app.module2_simulation.geometry_physics_router import _load_mesh
+from app.module2_simulation.thermal_field_benchmark import (
+    LINEAR_BENCHMARK_ID, QUADRATIC_BENCHMARK_ID,
+    persist_linear_prism_benchmark, persist_quadratic_prism_benchmark,
+)
 from app.module2_simulation.source_resolution import (
     SimulationSourceError,
     SimulationSourceNotFoundError,
@@ -18,7 +24,12 @@ from app.v2.claim_integrity import is_authoritative_evidence
 
 router=APIRouter(prefix="/api/v2/scientific",tags=["Backend V2 - Scientific Trust"])
 class Inputs(BaseModel): inputs:dict[str,Any]
-class BenchmarkRequest(BaseModel): inputs:dict[str,float];computed_result:float|None=None;source_simulation_id:str|None=None
+class BenchmarkRequest(BaseModel):
+    inputs:dict[str,float]=Field(default_factory=dict)
+    computed_result:float|None=None
+    source_simulation_id:str|None=None
+    benchmark_case_id:str|None=None
+    benchmark_id:str|None=None
 class ConvergenceRequest(BaseModel):
     values:list[float]=Field(min_length=3,max_length=3)
     configurations:list[dict]=Field(default_factory=lambda:[{},{},{}],min_length=3,max_length=3)
@@ -32,6 +43,8 @@ class RefinementRequest(BaseModel):
     selected_metric:str=Field(min_length=1)
     refinement_parameter:str=Field(min_length=1)
     threshold:float=Field(default=.02,gt=0,le=1)
+    metric_source:Literal["simulation_summary","benchmark_evidence"]="simulation_summary"
+    benchmark_id:str|None=None
 def _item(solver_id):
     try:return REGISTRY.get(solver_id)
     except KeyError:raise HTTPException(404,"Scientific solver capability not found")
@@ -60,6 +73,36 @@ def solver(solver_id:str,user:dict=Depends(get_current_user)):return metadata(_i
 def validate_inputs(solver_id:str,payload:Inputs,user:dict=Depends(get_current_user)):return validate(_item(solver_id),payload.inputs)
 @router.post("/solvers/{solver_id}/benchmark")
 def execute_benchmark(solver_id:str,payload:BenchmarkRequest,user:dict=Depends(get_current_user)):
+    fem_solvers={"thermal_fem_3d_v1","structural_linear_elasticity_3d_v1","modal_fem_3d_v1"}
+    if solver_id in fem_solvers:
+        case_id=payload.benchmark_case_id or payload.benchmark_id
+        if payload.benchmark_case_id and payload.benchmark_id and payload.benchmark_case_id!=payload.benchmark_id:
+            raise HTTPException(422,"benchmark_case_id and benchmark_id disagree")
+        if payload.source_simulation_id is None or case_id is None:
+            raise HTTPException(422,"source_simulation_id and benchmark_case_id are required for CAD FEM benchmarks")
+        if solver_id != "thermal_fem_3d_v1":
+            raise HTTPException(422,"This CAD FEM solver has no server-bound authoritative analytical benchmark")
+        repo=get_repository()
+        try:
+            source=resolve_simulation_source(payload.source_simulation_id,user["id"],require_completed_result=True,repository=repo)
+            if source.solver_id!=solver_id:raise ValueError("Source simulation solver does not match benchmark solver")
+            simulation_input=repo.get_simulation_input(source.simulation_id)
+            if simulation_input is None:raise ValueError("Persisted FEM input is unavailable")
+            mesh=_load_mesh(simulation_input.geometry.get("mesh_id",""),user["id"])
+            kwargs={"repository":repo,"storage":get_storage(),"user_id":user["id"],"simulation_id":source.simulation_id,
+                "mesh":mesh,"expected_parameters":payload.inputs}
+            if case_id==LINEAR_BENCHMARK_ID: persisted=persist_linear_prism_benchmark(**kwargs)
+            elif case_id==QUADRATIC_BENCHMARK_ID: persisted=persist_quadratic_prism_benchmark(**kwargs)
+            else:raise ValueError("Unknown authoritative thermal FEM benchmark case")
+            model=persisted["payload"]
+            return {"benchmark_id":model["benchmark_id"],"solver_id":solver_id,"selected_metric":model["metric_name"],
+                "computed_result":model["computed_value"],"reference_result":model["reference_value"],
+                "absolute_error":model["absolute_error"],"relative_error":model["relative_error"],
+                "declared_tolerance":model["tolerance"],"passed":model["passed"],
+                "source_simulation_id":source.simulation_id,"created_from_real_computation":True,
+                "authoritative_binding":model["case_binding"],"evidence_id":persisted["id"]}
+        except SimulationSourceNotFoundError:raise HTTPException(404,"Source simulation not found")
+        except (SimulationSourceError,LookupError,ValueError) as exc:raise HTTPException(422,str(exc))
     if payload.source_simulation_id is None or payload.computed_result is None: raise HTTPException(422,"source_simulation_id and computed_result are required for authoritative benchmark evidence")
     item=_item(solver_id); computed,source=_authoritative_benchmark(item,payload.source_simulation_id,user["id"],payload.computed_result)
     try:
@@ -95,11 +138,17 @@ def execute_refinement(solver_id:str,payload:RefinementRequest,user:dict=Depends
     _item(solver_id)
     repo=get_repository()
     try:
+        if payload.metric_source=="benchmark_evidence" and not payload.benchmark_id:
+            raise ValueError("benchmark_id is required for benchmark-derived refinement")
+        if payload.metric_source=="simulation_summary" and payload.benchmark_id:
+            raise ValueError("benchmark_id requires metric_source=benchmark_evidence")
         first=resolve_simulation_source(payload.simulation_ids[0],user["id"],require_result=True,repository=repo)
         if first.solver_id!=solver_id:raise ValueError("Refinement source solver does not match route solver")
         record=create_refinement_evidence(
             user["id"],payload.simulation_ids,payload.selected_metric,
-            payload.refinement_parameter,payload.threshold,repository=repo,
+            payload.refinement_parameter,payload.threshold,
+            benchmark_id=payload.benchmark_id if payload.metric_source=="benchmark_evidence" else None,
+            repository=repo,
         )
     except SimulationSourceNotFoundError:raise HTTPException(404,"Refinement source simulation not found")
     except (SimulationSourceError,ValueError) as exc:raise HTTPException(422,str(exc))

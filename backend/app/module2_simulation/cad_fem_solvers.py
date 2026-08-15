@@ -203,8 +203,15 @@ def solve_structural_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSo
     for assignment in model.material_assignments:
         try: yields.append(_property(model, assignment.domain_id, "yield_strength"))
         except FEMError: pass
-    if yields: summary["factor_of_safety"] = min(yields) / max(von_mises)
-    return FEMSolution("structural_linear_elasticity_3d_v1", summary, {"displacement": ("m", displacement.reshape(-1, 3)), "strain": ("dimensionless", np.asarray(strain)), "stress": ("Pa", np.asarray(stress)), "von_mises_stress": ("Pa", np.asarray(von_mises))}, {"dof_count": len(load), "nonzero_count": int(stiffness.nnz), "solver_method": "scipy.sparse.linalg.spsolve", "algebraic_residual": float(np.linalg.norm(residual[free]) / max(np.linalg.norm(load[free]), 1.0)), "equilibrium_residual": float(equilibrium), "solve_time_seconds": perf_counter() - started})
+    diagnostics = {"dof_count": len(load), "nonzero_count": int(stiffness.nnz), "solver_method": "scipy.sparse.linalg.spsolve", "algebraic_residual": float(np.linalg.norm(residual[free]) / max(np.linalg.norm(load[free]), 1.0)), "equilibrium_residual": float(equilibrium), "solve_time_seconds": perf_counter() - started}
+    warnings: tuple[str, ...] = ()
+    max_stress = max(von_mises)
+    if yields and max_stress > 1e-12:
+        summary["factor_of_safety"] = min(yields) / max_stress
+    elif yields:
+        diagnostics["factor_of_safety_applicability"] = "no nonzero stress; finite FOS not applicable"
+        warnings = ("No nonzero stress; finite factor of safety is not applicable.",)
+    return FEMSolution("structural_linear_elasticity_3d_v1", summary, {"displacement": ("m", displacement.reshape(-1, 3)), "strain": ("dimensionless", np.asarray(strain)), "stress": ("Pa", np.asarray(stress)), "von_mises_stress": ("Pa", np.asarray(von_mises))}, diagnostics, warnings)
 
 
 def solve_modal_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolution:

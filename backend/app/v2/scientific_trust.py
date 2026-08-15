@@ -110,7 +110,7 @@ _SOLVER_BENCHMARK_ASSOCIATIONS = {
 # registry is deliberately explicit; evidence IDs alone are never eligibility.
 TRUST_BENCHMARK_DEFINITIONS = {
     "thermal_fem_3d_v1": {
-        "thermal_fem_linear_prism": ("temperature_k", 1e-8),
+        "thermal_fem_linear_prism": ("normalized_l2_error", 1e-8),
         "thermal_fem_uniform_generation_prism": ("normalized_l2_error", 1e-2),
     },
 }
@@ -118,7 +118,12 @@ TRUST_BENCHMARK_DEFINITIONS = {
 
 def compatible_benchmarks(solver_id: str) -> dict[str, tuple[str, float]]:
     item = REGISTRY.get(solver_id) if "REGISTRY" in globals() else None
-    fallback = {item.benchmark_id: (item.benchmark_metric, item.benchmark_tolerance)} if item else {}
+    # CAD-FEM evidence is authoritative only through an explicit server-owned
+    # case binding. Structural/modal recognizers do not yet exist, so their
+    # client-formula capabilities are intentionally excluded from trust.
+    fallback = ({item.benchmark_id: (item.benchmark_metric, item.benchmark_tolerance)}
+                if item and solver_id not in {"thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
+                else {})
     return {**fallback, **TRUST_BENCHMARK_DEFINITIONS.get(solver_id, {})}
 
 

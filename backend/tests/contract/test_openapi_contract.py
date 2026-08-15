@@ -31,6 +31,11 @@ def test_frozen_openapi_contract() -> None:
         if path.startswith("/api/simulate/"):
             assert all(operation.get("deprecated") is True for operation in spec["paths"][path].values())
 
+    benchmark_request = spec["components"]["schemas"]["BenchmarkRequest"]["properties"]
+    assert {"benchmark_case_id", "benchmark_id", "source_simulation_id"} <= set(benchmark_request)
+    refinement_request = spec["components"]["schemas"]["RefinementRequest"]["properties"]
+    assert {"metric_source", "benchmark_id"} <= set(refinement_request)
+
     typed_responses = {
         ("/api/couplings/thermal-structural", "post"): "ThermalStructuralCouplingResponse",
         ("/api/couplings/{coupling_id}", "get"): "ThermalStructuralCouplingResponse",

@@ -36,12 +36,25 @@ def _scientific_request(model: PhysicsModelV1, mesh: GeneratedMesh, solver_id: s
         "physics_model_hash": model.physics_hash, "design_hash": model.design_hash,
         "geometry_fingerprint": model.geometry_fingerprint, "mesh_hash": model.mesh_hash,
         "mesh_id": model.mesh_id, "material_snapshots": material_snapshots,
+        "domains": [item.model_dump(mode="json") for item in model.domains],
+        "material_assignments": [item.model_dump(mode="json") for item in model.material_assignments],
         "boundary_conditions": [item.model_dump(mode="json") for item in model.boundary_conditions],
         "numerical_settings": model.numerical_settings.model_dump(mode="json")}
+    nodes = np.asarray(mesh.nodes_m, dtype=float)
+    element_volume_m3 = sum(abs(float(np.linalg.det(np.stack((nodes[tet[1]] - nodes[tet[0]],
+        nodes[tet[2]] - nodes[tet[0]], nodes[tet[3]] - nodes[tet[0]]))) / 6.0)) for tet in mesh.tetrahedra)
+    payload["mesh_geometry"] = {
+        "bounds_min_m": nodes.min(axis=0).tolist(), "bounds_max_m": nodes.max(axis=0).tolist(),
+        "element_volume_m3": element_volume_m3, "node_count": len(mesh.nodes_m),
+        "tetrahedron_count": len(mesh.tetrahedra), "boundary_facet_count": len(mesh.boundary_facets),
+        "fallback_provenance": mesh.metadata.fallback_provenance,
+    }
     payload["fem_refinement"] = {"design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
         "analysis_family": model.analysis_family.value, "materials": material_snapshots,
         "boundary_conditions": payload["boundary_conditions"], "numerical_settings": payload["numerical_settings"],
-        "mesh": {"mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash, "specification": mesh.metadata.specification.model_dump(mode="json")}}
+        "mesh": {"mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash,
+            "specification": mesh.metadata.specification.model_dump(mode="json"),
+            "geometry": payload["mesh_geometry"]}}
     evidence = {f"{item.material_name}.{property_.name}": property_.value for item in model.materials for property_ in item.properties}
     return payload, material_snapshots, evidence
 

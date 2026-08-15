@@ -24,6 +24,24 @@ class BenchmarkEvidenceStatus(str, Enum):
     FAIL = "fail"
     WARNING = "warning"
 
+class BenchmarkCaseBinding(BaseModel):
+    schema_version: Literal["1.0"] = "1.0"
+    benchmark_id: str
+    benchmark_version: str
+    authoritative: Literal[True] = True
+    eligibility_status: Literal["eligible"] = "eligible"
+    simulation_id: str
+    solver_id: str
+    solver_version: str
+    input_fingerprint: str
+    mesh_id: str
+    mesh_hash: str
+    result_hash: str
+    field_evidence_id: str
+    field_checksum_sha256: str
+    derived_parameters: dict[str, float | int | str]
+    binding_hash: str
+
 class ConvergenceEvidenceStatus(str, Enum):
     COMPLETED = "completed"
     NOT_CONVERGED = "not_converged"
@@ -58,6 +76,7 @@ class BenchmarkEvidence(EvidenceBase):
     source_simulation_id: str
     status: BenchmarkEvidenceStatus
     benchmark_details: dict[str, Any] = Field(default_factory=dict)
+    case_binding: BenchmarkCaseBinding | None = None
 
     @model_validator(mode="after")
     def status_matches_result(self):

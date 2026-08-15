@@ -1,6 +1,6 @@
 {
   "contract_version": "3.3.0-advanced-cad-assemblies",
-  "openapi_sha256": "c6cce2404b3d18d087e621a32a3b07b4aa2486f5f4c2469252ba697a98b8becf",
+  "openapi_sha256": "859947edc0336601e54e7b1f44198c72f0cec87f68839432d2088f765ab94697",
   "path_count": 112,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],

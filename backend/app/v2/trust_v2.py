@@ -8,7 +8,9 @@ from app.module2_simulation.source_resolution import resolve_simulation_source
 from app.v2.evidence_integrity import records_by_type, validate_scientific_record
 from app.v2.evidence_models import EvidenceType
 from app.v2.repository import EvidenceRepository
+from app.core.repository import get_repository
 from app.v2.scientific_trust import compatible_benchmarks
+from app.module2_simulation.thermal_field_benchmark import validate_persisted_binding
 
 TRUST_VERSION = "2.0"
 
@@ -25,6 +27,7 @@ def _dimension(state: str, item=None, *, warning: str | None = None) -> dict:
 
 
 def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) -> dict:
+    repository = repository or get_repository()
     evidence = EvidenceRepository(repository=repository)
     source = resolve_simulation_source(
         simulation_id, user_id, require_completed_result=True, repository=repository,
@@ -36,8 +39,13 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
     benchmark_candidates = [item for item in grouped.get(EvidenceType.BENCHMARK, []) if (
         item[1].benchmark_id in definitions
         and definitions[item[1].benchmark_id] == (item[1].metric_name, item[1].tolerance)
+        and (not source.solver_id.endswith("_fem_3d_v1") or validate_persisted_binding(item[1], repository, user_id))
     )]
-    benchmark_item = _latest(benchmark_candidates)
+    current_by_case = {
+        benchmark_id: _latest([item for item in benchmark_candidates if item[1].benchmark_id == benchmark_id])
+        for benchmark_id in definitions
+    }
+    current_benchmarks = [item for item in current_by_case.values() if item]
     convergence_item = _latest(grouped.get(EvidenceType.RUN_CONVERGENCE, []))
     refinement_item = _latest(grouped.get(EvidenceType.REFINEMENT_CONVERGENCE, []))
 
@@ -52,8 +60,11 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
         warning="Authoritative validity evidence is missing." if not validity_item else None,
     )
 
-    if benchmark_candidates:
-        benchmark_state = "FAIL" if any(item[1].status.value == "fail" for item in benchmark_candidates) else "PASS"
+    if current_benchmarks:
+        failing = [item for item in current_benchmarks if item[1].status.value == "fail"]
+        warning_items = [item for item in current_benchmarks if item[1].status.value == "warning"]
+        benchmark_state = "FAIL" if failing else "PASS"
+        benchmark_item = _latest(failing or warning_items or current_benchmarks)
         benchmark_dimension = _dimension(
             benchmark_state, benchmark_item,
             warning="Benchmark evidence carries a warning state." if benchmark_item[1].status.value == "warning" else None,

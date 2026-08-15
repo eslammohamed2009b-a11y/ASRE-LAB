@@ -262,7 +262,11 @@ def _tetrahedralize(
     total = sum(abs(_tet_volume(points_mm[list(item)])) for item in kept)
     source_volume = float(solid.Volume())
     coverage = total / source_volume
-    if abs(total - source_volume) > max(size_mm**3, _COVERAGE_TOLERANCE * source_volume):
+    # OCC Boolean noise is scale-relative and many orders below a mesh cell.
+    # A characteristic-cell allowance would let small/coarse meshes evade the
+    # advertised 15% coverage contract.
+    absolute_volume_tolerance_mm3 = max(source_volume * 1e-9, 1e-12)
+    if abs(total - source_volume) > max(absolute_volume_tolerance_mm3, _COVERAGE_TOLERANCE * source_volume):
         raise MeshingError("UNSUPPORTED_VOLUME_TOPOLOGY", "Bounded OCC fallback cannot establish aggregate authoritative volume agreement")
     result = sorted(set(kept))
     metrics: dict[str, float | int] = {
@@ -271,6 +275,7 @@ def _tetrahedralize(
         "rejected_crossing_tetrahedron_count": len(raw) - len(kept),
         "brep_volume_mm3": source_volume, "retained_tetrahedron_volume_mm3": total,
         "coverage_ratio": coverage, "aggregate_relative_volume_error": abs(total - source_volume) / source_volume,
+        "absolute_volume_tolerance_mm3": absolute_volume_tolerance_mm3,
     }
     return (result, metrics) if return_metrics else result
 

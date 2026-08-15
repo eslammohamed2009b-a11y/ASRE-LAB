@@ -44,6 +44,10 @@ def _fem_refinement_comparable(value: dict, dotted: str) -> tuple[dict, float] |
     geometry = comparable["geometry"]
     for key in ("mesh_id", "mesh_hash", "physics_model_hash"):
         geometry.pop(key, None)
+    mesh_geometry = geometry.get("mesh_geometry")
+    if isinstance(mesh_geometry, dict):
+        for key in ("element_volume_m3", "node_count", "tetrahedron_count", "boundary_facet_count", "fallback_provenance"):
+            mesh_geometry.pop(key, None)
     return comparable, refinement
 
 
