@@ -282,6 +282,7 @@ def validate_persisted_binding(model, repository, user_id: str) -> bool:
     elif binding.benchmark_id==QUADRATIC_BENCHMARK_ID:
         sources=[x for x in bcs if x.get("bc_type")=="volumetric_heat_source"]
         if len(temps)!=2 or len(sources)!=1 or not math.isclose(temps[0],temps[1],abs_tol=1e-12):return False
+        if not math.isclose(float(p["temperature_k"]),temps[0],rel_tol=0,abs_tol=1e-12):return False
         assignments=simulation_input.geometry.get("material_assignments",[]); snapshots=simulation_input.geometry.get("material_snapshots",{})
         assignment=next((x for x in assignments if x.get("domain_id")==sources[0].get("domain_id")),None)
         if assignment is None or not math.isclose(float(p["source_w_m3"]),float(sources[0]["heat_source_w_m3"]),rel_tol=1e-12):return False

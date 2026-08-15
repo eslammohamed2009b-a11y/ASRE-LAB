@@ -6,7 +6,7 @@ import json
 
 from app.module2_simulation.source_resolution import resolve_simulation_source
 from app.v2.evidence_integrity import records_by_type, validate_scientific_record
-from app.v2.evidence_models import EvidenceType
+from app.v2.evidence_models import BenchmarkEvidence, EvidenceType
 from app.v2.repository import EvidenceRepository
 from app.core.repository import get_repository
 from app.v2.scientific_trust import compatible_benchmarks
@@ -24,6 +24,44 @@ def _dimension(state: str, item=None, *, warning: str | None = None) -> dict:
     if warning:
         result["warning"] = warning
     return result
+
+
+def _valid_benchmark_refinement(item, *, evidence, repository, user_id: str) -> bool:
+    """Validate all three bound benchmark dependencies of a FEM refinement."""
+    _record, refinement = item
+    if refinement.metric_source != "benchmark_evidence":
+        return True
+    if not refinement.benchmark_id or len(refinement.levels) != 3:
+        return False
+    benchmark_records = []
+    for source_id in refinement.source_ids:
+        record = evidence.get(source_id, user_id)
+        if record is None or record["record_type"] != "scientific_benchmark":
+            continue
+        try:
+            model = BenchmarkEvidence.model_validate(record["payload"])
+        except Exception:
+            return False
+        benchmark_records.append((record, model))
+    if len(benchmark_records) != 3:
+        return False
+    expected_simulations = {level.simulation_id: level for level in refinement.levels}
+    if set(model.simulation_id for _record, model in benchmark_records) != set(expected_simulations):
+        return False
+    for _record, model in benchmark_records:
+        level = expected_simulations[model.simulation_id]
+        if (
+            model.benchmark_id != refinement.benchmark_id
+            or model.metric_name != refinement.selected_metric
+            or model.status.value != "pass"
+            or model.solver_id != refinement.solver_id
+            or model.solver_version != refinement.solver_version
+            or model.simulation_id != model.source_simulation_id
+            or not validate_persisted_binding(model, repository, user_id)
+            or abs(model.computed_value - level.value) > 1e-12 * max(abs(level.value), 1.0)
+        ):
+            return False
+    return True
 
 
 def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) -> dict:
@@ -47,7 +85,9 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
     }
     current_benchmarks = [item for item in current_by_case.values() if item]
     convergence_item = _latest(grouped.get(EvidenceType.RUN_CONVERGENCE, []))
-    refinement_item = _latest(grouped.get(EvidenceType.REFINEMENT_CONVERGENCE, []))
+    refinement_candidates = [item for item in grouped.get(EvidenceType.REFINEMENT_CONVERGENCE, [])
+                             if _valid_benchmark_refinement(item, evidence=evidence, repository=repository, user_id=user_id)]
+    refinement_item = _latest(refinement_candidates)
 
     if validity_item:
         validity_state = {"valid": "PASS", "valid_with_warnings": "WARNING", "invalid": "FAIL"}[

@@ -45,6 +45,32 @@ def _model(mesh, family: str = "thermal"):
     return build_physics_model(mesh, PhysicsModelRequest.model_validate(payload))
 
 
+def _quadratic_model(mesh):
+    return build_physics_model(mesh, PhysicsModelRequest.model_validate({
+        "analysis_family": "thermal", "domains": [domain().model_dump(mode="json")],
+        "material_assignments": [{"domain_id": "solid_domain", "material_name": "steel"}],
+        "boundary_conditions": [
+            {"bc_type": "temperature", "bc_id": "left", "semantic_region": "low_end", "temperature_k": 300},
+            {"bc_type": "temperature", "bc_id": "right", "semantic_region": "high_end", "temperature_k": 300},
+            {"bc_type": "heat_flux", "bc_id": "walls", "semantic_region": "walls", "heat_flux_w_m2": 0},
+            {"bc_type": "volumetric_heat_source", "bc_id": "source", "domain_id": "solid_domain", "heat_source_w_m3": 1_000_000},
+        ], "numerical_settings": {"settings_type": "steady_thermal"}, "expected_outputs": ["temperature", "heat_flux"],
+    }))
+
+
+def _real_quadratic_chain(tmp_path, *, suffix: str):
+    repo=LocalSQLiteRepository(tmp_path/f"{suffix}.sqlite"); storage=LocalFileStorage(tmp_path/f"{suffix}-private")
+    owner="fem-owner"; experiment=repo.create_experiment(owner,suffix); simulations=[]; meshes=[]; benchmarks=[]
+    for size in (20,10,7.5):
+        mesh=generate_mesh(compile_design(authoritative_box()),[domain()],mesh_spec(size)); meshes.append(mesh)
+        simulation=execute_cad_fem(repository=repo,storage=storage,user_id=owner,experiment_id=experiment,design_id=None,
+            mesh=mesh,model=_quadratic_model(mesh),solver_id="thermal_fem_3d_v1",idempotency_key=f"{suffix}-{size}")
+        simulations.append(simulation)
+        benchmarks.append(persist_quadratic_prism_benchmark(repository=repo,storage=storage,user_id=owner,
+            simulation_id=simulation,mesh=mesh))
+    return repo,storage,owner,simulations,meshes,benchmarks
+
+
 def test_authoritative_thermal_execution_persists_fields_evidence_and_is_idempotent(tmp_path):
     repo = LocalSQLiteRepository(tmp_path / "records.sqlite"); storage = LocalFileStorage(tmp_path / "private")
     owner = "fem-owner"; experiment = repo.create_experiment(owner, "FEM")
@@ -212,6 +238,7 @@ def test_quadratic_field_benchmark_refinement_and_trust(tmp_path, monkeypatch):
         "geometry.fem_refinement.mesh.specification.target_size.value", threshold=5e-4,
         benchmark_id="thermal_fem_uniform_generation_prism", repository=repo)
     assert refinement["payload"]["passed"] is True
+    assert {item["id"] for item in benchmarks} <= set(refinement["payload"]["source_ids"])
     routed=execute_refinement("thermal_fem_3d_v1",RefinementRequest(simulation_ids=simulations,
         selected_metric="normalized_l2_error",refinement_parameter="geometry.fem_refinement.mesh.specification.target_size.value",
         threshold=5e-4,metric_source="benchmark_evidence",benchmark_id="thermal_fem_uniform_generation_prism"),{"id":owner})
@@ -219,6 +246,44 @@ def test_quadratic_field_benchmark_refinement_and_trust(tmp_path, monkeypatch):
     trust = derive_trust_record(owner, simulations[-1], repository=repo)
     assert trust["payload"]["dimensions"]["benchmark"]["state"] == "PASS"
     assert refinement["id"] in trust["payload"]["dimensions"]["refinement"]["evidence_ids"]
+
+
+def test_refinement_rejects_legacy_or_tampered_bound_benchmarks_and_trust_does_not_pass(tmp_path):
+    repo, _storage, owner, simulations, _meshes, benchmarks = _real_quadratic_chain(tmp_path, suffix="legacy-refinement")
+    refinement_parameter="geometry.fem_refinement.mesh.specification.target_size.value"
+    valid=create_refinement_evidence(owner,simulations,"normalized_l2_error",refinement_parameter,
+        threshold=5e-4,benchmark_id="thermal_fem_uniform_generation_prism",repository=repo)
+    # Turn the coarse and medium persisted records into legacy-looking PASS
+    # evidence. Their values remain plausible but no server-owned binding exists.
+    with repo._connect() as connection:
+        for benchmark in benchmarks[:2]:
+            payload={**benchmark["payload"],"case_binding":None,"warnings":["legacy-unbound"]}
+            connection.execute("update engineering_evidence_records set payload=? where id=?",(json.dumps(payload),benchmark["id"]))
+        connection.commit()
+    with pytest.raises(ValueError,match="valid bound authoritative benchmark"):
+        create_refinement_evidence(owner,simulations,"normalized_l2_error",refinement_parameter,
+            threshold=5e-4,benchmark_id="thermal_fem_uniform_generation_prism",repository=repo)
+    trust=derive_trust_record(owner,simulations[-1],repository=repo)["payload"]
+    assert trust["dimensions"]["benchmark"]["state"]=="PASS"
+    assert trust["dimensions"]["refinement"]["state"]!="PASS"
+    assert valid["id"] not in trust["dimensions"]["refinement"]["evidence_ids"]
+
+    repo, _storage, owner, simulations, _meshes, benchmarks = _real_quadratic_chain(tmp_path, suffix="tampered-refinement")
+    tampered=json.loads(json.dumps(benchmarks[0]["payload"]))
+    tampered["case_binding"]["derived_parameters"]["source_w_m3"] = 999_999
+    invalid_newer=scientific_router.EvidenceRepository(repository=repo).create_scientific_evidence(owner,tampered)
+    # Invalid newer candidates are filtered before canonical selection; the
+    # still-valid original coarse benchmark remains usable.
+    selected=create_refinement_evidence(owner,simulations,"normalized_l2_error",refinement_parameter,
+        threshold=5e-4,benchmark_id="thermal_fem_uniform_generation_prism",repository=repo)
+    assert benchmarks[0]["id"] in selected["payload"]["source_ids"]
+    assert invalid_newer["id"] not in selected["payload"]["source_ids"]
+    with repo._connect() as connection:
+        connection.execute("update engineering_evidence_records set payload=? where id=?",(json.dumps(tampered),benchmarks[0]["id"]))
+        connection.commit()
+    with pytest.raises(ValueError,match="valid bound authoritative benchmark"):
+        create_refinement_evidence(owner,simulations,"normalized_l2_error",refinement_parameter,
+            threshold=5e-4,benchmark_id="thermal_fem_uniform_generation_prism",repository=repo)
 
 
 def test_thermal_binding_rejects_wrong_mesh_nonbenchmark_bc_missing_field_checksum_and_owner(tmp_path):

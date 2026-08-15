@@ -10,6 +10,35 @@ from app.core.repository import get_repository
 from app.v2.evidence_integrity import records_by_type
 from app.v2.evidence_models import EvidenceType
 from app.v2.repository import EvidenceRepository
+from app.v2.scientific_trust import compatible_benchmarks
+from app.module2_simulation.thermal_field_benchmark import validate_persisted_binding
+
+
+def _valid_bound_benchmark(item, source, *, benchmark_id: str, selected_metric: str, repository, user_id: str) -> bool:
+    """One shared eligibility decision for FEM benchmark-derived refinement.
+
+    Filtering happens before deterministic latest-record selection so an
+    invalid historical record cannot conceal an older valid bound record.
+    """
+    record, model = item
+    compatible = compatible_benchmarks(source.solver_id)
+    if (
+        model.status.value != "pass"
+        or model.benchmark_id != benchmark_id
+        or model.metric_name != selected_metric
+        or compatible.get(benchmark_id) != (selected_metric, model.tolerance)
+        or model.simulation_id != source.simulation_id
+        or model.source_simulation_id != source.simulation_id
+        or model.solver_id != source.solver_id
+        or model.solver_version != source.solver_version
+        or model.input_fingerprint != source.result.validation_metadata.get("input_fingerprint")
+        or model.result_hash != source.result.reproducibility_hash
+    ):
+        return False
+    # CAD FEM benchmark evidence is authoritative only when the exact existing
+    # server-owned binding validator succeeds. Non-FEM legacy paths remain
+    # backward compatible.
+    return not source.solver_id.endswith("_fem_3d_v1") or validate_persisted_binding(model, repository, user_id)
 
 
 def _remove_path(value: dict, dotted: str):
@@ -92,9 +121,10 @@ def create_refinement_evidence(
         numerical_ids.append(sorted(candidates, key=lambda x: (x[0].get("created_at", ""), x[0]["id"]))[-1][0]["id"])
         if benchmark_id:
             benchmarks = [item for item in records_by_type(scientific, user_id, source).get(EvidenceType.BENCHMARK, [])
-                          if item[1].benchmark_id == benchmark_id and item[1].metric_name == selected_metric and item[1].status.value == "pass"]
+                          if _valid_bound_benchmark(item, source, benchmark_id=benchmark_id,
+                              selected_metric=selected_metric, repository=repository, user_id=user_id)]
             if not benchmarks:
-                raise ValueError("Refinement source lacks a passed authoritative benchmark for the requested metric")
+                raise ValueError("Refinement source lacks a valid bound authoritative benchmark for the requested metric")
             benchmark = sorted(benchmarks, key=lambda x: (x[0].get("created_at", ""), x[0]["id"]))[-1]
             values.append(float(benchmark[1].computed_value)); benchmark_ids.append(benchmark[0]["id"])
     if len(set(physical_hashes)) != 1:
