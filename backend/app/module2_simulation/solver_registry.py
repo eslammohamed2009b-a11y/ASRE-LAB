@@ -330,6 +330,27 @@ SOLVER_REGISTRY.update({
         known_limitations=["Unconstrained/rigid-body systems fail explicitly.", "No damping or modal participation factors."],
         benchmark_references=["tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency"],
     ),
+    "cfd_openfoam_laminar_internal_3d_v1": CapabilityEntry(
+        solver_id="cfd_openfoam_laminar_internal_3d_v1", family=SolverFamily.CFD, version="1.0.0",
+        implementation_status=ImplementationStatus.REAL, validation_status=ValidationStatus.PARTIALLY_VALIDATED,
+        governing_equations=["Steady incompressible Navier-Stokes momentum", "Continuity: div(U)=0"],
+        numerical_method="OpenFOAM Foundation 14 foamRun -solver incompressibleFluid; SIMPLE finite volume",
+        discretization="Authoritative ASRE SI TET4 cells exported one-to-one as deterministic OpenFOAM polyMesh",
+        supported_dimensions=["3d"], supported_geometry=["authoritative_cad_fluid_volume_tetra4"],
+        geometry_limitations="Fixed-geometry internal fluid volume with one velocity inlet, one pressure outlet, and one no-slip wall group.",
+        consumes_cad_geometry=True, consumes_authoritative_cad=True, required_mesh_dimension=3,
+        accepted_element_types=["tetra4"], supported_domain_types=["fluid"],
+        geometry_dependency_description="Consumes GeneratedMesh cells and semantic facets without independent OpenFOAM remeshing.",
+        supported_materials=["single Newtonian fluid with authoritative density and dynamic_viscosity snapshots"],
+        supported_boundary_conditions=["velocity_inlet", "pressure_boundary", "wall"],
+        required_inputs=["matching CFD PhysicsModelV1", "explicit FLUID CAD volume", "authoritative ASRE TET4 mesh"],
+        output_metrics=["cell-centered U", "cell-centered kinematic p", "surface phi", "residuals", "mass conservation"],
+        validity_envelope={"flow": "steady incompressible Newtonian laminar single-phase isothermal internal", "mass_imbalance": "<= 1e-3"},
+        convergence_requirements="Normal solver completion, SIMPLE residual convergence, finite reviewed fields, and normalized mass imbalance <= 1e-3.",
+        implementation_reference="app.module2_simulation.solver_orchestrator.solve_openfoam_cfd_3d",
+        known_limitations=["No turbulence, transient, compressible, multiphase, non-Newtonian, porous, rotating-frame, CHT, FSI, or combustion support.", "Analytical benchmark and three-mesh refinement remain pending Phase 3C-2B."],
+        benchmark_references=["tests/integration/test_openfoam_cfd.py::test_real_openfoam_asre_channel_solve (real execution smoke; analytical benchmark pending)"],
+    ),
 })
 
 # Kept beside the registry entries so the public contract is fully typed while

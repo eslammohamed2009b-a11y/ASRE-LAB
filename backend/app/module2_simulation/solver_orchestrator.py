@@ -1,8 +1,8 @@
 """Deterministic, fail-closed orchestration for authoritative CAD FEM.
 
-This module plans and dispatches only fixed, reviewed solver adapters.  It is
-not a second numerical implementation and it intentionally does not register
-the future CFD solver as implemented.
+This module plans and dispatches only fixed, reviewed solver adapters. It is
+not a second numerical implementation; its CFD path is restricted to the
+reviewed OpenFOAM 14 steady laminar adapter.
 """
 from __future__ import annotations
 
@@ -27,6 +27,7 @@ from app.module2_simulation.cad_fem_solvers import (
 from app.module2_simulation.fem_core import MAX_ELEMENTS, MAX_NODES, MAX_STRUCTURAL_DOFS
 from app.module2_simulation.geometry_physics_schemas import PhysicsModelV1
 from app.module2_simulation.meshing import GeneratedMesh
+from app.module2_simulation.openfoam_case import CFDSolutionV1, parse_cfd_solution, prepare_laminar_case
 from app.module2_simulation.schemas import ImplementationStatus
 from app.module2_simulation.solver_registry import SOLVER_REGISTRY
 
@@ -90,7 +91,7 @@ class SolverOrchestrationError(ValueError):
         self.code = code
 
 
-SolverCallable = Callable[[GeneratedMesh, PhysicsModelV1], FEMSolution]
+SolverCallable = Callable[[GeneratedMesh, PhysicsModelV1], FEMSolution | CFDSolutionV1]
 
 
 @dataclass(frozen=True)
@@ -241,7 +242,7 @@ def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1
     if unsupported_bcs:
         errors.append("UNSUPPORTED_BOUNDARY_CONDITION")
     names = {property_.name for material in model.materials for property_ in material.properties}
-    required_by_family = {"thermal": {"thermal_conductivity"}, "structural": {"elastic_modulus", "poisson_ratio", "density"}, "modal": {"elastic_modulus", "poisson_ratio", "density"}}
+    required_by_family = {"thermal": {"thermal_conductivity"}, "structural": {"elastic_modulus", "poisson_ratio", "density"}, "modal": {"elastic_modulus", "poisson_ratio", "density"}, "cfd": {"density", "dynamic_viscosity"}}
     if not required_by_family.get(model.analysis_family.value, set()).issubset(names):
         errors.append("MATERIAL_PROPERTY_MISSING")
     if len(mesh.nodes_m) > limits.maximum_nodes or len(mesh.tetrahedra) > limits.maximum_elements:
@@ -261,7 +262,7 @@ def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1
 def create_execution_plan(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1, *, limits: ExecutionResourceLimits = ExecutionResourceLimits(), backend: BackendCapability | None = None) -> SolverExecutionPlanV1:
     adapter = FIXED_SOLVER_ADAPTERS.get(solver_id)
     entry = SOLVER_REGISTRY.get(solver_id)
-    active_backend = backend or local_fem_backend()
+    active_backend = backend or (detect_openfoam14_backend() if solver_id == "cfd_openfoam_laminar_internal_3d_v1" else local_fem_backend())
     errors = _preflight_errors(solver_id, mesh, model, limits, active_backend)
     if adapter is None or entry is None:
         raise SolverOrchestrationError("UNKNOWN_SOLVER", f"Solver '{solver_id}' has no fixed authoritative adapter")
@@ -272,7 +273,7 @@ def create_execution_plan(solver_id: str, mesh: GeneratedMesh, model: PhysicsMod
         solver_id=solver_id, solver_version=entry.version, analysis_family=model.analysis_family.value,
         backend_id=active_backend.backend_id, backend_version=active_backend.detected_version or "unavailable",
         backend_availability=active_backend.status,
-        execution_mode="fixed_python_callable", mesh_id=mesh.metadata.mesh_id, mesh_hash=mesh.metadata.mesh_hash,
+        execution_mode="fixed_external_openfoam" if adapter.backend_id == "openfoam-foundation-14" else "fixed_python_callable", mesh_id=mesh.metadata.mesh_id, mesh_hash=mesh.metadata.mesh_hash,
         physics_model_id=model.physics_model_id, physics_hash=model.physics_hash, request_fingerprint=fingerprint,
         preflight_status=PreflightStatus.PASS if not errors else PreflightStatus.FAIL, resource_limits=limits,
         required_capabilities=tuple(model.solver_requirements), authoritative=bool(entry.consumes_authoritative_cad),
@@ -280,14 +281,14 @@ def create_execution_plan(solver_id: str, mesh: GeneratedMesh, model: PhysicsMod
     )
 
 
-def dispatch(plan: SolverExecutionPlanV1, mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolution:
+def dispatch(plan: SolverExecutionPlanV1, mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolution | CFDSolutionV1:
     """Dispatch only a preflight-passing plan to its fixed in-process callable."""
     if plan.preflight_status != PreflightStatus.PASS:
         raise SolverOrchestrationError(plan.diagnostics[0], "Solver preflight failed; no fallback solver was selected")
     adapter = FIXED_SOLVER_ADAPTERS.get(plan.solver_id)
     if adapter is None or adapter.backend_id != plan.backend_id:
         raise SolverOrchestrationError("SOLVER_BACKEND_UNAVAILABLE", "Fixed adapter is unavailable; no fallback solver was selected")
-    active_backend = local_fem_backend()
+    active_backend = detect_openfoam14_backend() if adapter.backend_id == "openfoam-foundation-14" else local_fem_backend()
     if active_backend.backend_id != plan.backend_id or active_backend.detected_version != plan.backend_version:
         raise SolverOrchestrationError("SOLVER_BACKEND_MISMATCH", "The active fixed backend no longer matches the execution plan")
     recomputed = scientific_execution_fingerprint(
@@ -304,7 +305,7 @@ class OpenFOAMExecutionConfig:
 
 
 class OpenFOAMAdapterFoundation:
-    """Safe Phase-3C-2 foundation; it does not create or claim a CFD result."""
+    """Safe fixed OpenFOAM process boundary used by the reviewed CFD solver."""
     executable = "foamRun"
     solver_module = "incompressibleFluid"
 
@@ -342,3 +343,22 @@ class OpenFOAMAdapterFoundation:
     def isolated_workdir(self) -> tempfile.TemporaryDirectory[str]:
         """Deprecated helper; use ``case_workspace`` for executable cases."""
         return tempfile.TemporaryDirectory(prefix="asre-openfoam-")
+
+
+def solve_openfoam_cfd_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> CFDSolutionV1:
+    """Execute only the reviewed steady laminar OpenFOAM case in an isolated workspace."""
+    adapter = OpenFOAMAdapterFoundation()
+    with adapter.case_workspace() as case:
+        poly, definition = prepare_laminar_case(mesh, model, case)
+        completed = adapter.run_fixed_case(case)
+        solution = parse_cfd_solution(mesh, model, poly, definition, case, completed.stdout + completed.stderr)
+        if not solution.converged:
+            raise SolverOrchestrationError("CFD_NOT_CONVERGED", "OpenFOAM output failed residual or mass-conservation acceptance")
+        return solution
+
+
+# Registered only after the concrete bounded adapter is defined; no dynamic module or user solver lookup exists.
+FIXED_SOLVER_ADAPTERS["cfd_openfoam_laminar_internal_3d_v1"] = FixedSolverAdapter(
+    "openfoam_laminar_internal_3d_v1", "cfd_openfoam_laminar_internal_3d_v1",
+    "openfoam-foundation-14", solve_openfoam_cfd_3d,
+)
