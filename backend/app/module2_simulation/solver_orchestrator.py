@@ -160,8 +160,34 @@ def detect_external_backends() -> dict[str, BackendCapability]:
         "gmsh": _external_binary_capability("gmsh", "gmsh", deployment_state="not included in backend image"),
         "fenicsx": python_package("fenicsx", "fenics-dolfinx"),
         "petsc": python_package("petsc", "petsc4py"),
-        "openfoam": _external_binary_capability("openfoam", "simpleFoam", deployment_state="not included in backend image"),
+        "openfoam": detect_openfoam14_backend(),
     }
+
+
+def detect_openfoam14_backend() -> BackendCapability:
+    """Probe the exact reviewed OpenFOAM Foundation v14 runtime."""
+    executable = shutil.which("foamRun")
+    if executable is None:
+        return BackendCapability("openfoam-foundation-14", BackendAvailability.UNAVAILABLE, None,
+            "which foamRun", "dedicated CFD image only", "foamRun was not found on PATH")
+    try:
+        completed = subprocess.run([executable, "-help"], shell=False, capture_output=True, text=True, timeout=10, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return BackendCapability("openfoam-foundation-14", BackendAvailability.UNAVAILABLE, None,
+            "foamRun -help", "dedicated CFD image", str(exc))
+    output = completed.stdout + completed.stderr
+    if completed.returncode != 0 or "OpenFOAM-14" not in output or "-solver <name>" not in output:
+        return BackendCapability("openfoam-foundation-14", BackendAvailability.UNSUPPORTED, None,
+            "foamRun -help", "dedicated CFD image", "foamRun is not the required OpenFOAM Foundation 14 executable")
+    package = "14"
+    dpkg = shutil.which("dpkg-query")
+    if dpkg:
+        result = subprocess.run([dpkg, "-W", "-f=${Version}", "openfoam14"], shell=False,
+            capture_output=True, text=True, timeout=10, check=False)
+        if result.returncode == 0: package = result.stdout.strip()
+    status = BackendAvailability.AVAILABLE if package == "20260724" else BackendAvailability.AVAILABLE_BUT_NOT_DEPLOYMENT_CERTIFIED
+    return BackendCapability("openfoam-foundation-14", status, package, "foamRun -help; dpkg-query openfoam14",
+        "dedicated Ubuntu 24.04 CFD image", None if package == "20260724" else "OpenFOAM package is not pinned subversion 20260724")
 
 
 def _material_snapshot(model: PhysicsModelV1) -> list[dict]:
@@ -279,7 +305,8 @@ class OpenFOAMExecutionConfig:
 
 class OpenFOAMAdapterFoundation:
     """Safe Phase-3C-2 foundation; it does not create or claim a CFD result."""
-    executable = "simpleFoam"
+    executable = "foamRun"
+    solver_module = "incompressibleFluid"
 
     def __init__(self, config: OpenFOAMExecutionConfig = OpenFOAMExecutionConfig()):
         self.config = config
@@ -299,13 +326,13 @@ class OpenFOAMAdapterFoundation:
     def run_fixed_case(self, case_directory: Path) -> subprocess.CompletedProcess[str]:
         executable = shutil.which(self.executable)
         if executable is None:
-            raise SolverOrchestrationError("SOLVER_BACKEND_UNAVAILABLE", "OpenFOAM simpleFoam is not installed")
+            raise SolverOrchestrationError("SOLVER_BACKEND_UNAVAILABLE", "OpenFOAM Foundation foamRun is not installed")
         case = case_directory.resolve()
         if not case.is_dir() or case not in self._authorized_workspaces:
             raise SolverOrchestrationError("INVALID_EXTERNAL_WORKDIR", "OpenFOAM case directory is not an adapter-controlled workspace")
         # The only command is a literal executable plus the generated case path.
         try:
-            completed = subprocess.run([executable, "-case", str(case)], shell=False, capture_output=True, text=True, timeout=self.config.timeout_seconds, check=False)
+            completed = subprocess.run([executable, "-solver", self.solver_module, "-case", str(case)], shell=False, capture_output=True, text=True, timeout=self.config.timeout_seconds, check=False)
         except subprocess.TimeoutExpired as exc:
             raise SolverOrchestrationError("SOLVER_TIMEOUT", "OpenFOAM exceeded the configured execution timeout") from exc
         if completed.returncode != 0:

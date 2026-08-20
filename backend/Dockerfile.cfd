@@ -1,0 +1,33 @@
+# syntax=docker/dockerfile:1
+FROM ubuntu:24.04@sha256:561618e2c15bf2397621dd04f96926663a3b5616c189cf7e38db7e82f5c538ea
+
+ARG OPENFOAM_PACKAGE_VERSION=20260724
+ENV DEBIAN_FRONTEND=noninteractive \
+    FOAM_INST_DIR=/opt \
+    PATH=/opt/openfoam14/bin:$PATH
+
+COPY openfoam-foundation.asc /etc/apt/trusted.gpg.d/openfoam.asc
+SHELL ["/bin/bash", "-o", "pipefail", "-c"]
+RUN set -ex; \
+    echo 'deb [arch=amd64] http://dl.openfoam.org/ubuntu noble main' > /etc/apt/sources.list.d/openfoam.list; \
+    apt-get update; \
+    apt-get install -y --no-install-recommends openfoam14=${OPENFOAM_PACKAGE_VERSION} python3 python3-venv ca-certificates openssl; \
+    rm -rf /var/lib/apt/lists/*; \
+    dpkg-query -W -f='${Package}=${Version}\n' openfoam14; \
+    . /opt/openfoam14/etc/bashrc; foamRun -help
+
+WORKDIR /app
+COPY requirements.txt .
+RUN --mount=type=secret,id=host_ca,required=false \
+    if [ -f /run/secrets/host_ca ]; then \
+      openssl x509 -inform DER -in /run/secrets/host_ca -out /usr/local/share/ca-certificates/asre-local-build-ca.crt; \
+      update-ca-certificates; \
+    fi && \
+    python3 -m venv /opt/asre-venv && /opt/asre-venv/bin/pip install --no-cache-dir -r requirements.txt && \
+    rm -f /usr/local/share/ca-certificates/asre-local-build-ca.crt && \
+    update-ca-certificates --fresh
+COPY app ./app
+ENV PATH=/opt/asre-venv/bin:/opt/openfoam14/bin:$PATH \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+CMD ["bash", "-lc", ". /opt/openfoam14/etc/bashrc && celery -A app.core.celery_app.celery_app worker --loglevel=info --concurrency=1 -Q cfd"]

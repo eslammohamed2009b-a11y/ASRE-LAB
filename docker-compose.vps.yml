@@ -94,6 +94,32 @@ services:
     networks: [internal]
     security_opt: [no-new-privileges:true]
 
+  worker-cfd:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.cfd
+    command: bash -lc ". /opt/openfoam14/etc/bashrc && celery -A app.core.celery_app.celery_app worker --loglevel=info --concurrency=1 -Q cfd"
+    env_file: ./deploy/vps.env
+    environment:
+      ENV: production
+      DEBUG: "false"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/1
+      LOCAL_PERSISTENCE_DB_PATH: ""
+      LOCAL_STORAGE_ROOT: ""
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "bash", "-lc", ". /opt/openfoam14/etc/bashrc && foamRun -help >/dev/null && celery -A app.core.celery_app.celery_app inspect ping -d celery@$$HOSTNAME --timeout=3"]
+      interval: 30s
+      timeout: 8s
+      retries: 3
+      start_period: 60s
+    networks: [internal]
+    security_opt: [no-new-privileges:true]
+
   redis:
     image: redis:7.4-alpine
     command: redis-server --appendonly yes --appendfsync everysec --save 60 1000

@@ -138,7 +138,7 @@ def test_backend_identity_mismatch_is_not_an_executable_plan(mesh):
 def test_openfoam_foundation_uses_fixed_safe_command_and_isolation(monkeypatch, tmp_path):
     adapter = OpenFOAMAdapterFoundation(OpenFOAMExecutionConfig(timeout_seconds=7))
     calls = []
-    monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/simpleFoam")
+    monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/foamRun")
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.subprocess.run", lambda args, **kwargs: calls.append((args, kwargs)) or CompletedProcess(args, 17, "", "failure"))
     arbitrary = tmp_path / "case;not-a-command"; arbitrary.mkdir()
     with pytest.raises(SolverOrchestrationError) as exc:
@@ -148,7 +148,7 @@ def test_openfoam_foundation_uses_fixed_safe_command_and_isolation(monkeypatch, 
         with pytest.raises(SolverOrchestrationError) as exc:
             adapter.run_fixed_case(case)
     assert exc.value.code == "SOLVER_EXTERNAL_FAILED"
-    assert calls[0][0] == ["/fixed/simpleFoam", "-case", str(case)]
+    assert calls[0][0] == ["/fixed/foamRun", "-solver", "incompressibleFluid", "-case", str(case)]
     assert calls[0][1]["shell"] is False and calls[0][1]["timeout"] == 7
     with adapter.case_workspace() as first, adapter.case_workspace() as second:
         assert Path(first).is_dir() and Path(second).is_dir() and first != second
@@ -164,7 +164,7 @@ def test_openfoam_missing_executable_fails_closed(monkeypatch, tmp_path):
 
 
 def test_openfoam_timeout_is_typed(monkeypatch, tmp_path):
-    monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/simpleFoam")
+    monkeypatch.setattr("app.module2_simulation.solver_orchestrator.shutil.which", lambda executable: "/fixed/foamRun")
     monkeypatch.setattr("app.module2_simulation.solver_orchestrator.subprocess.run", lambda *args, **kwargs: (_ for _ in ()).throw(TimeoutExpired(args[0], kwargs["timeout"])))
     adapter = OpenFOAMAdapterFoundation()
     with adapter.case_workspace() as workspace:
