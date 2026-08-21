@@ -133,6 +133,27 @@ class SemanticMeshMapping(StrictModel):
     warnings: list[str] = Field(default_factory=list)
 
 
+class CFDSemanticMeshMappingV1(StrictModel):
+    """Truthful CAD-to-OpenFOAM boundary identity for certified FV meshes."""
+
+    mapping_type: Literal["cfd_openfoam_patch"] = "cfd_openfoam_patch"
+    semantic_region: str
+    body_id: str
+    topology_signatures: list[str]
+    domain_ids: list[str]
+    source_surface_region: str
+    final_patch: str
+    start_face: int = Field(ge=0)
+    face_count: int = Field(gt=0)
+    face_ids: list[int] = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def exact_face_range(self) -> "CFDSemanticMeshMappingV1":
+        if self.face_ids != list(range(self.start_face, self.start_face + self.face_count)):
+            raise ValueError("CFD semantic face IDs must equal the certified OpenFOAM patch range")
+        return self
+
+
 class DomainMeshMapping(StrictModel):
     domain_id: str
     source_body_id: str
@@ -374,7 +395,7 @@ class PhysicsModelV1(StrictModel):
     domains: list[PhysicsDomain]
     materials: list[MaterialSnapshot]
     material_assignments: list[MaterialAssignment]
-    semantic_mappings: list[SemanticMeshMapping]
+    semantic_mappings: list[Union[SemanticMeshMapping, CFDSemanticMeshMappingV1]]
     boundary_conditions: list[BoundaryCondition]
     numerical_settings: NumericalSettingsV1
     expected_outputs: list[str]

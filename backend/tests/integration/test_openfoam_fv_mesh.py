@@ -150,7 +150,11 @@ def test_fem_tet4_remains_unchanged_and_pure_tet_cfd_is_not_claimed(compiled):
 
 
 def _typed_certified_mesh(compiled, surface, *, mesh_id="fv-a", mesh_hash="a" * 64):
-    patches = [item.model_copy(update={"final_face_count": item.triangle_count}) for item in surface.semantic_patches]
+    patches = []
+    start_face = 0
+    for item in surface.semantic_patches:
+        patches.append(item.model_copy(update={"start_face": start_face, "final_face_count": item.triangle_count}))
+        start_face += item.triangle_count
     boundary_faces = sum(item.final_face_count for item in patches)
     return CFDGeneratedMeshV1.model_validate({
         "mesh_id": mesh_id, "mesh_hash": mesh_hash, "design_hash": compiled.design_hash,
@@ -179,7 +183,8 @@ def test_cfd_physics_binds_actual_fv_mesh_without_tet_dependency(compiled, surfa
     model = build_cfd_physics_model(mesh, benchmark_physics_request())
     assert (model.mesh_id, model.mesh_hash) == (mesh.mesh_id, mesh.mesh_hash)
     assert "certified_finite_volume" in model.solver_requirements and "tetra4" not in model.solver_requirements
-    assert sum(len(item.boundary_facet_ids) for item in model.semantic_mappings) == mesh.boundary_face_count
+    assert sum(item.face_count for item in model.semantic_mappings) == mesh.boundary_face_count
+    assert all(item.face_ids == list(range(item.start_face, item.start_face + item.face_count)) for item in model.semantic_mappings)
     assert build_cfd_physics_model(mesh, benchmark_physics_request()).physics_hash == model.physics_hash
 
     changed = mesh.model_copy(update={"mesh_id": "fv-b", "mesh_hash": "b" * 64})

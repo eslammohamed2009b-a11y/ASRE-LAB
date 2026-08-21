@@ -1,7 +1,7 @@
 {
-  "contract_version": "3.3.0-advanced-cad-assemblies",
-  "openapi_sha256": "859947edc0336601e54e7b1f44198c72f0cec87f68839432d2088f765ab94697",
-  "path_count": 112,
+  "contract_version": "3.4.0-cfd-closure",
+  "openapi_sha256": "255f1a0c05c67d08f641349b63aafd079b72cfc0fd731a25e3d4fd31739ee8cc",
+  "path_count": 116,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
@@ -90,6 +90,10 @@
     "/api/simulations/{simulation_id}/results",
     "/api/simulations/{simulation_id}/export/{fmt}",
     "/api/geometry-physics/physics/{physics_model_id}/execute",
+    "/api/geometry-physics/physics/cfd",
+    "/api/geometry-physics/physics/cfd/preparations/{preparation_id}",
+    "/api/geometry-physics/meshes/cfd/{mesh_id}",
+    "/api/geometry-physics/physics/cfd/{physics_model_id}/execute",
     "/health",
     "/version"
   ]

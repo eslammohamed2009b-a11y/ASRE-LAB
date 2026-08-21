@@ -7,6 +7,23 @@ from app.v2.repository import EvidenceRepository
 def _convergence_semantics(result) -> tuple[str, str, str, bool | None]:
     metadata = result.validation_metadata
     declared = metadata.get("convergence_metric")
+    if result.solver_id == "cfd_openfoam_laminar_internal_3d_v1":
+        conditions = metadata.get("convergence_conditions", {})
+        required = {
+            "simple_converged", "final_u_residual", "u_tolerance", "final_p_residual",
+            "p_tolerance", "normalized_mass_imbalance", "mass_imbalance_limit", "finite_reviewed_fields",
+        }
+        passed = bool(required <= set(conditions) and conditions["simple_converged"]
+                      and conditions["finite_reviewed_fields"]
+                      and conditions["final_u_residual"] <= conditions["u_tolerance"]
+                      and conditions["final_p_residual"] <= conditions["p_tolerance"]
+                      and conditions["normalized_mass_imbalance"] <= conditions["mass_imbalance_limit"])
+        return (
+            "cfd_combined_residual_mass_conservation",
+            "OpenFOAM SIMPLE converged; final U and p residuals <= requested tolerance; "
+            "normalized mass imbalance <= 1e-3; reviewed U, p, and phi fields finite",
+            "completed" if passed else "not_converged", passed,
+        )
     if declared == "maximum_iteration_update":
         return (
             "maximum_iteration_update", "maximum iteration update <= requested tolerance",
@@ -86,6 +103,11 @@ def persist_automatic_evidence(repository, simulation_id: str) -> list[dict]:
             "unit": field.unit, "array_shape": field.array_shape,
             "checksum_sha256": field.checksum_sha256,
             "format": field.format, "format_version": field.format_version,
+            "location_type": field.grid_metadata.get("location_type"),
+            "mesh_hash": field.grid_metadata.get("mesh_hash"),
+            "quantity": field.grid_metadata.get("quantity"),
+            "field_solver_id": field.grid_metadata.get("solver_id"),
+            "field_solver_version": field.grid_metadata.get("solver_version"),
         }))
 
     rules = [{

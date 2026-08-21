@@ -23,6 +23,7 @@ class TrustCapability:
     benchmark_formula: Callable[[dict[str, float]], float]
     convergence_applicable: bool = True
     solver_benchmark_reference: str = ""
+    maximum_trust_level: str = "high"
 
 
 def _thermal(x): return x["cold_c"] + (x["hot_c"] - x["cold_c"]) * x.get("position_fraction", .5)
@@ -36,6 +37,7 @@ def _coupling(x): return x["youngs_modulus_pa"] * x["alpha_1_k"] * x["delta_temp
 def _thermal_fem_3d(x): return x["cold_k"] + (x["hot_k"] - x["cold_k"]) * x.get("position_fraction", .5)
 def _structural_fem_3d(x): return x["load_n"] * x["length_m"] / (x["youngs_modulus_pa"] * x["area_m2"])
 def _modal_fem_3d(x): return 1.875104068711961 ** 2 / (2 * math.pi) * math.sqrt(x["youngs_modulus_pa"] * x["inertia_m4"] / (x["density_kg_m3"] * x["area_m2"] * x["length_m"] ** 4))
+def _server_owned_cfd(_x): raise ValueError("The certified CFD benchmark is server-owned and cannot be evaluated from client formulas")
 
 
 _COMMON_ASSUMPTIONS = {
@@ -88,6 +90,19 @@ _DEFINITIONS = [
         {"displacement":"m","stress":"Pa"}, {"nodes":(4,5000)}, "structural_fem_axial_prism", "Analytical axial-prism displacement", "displacement_m", 5e-2, _structural_fem_3d),
     TrustCapability("modal_fem_3d_v1", "Authoritative TET4 undamped modal analysis", ("linear modes", "consistent mass", "mass normalization"),
         {"frequency":"Hz"}, {"nodes":(4,5000)}, "modal_fem_cantilever", "Euler-Bernoulli cantilever first frequency", "frequency_hz", 3e-1, _modal_fem_3d),
+    TrustCapability(
+        solver_id="cfd_openfoam_laminar_internal_3d_v1",
+        physical_model="Steady 3D incompressible Newtonian laminar internal flow on certified CAD-derived finite-volume meshes",
+        assumptions=("steady", "incompressible", "Newtonian", "single-phase", "isothermal", "laminar", "fixed geometry", "internal flow"),
+        units={"velocity": "m/s", "kinematic_pressure": "m2/s2", "mass_flow": "kg/s"},
+        limits={"reynolds_number": (0.0, 2000.0)},
+        benchmark_id="cfd_square_duct_poiseuille_v1",
+        benchmark_title="Certified-FV square-duct analytical pressure-gradient and three-mesh refinement",
+        benchmark_metric="normalized_pressure_gradient_error",
+        benchmark_tolerance=0.05,
+        benchmark_formula=_server_owned_cfd,
+        maximum_trust_level="moderate",
+    ),
 ]
 
 # Exact, machine-verifiable association to the solver registry evidence.  The
@@ -104,6 +119,7 @@ _SOLVER_BENCHMARK_ASSOCIATIONS = {
     "thermal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_thermal_linear_cube_benchmark",
     "structural_linear_elasticity_3d_v1": "tests/integration/test_cad_fem_3d.py::test_structural_axial_prism_benchmark_and_pressure_direction",
     "modal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency",
+    "cfd_openfoam_laminar_internal_3d_v1": "tests/integration/test_openfoam_cfd_benchmark.py::test_real_openfoam_square_duct_poiseuille_refinement (three-mesh certified-FV refinement)",
 }
 
 # Multiple bounded analytical cases can be authoritative for one solver.  This
@@ -122,7 +138,7 @@ def compatible_benchmarks(solver_id: str) -> dict[str, tuple[str, float]]:
     # case binding. Structural/modal recognizers do not yet exist, so their
     # client-formula capabilities are intentionally excluded from trust.
     fallback = ({item.benchmark_id: (item.benchmark_metric, item.benchmark_tolerance)}
-                if item and solver_id not in {"thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
+                if item and solver_id not in {"thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1", "cfd_openfoam_laminar_internal_3d_v1"}
                 else {})
     return {**fallback, **TRUST_BENCHMARK_DEFINITIONS.get(solver_id, {})}
 
@@ -150,7 +166,7 @@ def metadata(item: TrustCapability) -> dict[str, Any]:
     limitations = list(base.known_limitations) if base else [
         "One-way sequential coupling only; temperature does not respond to structural deformation."
     ]
-    return {"solver_id":item.solver_id,"implementation_version":base.version if base else "1.0.0",
+    result={"solver_id":item.solver_id,"implementation_version":base.version if base else "1.0.0",
             "physical_model":item.physical_model,"assumptions":list(item.assumptions),"supported_units":item.units,
             "governing_equations":list(base.governing_equations) if base else ["sigma = E * alpha * delta_T"],
             "required_inputs":list(base.required_inputs) if base else ["length_m","cross_section_area_m2","temperature range","restraint"],
@@ -159,7 +175,18 @@ def metadata(item: TrustCapability) -> dict[str, Any]:
             "validity_limits":{k:{"minimum":v[0],"maximum":v[1]} for k,v in item.limits.items()},
             "benchmark":{"id":item.benchmark_id,"title":item.benchmark_title,"metric":item.benchmark_metric,
                          "relative_tolerance":item.benchmark_tolerance},
-            "convergence_applicable":item.convergence_applicable,"limitations":limitations}
+            "convergence_applicable":item.convergence_applicable,"maximum_trust_level":item.maximum_trust_level,
+            "validation_classification":"partially_validated" if item.maximum_trust_level=="moderate" else "validated",
+            "limitations":limitations}
+    if item.solver_id=="cfd_openfoam_laminar_internal_3d_v1":
+        result["server_validation"]={
+            "authority":"server-owned real integration machinery",
+            "benchmark_reference":item.solver_benchmark_reference,
+            "benchmark_result_contract":"CFDFVRefinementResultV1",
+            "regression_expectations":{"fine_error":0.008737062159076001,"monotonic":True,"observed_order":1.9383718918150699},
+            "client_formula_fallback":False,
+        }
+    return result
 
 
 def validate(item: TrustCapability, inputs: dict[str, Any]) -> dict[str, Any]:

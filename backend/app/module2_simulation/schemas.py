@@ -220,7 +220,7 @@ class SimulationResultsResponse(SimulationJobResponse):
 class CoordinateAxis(BaseModel):
     name: str = Field(min_length=1, max_length=64)
     unit: str = Field(min_length=1, max_length=64)
-    values: list[float] = Field(min_length=1, max_length=2000)
+    values: list[float] = Field(min_length=1, max_length=2_000_000)
 
 
 class FieldResultMetadataResponse(BaseModel):

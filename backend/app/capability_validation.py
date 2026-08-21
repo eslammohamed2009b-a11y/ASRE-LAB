@@ -58,10 +58,7 @@ def capability_consistency_errors() -> list[str]:
                 errors.append(f"real solver implementation reference does not resolve: {solver_id}")
             if entry.validation_status == ValidationStatus.VALIDATED and not entry.benchmark_references:
                 errors.append(f"validated solver missing benchmark metadata: {solver_id}")
-            # The real analytical/refinement gates are closed; persistent trust
-            # registration remains intentionally deferred to the next CFD batch.
-            pending_cfd_trust = {"cfd_openfoam_laminar_internal_3d_v1"}
-            if solver_id not in {item.solver_id for item in TRUST_REGISTRY.list()} and solver_id not in pending_cfd_trust:
+            if solver_id not in {item.solver_id for item in TRUST_REGISTRY.list()}:
                 errors.append(f"real solver missing scientific trust mapping: {solver_id}")
     for trust in TRUST_REGISTRY.list():
         if trust.solver_id not in SOLVER_REGISTRY and trust.solver_id != "thermal_structural_one_way_v1":

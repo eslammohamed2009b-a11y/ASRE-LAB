@@ -12,6 +12,7 @@ multiphysics validation. Scientific confidence is deterministic and never AI-gen
 - `acoustic_duct_1d_v1`: lossless, linear, plane-wave duct acoustics.
 - `electrostatic_rectangular_2d_v1`: static rectangular-grid Poisson field with constant permittivity.
 - `cfd_laminar_channel_2d_v1`: steady, incompressible, fully developed plane-Poiseuille flow below Re 2000.
+- `cfd_openfoam_laminar_internal_3d_v1`: real OpenFOAM Foundation 14 (`20260724`) steady incompressible Newtonian laminar internal flow on certified CAD-derived hex-dominant/polyhedral finite-volume meshes.
 - `thermal_structural_one_way_v1`: approximate sequential coupling using mean nodal temperature.
 
 The planned `coupled_multiphysics_v0` is unsupported and is not presented as evidence.
@@ -24,6 +25,8 @@ field, plane-Poiseuille maximum velocity, or restrained thermal stress. Toleranc
 declared in solver metadata. Coarse/medium/fine studies require decreasing medium-to-fine
 change below the declared threshold. Coupling convergence is explicitly not applicable;
 the coupling benchmark is a consistency check, not general validation.
+
+The 3D OpenFOAM capability is `PARTIALLY_VALIDATED` with a maximum scientific-trust level of `MODERATE`. Its server-owned `cfd_square_duct_poiseuille_v1` validation uses an analytical pressure-gradient reference and a real predeclared three-mesh study; the fine normalized error is `0.008737062159076001`, the sequence is monotonic, and the observed order is approximately `1.93837`. These are regression expectations bound to the real integration machinery, not client-submitted benchmark evidence. Arbitrary user CFD runs receive numerical, field, validity, and combined convergence evidence only.
 
 ### Geometry-aware pyramid thermal model
 

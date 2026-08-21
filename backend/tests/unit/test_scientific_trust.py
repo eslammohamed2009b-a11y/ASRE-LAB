@@ -5,7 +5,8 @@ from app.core.auth import get_current_user
 from app.main import app
 from app.v2.repository import EvidenceRepository
 from app.v2.scientific_trust import (
-    REGISTRY, TrustCapability, TrustRegistry, benchmark, confidence, convergence, validate,
+    REGISTRY, TrustCapability, TrustRegistry, benchmark, confidence, convergence, metadata,
+    reference_only, validate,
 )
 from app.module2_simulation.solver_registry import SOLVER_REGISTRY
 
@@ -16,8 +17,21 @@ def test_all_real_capabilities_and_coupling_are_registered():
             "pyramid_thermal_conduction_v1",
             "thermal_conduction_v1","structural_linear_1d_v1","modal_eigen_1d_v1",
             "acoustic_duct_1d_v1","electrostatic_rectangular_2d_v1",
-            "cfd_laminar_channel_2d_v1","thermal_structural_one_way_v1",
-            "thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
+            "cfd_laminar_channel_2d_v1","cfd_openfoam_laminar_internal_3d_v1","thermal_structural_one_way_v1",
+        "thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
+
+
+def test_certified_fv_cfd_trust_is_server_owned_and_capped_at_moderate():
+    item = REGISTRY.get("cfd_openfoam_laminar_internal_3d_v1")
+    data = metadata(item)
+    assert item.benchmark_id == "cfd_square_duct_poiseuille_v1"
+    assert item.benchmark_metric == "normalized_pressure_gradient_error" and item.benchmark_tolerance == 0.05
+    assert data["maximum_trust_level"] == "moderate"
+    assert data["validation_classification"] == "partially_validated"
+    assert data["server_validation"]["client_formula_fallback"] is False
+    assert "test_real_openfoam_square_duct_poiseuille_refinement" in data["server_validation"]["benchmark_reference"]
+    with pytest.raises(ValueError):
+        reference_only(item, {"reynolds_number": 100.0})
 
 def test_trust_benchmarks_have_exact_solver_registry_associations():
     for item in REGISTRY.list():

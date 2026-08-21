@@ -71,6 +71,7 @@ class SemanticSurfacePatchV1(_Strict):
     final_patch: str
     category: Literal["inlet", "outlet", "wall"]
     triangle_count: int = Field(gt=0)
+    start_face: int | None = Field(default=None, ge=0)
     final_face_count: int = Field(default=0, ge=0)
 
 
@@ -583,7 +584,7 @@ def certify_final_cfd_mesh(
             for point_id in poly.faces[face_id]:
                 point_mm = poly.points[point_id] * 1e3
                 maximum_deviation = max(maximum_deviation, min(_shape_distance_mm(shape, point_mm) for shape in shapes) * 1e-3)
-        updated.append(item.model_copy(update={"final_face_count": count}))
+        updated.append(item.model_copy(update={"start_face": start, "final_face_count": count}))
     if maximum_deviation > SURFACE_TESSELLATION_TOLERANCE_M:
         raise CFDMeshError("FINAL_BOUNDARY_MISMATCH", "Final CFD boundary exceeds certified CAD deviation tolerance")
     cad_volume = generated.surface.certification.cad_volume_m3

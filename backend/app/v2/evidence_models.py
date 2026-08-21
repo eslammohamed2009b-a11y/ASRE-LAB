@@ -118,6 +118,11 @@ class FieldResultEvidence(EvidenceBase):
     evidence_type: EvidenceType = EvidenceType.FIELD_RESULT
     variable_name: str; unit: str; array_shape: list[int]; checksum_sha256: str
     format: str; format_version: str
+    location_type: str | None = None
+    mesh_hash: str | None = None
+    quantity: str | None = None
+    field_solver_id: str | None = None
+    field_solver_version: str | None = None
     status: ResultEvidenceStatus
 
 class ValidityEvidence(EvidenceBase):

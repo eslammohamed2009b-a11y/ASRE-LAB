@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING, Any
 
 from app.module2_simulation.geometry_physics_schemas import (
     AnalysisFamilyV1,
+    CFDSemanticMeshMappingV1,
     DomainKind,
     GravityBC,
     MaterialPropertySnapshot,
@@ -42,7 +43,7 @@ class _PhysicsMeshBinding:
     mesh_id: str
     mesh_hash: str
     domains: tuple[tuple[str, str, DomainKind], ...]
-    semantic_mappings: tuple[SemanticMeshMapping, ...]
+    semantic_mappings: tuple[SemanticMeshMapping | CFDSemanticMeshMappingV1, ...]
     validation_status: ValidationState
     solver_requirements: tuple[str, ...]
 
@@ -228,7 +229,8 @@ def _build_physics_model(binding: _PhysicsMeshBinding, request: PhysicsModelRequ
                 )
             continue
         mapping = mapping_by_tag.get(bc.semantic_region)
-        if mapping is None or not mapping.boundary_facet_ids:
+        mapped_faces = getattr(mapping, "boundary_facet_ids", None) or getattr(mapping, "face_ids", None)
+        if mapping is None or not mapped_faces:
             raise PhysicsValidationError(
                 "INVALID_SEMANTIC_TARGET",
                 f"Boundary condition '{bc.bc_id}' requires a nonempty mapped semantic surface",
@@ -306,23 +308,22 @@ def build_cfd_physics_model(mesh: CFDGeneratedMeshV1, request: PhysicsModelReque
     if request.analysis_family != AnalysisFamilyV1.CFD:
         raise PhysicsValidationError("CFD_ANALYSIS_REQUIRED", "The certified finite-volume binding is CFD-only")
 
-    mappings: list[SemanticMeshMapping] = []
-    next_boundary_id = 1
-    for group_id, patch in enumerate(mesh.semantic_patches, 1):
-        boundary_ids = list(range(next_boundary_id, next_boundary_id + patch.final_face_count))
-        next_boundary_id += patch.final_face_count
-        mappings.append(SemanticMeshMapping(
+    mappings: list[CFDSemanticMeshMappingV1] = []
+    for patch in mesh.semantic_patches:
+        if patch.start_face is None or patch.final_face_count <= 0:
+            raise PhysicsValidationError("INVALID_CFD_SEMANTIC_MAPPING", "Certified CFD patch lacks its actual OpenFOAM face range")
+        mappings.append(CFDSemanticMeshMappingV1(
             semantic_region=patch.semantic_region,
             body_id=mesh.source_body_id,
-            cad_resolution_status="EXACT",
-            topology_kind="face",
             topology_signatures=patch.topology_signatures,
-            physical_group_id=group_id,
-            boundary_facet_ids=boundary_ids,
             domain_ids=[mesh.fluid_domain_id],
-            mapping_status="EXACT",
+            source_surface_region=patch.surface_region,
+            final_patch=patch.final_patch,
+            start_face=patch.start_face,
+            face_count=patch.final_face_count,
+            face_ids=list(range(patch.start_face, patch.start_face + patch.final_face_count)),
         ))
-    if next_boundary_id - 1 != mesh.boundary_face_count or any(not item.boundary_facet_ids for item in mappings):
+    if sum(item.face_count for item in mappings) != mesh.boundary_face_count:
         raise PhysicsValidationError("INVALID_CFD_SEMANTIC_MAPPING", "Certified CFD patch faces do not cover the finite-volume boundary")
 
     binding = _PhysicsMeshBinding(

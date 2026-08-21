@@ -73,6 +73,8 @@ def solver(solver_id:str,user:dict=Depends(get_current_user)):return metadata(_i
 def validate_inputs(solver_id:str,payload:Inputs,user:dict=Depends(get_current_user)):return validate(_item(solver_id),payload.inputs)
 @router.post("/solvers/{solver_id}/benchmark")
 def execute_benchmark(solver_id:str,payload:BenchmarkRequest,user:dict=Depends(get_current_user)):
+    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":
+        raise HTTPException(422,"CFD benchmark evidence is server-owned and cannot be created from an arbitrary user simulation")
     fem_solvers={"thermal_fem_3d_v1","structural_linear_elasticity_3d_v1","modal_fem_3d_v1"}
     if solver_id in fem_solvers:
         case_id=payload.benchmark_case_id or payload.benchmark_id
@@ -128,14 +130,17 @@ def execute_benchmark(solver_id:str,payload:BenchmarkRequest,user:dict=Depends(g
     except ValueError as exc:raise HTTPException(422,str(exc))
 @router.post("/solvers/{solver_id}/reference-only")
 def execute_reference_only(solver_id:str,payload:Inputs,user:dict=Depends(get_current_user)):
+    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD analytical validation is server-owned")
     return reference_only(_item(solver_id),payload.inputs)
 @router.post("/solvers/{solver_id}/convergence")
 def execute_convergence(solver_id:str,payload:ConvergenceRequest,user:dict=Depends(get_current_user)):
+    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD refinement validation is server-owned")
     return {**convergence(_item(solver_id),payload.values,payload.configurations,payload.threshold),
             "authoritative":False,"evidence_id":None}
 @router.post("/solvers/{solver_id}/refinement",status_code=201)
 def execute_refinement(solver_id:str,payload:RefinementRequest,user:dict=Depends(get_current_user)):
     _item(solver_id)
+    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD refinement validation is server-owned")
     repo=get_repository()
     try:
         if payload.metric_source=="benchmark_evidence" and not payload.benchmark_id:

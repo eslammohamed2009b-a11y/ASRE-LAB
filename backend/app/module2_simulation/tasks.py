@@ -309,3 +309,25 @@ def run_simulation_job(
 @celery_app.task(name="module2.run_simulation_job_task", max_retries=0)
 def run_simulation_job_task(**kwargs: Any) -> dict:
     return run_simulation_job(**kwargs)
+
+
+@celery_app.task(name="module2.prepare_cfd_physics_task", max_retries=0, queue="cfd")
+def prepare_cfd_physics_task(*, job_id: str, owner_id: str, payload: dict) -> dict:
+    """Dedicated CFD-worker entry point; the API image never invokes OpenFOAM."""
+    from app.module2_simulation.cad_cfd_execution import CFDPhysicsCreateRequest, prepare_cfd_physics
+
+    result = prepare_cfd_physics(
+        repository=get_repository(), storage=get_storage(), job_id=job_id, owner_id=owner_id,
+        payload=CFDPhysicsCreateRequest.model_validate(payload),
+    )
+    return result.model_dump(mode="json")
+
+
+@celery_app.task(name="module2.run_cad_cfd_job_task", max_retries=0, queue="cfd")
+def run_cad_cfd_job_task(*, simulation_id: str) -> dict:
+    """Execute only persisted certified-FV CFD jobs on the dedicated queue."""
+    from app.module2_simulation.cad_cfd_execution import execute_cad_cfd_job
+
+    return execute_cad_cfd_job(
+        repository=get_repository(), storage=get_storage(), simulation_id=simulation_id,
+    )

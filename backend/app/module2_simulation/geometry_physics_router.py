@@ -24,6 +24,17 @@ from app.module2_simulation.geometry_physics_schemas import (
 from app.module2_simulation.meshing import GeneratedMesh, MeshingError, generate_mesh, prepare_geometry, write_gmsh22
 from app.module2_simulation.physics_model import PhysicsValidationError, build_physics_model
 from app.module2_simulation.cad_fem_execution import FEMExecutionError, execute_cad_fem
+from app.module2_simulation.cad_cfd_execution import (
+    CFDExecutionError,
+    CFDExecutionRequest,
+    CFDPhysicsCreateRequest,
+    CFDPreparationResponse,
+    create_cad_cfd_execution,
+    create_cfd_preparation_job,
+    get_cfd_preparation,
+    load_cfd_mesh,
+    private_cfd_id,
+)
 from app.module2_simulation.fem_core import FEMError
 
 
@@ -263,3 +274,89 @@ def download_mesh_artifact(artifact_id: str, current_user: dict = Depends(get_cu
     return get_storage().create_download_response(
         record.object_key, f"{artifact_id}.msh", "application/vnd.gmsh"
     )
+
+
+@router.post("/physics/cfd", response_model=CFDPreparationResponse, status_code=202)
+def create_cfd_physics(payload: CFDPhysicsCreateRequest,
+                       idempotency_key: str = Header(..., alias="Idempotency-Key"),
+                       current_user: dict = Depends(get_current_user)):
+    """Queue certified FV meshing on worker-cfd; the API never runs OpenFOAM."""
+    _owned_experiment(payload.experiment_id, current_user["id"])
+    try:
+        job_id, created = create_cfd_preparation_job(
+            repository=get_repository(), storage=get_storage(), owner_id=current_user["id"],
+            payload=payload, idempotency_key=idempotency_key,
+        )
+        if created:
+            from app.module2_simulation.tasks import prepare_cfd_physics_task
+            try:
+                prepare_cfd_physics_task.apply_async(
+                    kwargs={"job_id": job_id, "owner_id": current_user["id"],
+                            "payload": payload.model_dump(mode="json")}, queue="cfd",
+                )
+            except Exception as exc:
+                get_repository().update_job(
+                    job_id, status="failed", failed_count=1, progress_percent=100,
+                    error_code="CFD_WORKER_DISPATCH_FAILED",
+                    safe_error_message="The dedicated CFD worker is unavailable.",
+                )
+                raise HTTPException(status_code=503, detail="The dedicated CFD worker is unavailable") from exc
+        return get_cfd_preparation(repository=get_repository(), storage=get_storage(),
+                                   owner_id=current_user["id"], preparation_id=job_id)
+    except CFDExecutionError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc)}) from exc
+
+
+@router.get("/physics/cfd/preparations/{preparation_id}", response_model=CFDPreparationResponse)
+def get_cfd_physics_preparation(preparation_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return get_cfd_preparation(repository=get_repository(), storage=get_storage(),
+                                   owner_id=current_user["id"], preparation_id=preparation_id)
+    except CFDExecutionError as exc:
+        raise HTTPException(status_code=404, detail="CFD preparation not found") from exc
+
+
+@router.get("/meshes/cfd/{mesh_id}")
+def get_cfd_mesh(mesh_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return load_cfd_mesh(repository=get_repository(), storage=get_storage(),
+                             owner_id=current_user["id"], mesh_id=mesh_id)
+    except CFDExecutionError as exc:
+        raise HTTPException(status_code=404, detail="CFD mesh not found") from exc
+
+
+@router.post("/physics/cfd/{physics_model_id}/execute", response_model=PhysicsExecutionResult, status_code=202)
+def execute_cfd_physics(physics_model_id: str, payload: CFDExecutionRequest,
+                        idempotency_key: str = Header(..., alias="Idempotency-Key"),
+                        current_user: dict = Depends(get_current_user)):
+    try:
+        model = PhysicsModelV1.model_validate(_load_json(
+            _private_id(current_user["id"], "physics-model", physics_model_id), current_user["id"]))
+        mesh = load_cfd_mesh(repository=get_repository(), storage=get_storage(),
+                             owner_id=current_user["id"], mesh_id=model.mesh_id)
+        metadata_record = get_repository().get_design_file(
+            private_cfd_id(current_user["id"], "cfd-mesh-metadata", mesh.mesh_id))
+        if metadata_record is None or metadata_record.experiment_id is None:
+            raise CFDExecutionError("CFD_ARTIFACT_NOT_FOUND", "CFD mesh experiment binding is unavailable")
+        simulation_id, created = create_cad_cfd_execution(
+            repository=get_repository(), storage=get_storage(), user_id=current_user["id"],
+            experiment_id=metadata_record.experiment_id, model=model, mesh=mesh,
+            idempotency_key=idempotency_key,
+        )
+        if created:
+            from app.module2_simulation.tasks import run_cad_cfd_job_task
+            try:
+                run_cad_cfd_job_task.apply_async(kwargs={"simulation_id": simulation_id}, queue="cfd")
+            except Exception as exc:
+                get_repository().update_simulation_job(
+                    simulation_id, status="failed", progress_percent=100,
+                    error_code="CFD_WORKER_DISPATCH_FAILED",
+                    safe_error_message="The dedicated CFD worker is unavailable; no CFD solve was executed.",
+                )
+                raise HTTPException(status_code=503, detail="The dedicated CFD worker is unavailable") from exc
+        job = get_repository().get_simulation_job(simulation_id)
+        return PhysicsExecutionResult(simulation_id=simulation_id, solver_id=payload.solver_id,
+                                      status=job.status if job else "failed")
+    except CFDExecutionError as exc:
+        raise HTTPException(status_code=422, detail={"code": exc.code, "message": str(exc),
+                                                     "simulation_id": exc.simulation_id}) from exc

@@ -49,10 +49,10 @@ ASRE-Lab ships bounded numerical models rather than a general-purpose industrial
 | Modal analysis | SDOF mass-spring frequency and bounded 1D cantilever eigenvalue analysis. |
 | Acoustics | Straight, lossless 1D plane-wave duct analysis. |
 | Electrostatics | 2D rectangular-grid electrostatic potential and electric-field calculation. |
-| Laminar flow | Bounded plane-Poiseuille channel-flow calculation for laminar regimes. |
+| Laminar flow | Bounded plane-Poiseuille channel flow plus real steady 3D incompressible Newtonian laminar internal flow on certified CAD-derived hex-dominant/polyhedral FV meshes using OpenFOAM Foundation 14 (`20260724`). |
 | Thermal–structural workflow | Explicit one-way, sequential coupling for compatible bounded 1D cases. |
 
-The solver registry is the authoritative capability source. These models do **not** claim arbitrary CAD-mesh simulation, general 3D FEA/CFD, turbulence, nonlinear plasticity, industrial certification, or bidirectional general multiphysics. The [scientific trust documentation](docs/SCIENTIFIC_TRUST.md) describes the supported domains and exclusions in more detail.
+The solver registry is the authoritative capability source. These models do **not** claim general or unbounded 3D FEA/CFD, turbulence, nonlinear plasticity, industrial certification, or bidirectional general multiphysics. The [scientific trust documentation](docs/SCIENTIFIC_TRUST.md) describes the supported domains and exclusions in more detail.
 
 ## Design Generation and Execution
 
@@ -78,14 +78,17 @@ flowchart TD
     F --> A[FastAPI API\nHetzner VPS]
     A --> Q[Redis / Valkey queue]
     Q --> W[Celery worker]
+    Q --> CFW[Dedicated CFD worker - OpenFOAM Foundation 14]
     W --> S[Engineering solvers]
+    CFW --> CFD[Certified CAD-derived FV solver]
     A --> DB[Supabase\nAuth · PostgreSQL · private Storage]
     W --> DB
+    CFW --> DB
     C[Caddy\nTLS / reverse proxy] --> A
 ```
 
 - **Frontend:** Next.js on Vercel.
-- **Backend compute:** FastAPI, a separate Celery worker, persistent Redis/Valkey, and Caddy on a Hetzner VPS.
+- **Backend compute:** FastAPI, a normal Celery worker, a dedicated `cfd`-queue OpenFOAM worker, persistent Redis/Valkey, and Caddy on a Hetzner VPS.
 - **Data and identity:** Supabase Auth, PostgreSQL, and private Storage.
 - **Transport security:** Caddy terminates TLS for the production API.
 - **Source control and CI:** GitHub.
