@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import replace
 import json
 import os
+import shutil
 import subprocess
 
 import numpy as np
@@ -17,25 +18,35 @@ from app.module2_simulation.openfoam_benchmark import (
     DUCT_HEIGHT_M,
     DUCT_WIDTH_M,
     FINE_ERROR_LIMIT,
+    FV_MESH_RESOLUTIONS,
     FIT_R2_MINIMUM,
     MESH_TARGETS_M,
+    PURE_TET_CFD_VALIDATION_STATUS,
     FIT_WINDOW,
     BenchmarkGeometry,
     CFDBenchmarkError,
     analytical_pressure_gradient,
+    assemble_certified_fv_refinement,
     assemble_benchmark_result,
     benchmark_design,
     benchmark_domain,
     benchmark_mesh_specification,
     benchmark_physics_request,
     evaluate_benchmark_level,
+    evaluate_certified_fv_benchmark_level,
     rectangular_duct_series,
     validate_benchmark_identity,
     validate_benchmark_identity_from_level,
     volume_weighted_pressure_fit,
 )
-from app.module2_simulation.openfoam_case import CFDSolutionV1, parse_cfd_solution, prepare_laminar_case
-from app.module2_simulation.physics_model import build_physics_model
+from app.module2_simulation.openfoam_case import (
+    CFDSolutionV1, generate_laminar_fv_case, parse_cfd_fv_solution,
+    parse_cfd_solution, prepare_laminar_case,
+)
+from app.module2_simulation.openfoam_fv_mesh import (
+    certify_final_cfd_mesh, generate_certified_cfd_surface, generate_snappyhex_case,
+)
+from app.module2_simulation.physics_model import build_cfd_physics_model, build_physics_model
 
 pytestmark = pytest.mark.integration
 
@@ -52,6 +63,15 @@ def test_rectangular_duct_analytical_engine_independent_limits_and_scaling():
     assert doubled_mu == pytest.approx(2 * base) and doubled_q == pytest.approx(2 * base)
     for args in ((0, .02, 1e-5, 1e-4), (.01, .02, 1e-5, 1e-4), (.02, .02, 0, 1e-4), (.02, .02, 1e-5, 0)):
         with pytest.raises(CFDBenchmarkError): analytical_pressure_gradient(*args)
+
+
+def test_certified_fv_refinement_contract_is_server_owned_and_predeclared():
+    assert {name: (item.transverse_cell_size_m, item.streamwise_cell_size_m)
+            for name, item in FV_MESH_RESOLUTIONS.items()} == {
+        "coarse": (0.002, 0.010), "medium": (0.0015, 0.0075), "fine": (0.001, 0.005),
+    }
+    assert FINE_ERROR_LIMIT == 0.05 and FIT_WINDOW == (0.75, 0.95)
+    assert PURE_TET_CFD_VALIDATION_STATUS == "FAILED_NOT_PRODUCTION_AUTHORITY"
 
 
 @pytest.fixture(scope="module")
@@ -147,39 +167,37 @@ def test_pressure_fit_rejects_malformed_nonfinite_insufficient_and_nonlinear(coa
     assert exc.value.code == "NONLINEAR_PRESSURE_FIT"
 
 
-@pytest.mark.skipif(os.getenv("ASRE_RUN_OPENFOAM_REFINEMENT") != "1", reason="explicit three-real-solve CFD gate")
+@pytest.mark.skipif(os.getenv("ASRE_RUN_OPENFOAM_REFINEMENT") != "1" or shutil.which("docker") is None,
+                    reason="explicit three-real-solve certified-FV CFD gate")
 def test_real_openfoam_square_duct_poiseuille_refinement(tmp_path):
     compiled = compile_design(benchmark_design()); domain = benchmark_domain()
-    levels=[]; models=[]; definitions=[]; series=None; flow=None; reynolds=None
+    surface = generate_certified_cfd_surface(compiled, domain, {"low_end": "inlet", "high_end": "outlet", "walls": "wall"})
+    levels=[]; models=[]; definitions=[]
     for level in ("coarse", "medium", "fine"):
-        mesh = generate_mesh(compiled, [domain], benchmark_mesh_specification(level))
-        model = build_physics_model(mesh, benchmark_physics_request()); case = tmp_path / level
-        poly, definition = prepare_laminar_case(mesh, model, case)
-        command = ". /opt/openfoam14/etc/bashrc && foamRun -solver incompressibleFluid -case /case"
-        completed = subprocess.run(["docker","run","--rm","-v",f"{case.resolve()}:/case","asre-openfoam14:20260724","bash","-lc",command], shell=False, capture_output=True, text=True, timeout=1800)
+        case = tmp_path / level
+        generated = generate_snappyhex_case(case, surface, FV_MESH_RESOLUTIONS[level])
+        logs = []
+        for command in (("blockMesh", "-case", "/case"), ("snappyHexMesh", "-overwrite", "-case", "/case"), ("checkMesh", "-case", "/case")):
+            completed = subprocess.run(["docker", "run", "--rm", "-v", f"{case.resolve()}:/case",
+                "asre-openfoam14:20260724", "bash", "-lc", ". /opt/openfoam14/etc/bashrc && " + " ".join(command)],
+                shell=False, capture_output=True, text=True, timeout=1200)
+            assert completed.returncode == 0, completed.stdout + completed.stderr
+            logs.append(completed.stdout + completed.stderr)
+        mesh = certify_final_cfd_mesh(compiled, domain, generated, case, logs[-1])
+        model = build_cfd_physics_model(mesh, benchmark_physics_request())
+        definition = generate_laminar_fv_case(mesh, model, case)
+        completed = subprocess.run(["docker", "run", "--rm", "-v", f"{case.resolve()}:/case",
+            "asre-openfoam14:20260724", "bash", "-lc",
+            ". /opt/openfoam14/etc/bashrc && foamRun -solver incompressibleFluid -case /case"],
+            shell=False, capture_output=True, text=True, timeout=1800)
         assert completed.returncode == 0, completed.stdout + completed.stderr
-        solution = parse_cfd_solution(mesh, model, poly, definition, case, completed.stdout + completed.stderr)
-        result, current_series, current_flow, current_reynolds = evaluate_benchmark_level(level, mesh, model, poly, definition, solution)
+        solution = parse_cfd_fv_solution(mesh, model, definition, case, completed.stdout + completed.stderr)
+        result = evaluate_certified_fv_benchmark_level(level, case, mesh, model, definition, solution)
         levels.append(result); models.append(model); definitions.append(definition)
-        series = current_series; flow = current_flow; reynolds = current_reynolds
-    benchmark = assemble_benchmark_result(levels, models, definitions, series, flow, reynolds)
+    benchmark = assemble_certified_fv_refinement(levels, models, definitions)
     summary = {"benchmark_id": BENCHMARK_ID, "G_analytical_pa_m": levels[0].analytical_gradient_pa_m,
-        "series_terms": series.terms, "series_correction": series.correction, "reynolds_number": reynolds,
-        "hydraulic_diameter_m": benchmark.hydraulic_diameter_m,
-        "entrance_length_screen_m": benchmark.entrance_length_screen_m,
-        "fit_start_m": benchmark.fit_start_from_inlet_m,
-        "fit_start_over_Dh": benchmark.fit_start_over_hydraulic_diameter,
-        "fit_start_over_Le": benchmark.fit_start_over_entrance_screen,
-        "fit_window": FIT_WINDOW,
-        "fine_threshold": FINE_ERROR_LIMIT, "passed": benchmark.passed, "monotonic": benchmark.monotonic_error_reduction,
-        "observed_order": benchmark.observed_order,
-        "levels": {item.level: {"target_size_m": item.target_size_m, "cells": item.cell_count,
-            "boundary_faces": item.boundary_face_count, "mesh_id": item.mesh_id, "mesh_hash": item.mesh_hash,
-            "poly_mesh_hash": item.poly_mesh_hash, "case_fingerprint": item.case_fingerprint,
-            "G_numeric_pa_m": item.numerical_gradient_pa_m, "error": item.normalized_pressure_gradient_error,
-            "fit_r2": item.pressure_fit.r_squared, "fit_cells": item.pressure_fit.cell_count,
-            "fit_x_range_m": [item.pressure_fit.x_min_m,item.pressure_fit.x_max_m],
-            "mass_imbalance": item.normalized_mass_imbalance, "U_residual": item.final_u_residual,
-            "p_residual": item.final_p_residual} for item in levels}}
-    print("ASRE_REAL_CFD_REFINEMENT=" + json.dumps(summary, sort_keys=True))
+        "fit_window": FIT_WINDOW, "fine_threshold": FINE_ERROR_LIMIT, "passed": benchmark.passed,
+        "monotonic": benchmark.monotonic_error_reduction, "observed_order": benchmark.observed_order,
+        "levels": {item.level: item.model_dump(mode="json") for item in levels}}
+    print("ASRE_REAL_CERTIFIED_FV_REFINEMENT=" + json.dumps(summary, sort_keys=True))
     assert benchmark.passed and levels[2].normalized_pressure_gradient_error < levels[0].normalized_pressure_gradient_error

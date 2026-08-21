@@ -272,6 +272,8 @@ def validate_fv_cfd_scope(mesh, model: PhysicsModelV1) -> tuple[VelocityInletBC,
         raise OpenFOAMCaseError("UNSUPPORTED_CFD_FAMILY", "Only the typed CFD analysis family is accepted")
     if model.design_hash != mesh.design_hash or model.geometry_fingerprint != mesh.geometry_fingerprint:
         raise OpenFOAMCaseError("AUTHORITATIVE_GEOMETRY_REQUIRED", "Physics and CFD mesh must derive from the same authoritative CAD BRep")
+    if model.mesh_id != mesh.mesh_id or model.mesh_hash != mesh.mesh_hash:
+        raise OpenFOAMCaseError("AUTHORITATIVE_MESH_REQUIRED", "CFD PhysicsModel does not match the certified finite-volume mesh")
     if len(model.domains) != 1 or model.domains[0].domain_id != mesh.fluid_domain_id or model.domains[0].source_body_id != mesh.source_body_id:
         raise OpenFOAMCaseError("FLUID_DOMAIN_MISMATCH", "Certified CFD mesh does not match the typed fluid domain")
     if any(domain.domain_kind.value != "fluid" or not domain.explicit_fluid_volume for domain in model.domains):
@@ -494,7 +496,7 @@ def parse_cfd_solution(mesh: GeneratedMesh, model: PhysicsModelV1, poly: PolyMes
             density_source=definition.density_source, dynamic_viscosity_source=definition.dynamic_viscosity_source),
         pressure_interpretation=CFDPressureInterpretationV1(density_kg_m3=density, density_source=definition.density_source),
         diagnostics=diagnostics,
-        warnings=["Analytical benchmark and mesh-refinement validation are pending Phase 3C-2B"],
+        warnings=["Pure-TET CFD is retained only as a diagnostic and is not a validated production authority"],
         limitations=["Steady 3D incompressible Newtonian single-phase isothermal laminar internal flow only", "No turbulence, transient, compressible, multiphase, non-Newtonian, porous, rotating-frame, CHT, FSI, or combustion support"],
     )
 

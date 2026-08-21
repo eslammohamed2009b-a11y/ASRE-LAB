@@ -25,7 +25,7 @@ from app.module2_simulation.cad_fem_solvers import (
     solve_thermal_fem_3d,
 )
 from app.module2_simulation.fem_core import MAX_ELEMENTS, MAX_NODES, MAX_STRUCTURAL_DOFS
-from app.module2_simulation.geometry_physics_schemas import PhysicsModelV1
+from app.module2_simulation.geometry_physics_schemas import PhysicsModelRequest, PhysicsModelV1
 from app.module2_simulation.meshing import GeneratedMesh
 from app.module2_simulation.openfoam_case import CFDSolutionV1, parse_cfd_solution, prepare_laminar_case
 from app.module2_simulation.schemas import ImplementationStatus
@@ -357,7 +357,7 @@ def solve_openfoam_cfd_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> CFDSolu
         return solution
 
 
-def solve_openfoam_cfd_from_cad(compiled, model: PhysicsModelV1, domain, resolution=None):
+def solve_openfoam_cfd_from_cad(compiled, physics_request, domain, resolution=None):
     """Build and solve the certified production FV mesh from authoritative CAD."""
     from app.module2_simulation.openfoam_case import generate_laminar_fv_case, parse_cfd_fv_solution
     from app.module2_simulation.openfoam_fv_mesh import (
@@ -367,20 +367,25 @@ def solve_openfoam_cfd_from_cad(compiled, model: PhysicsModelV1, domain, resolut
         generate_snappyhex_case,
         run_snappyhex_mesher,
     )
+    from app.module2_simulation.physics_model import build_cfd_physics_model
+
+    if not isinstance(physics_request, PhysicsModelRequest):
+        raise SolverOrchestrationError("CFD_PHYSICS_REQUEST_REQUIRED", "Production CAD-CFD constructs physics only after certifying its FV mesh")
 
     categories: dict[str, str] = {}
-    for boundary in model.boundary_conditions:
+    for boundary in physics_request.boundary_conditions:
         category = {"velocity_inlet": "inlet", "pressure_boundary": "outlet", "wall": "wall"}.get(boundary.bc_type)
         if category is None:
             raise SolverOrchestrationError("UNSUPPORTED_CFD_BOUNDARY", "Production CFD meshing supports only velocity inlet, pressure outlet, and wall")
         categories[boundary.semantic_region] = category
     active_resolution = resolution or CFDMeshResolutionV1()
-    adapter = OpenFOAMAdapterFoundation(OpenFOAMExecutionConfig(timeout_seconds=model.numerical_settings.maximum_iterations * 2))
+    adapter = OpenFOAMAdapterFoundation(OpenFOAMExecutionConfig(timeout_seconds=physics_request.numerical_settings.maximum_iterations * 2))
     with adapter.case_workspace() as case:
         surface = generate_certified_cfd_surface(compiled, domain, categories)
         generated = generate_snappyhex_case(case, surface, active_resolution)
         _, _, check_log = run_snappyhex_mesher(case, active_resolution)
         mesh = certify_final_cfd_mesh(compiled, domain, generated, case, check_log)
+        model = build_cfd_physics_model(mesh, physics_request)
         definition = generate_laminar_fv_case(mesh, model, case)
         completed = adapter.run_fixed_case(case)
         solution = parse_cfd_fv_solution(mesh, model, definition, case, completed.stdout + completed.stderr)

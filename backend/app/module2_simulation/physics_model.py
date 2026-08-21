@@ -5,7 +5,8 @@ import hashlib
 import json
 import math
 import uuid
-from typing import Any
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from app.module2_simulation.geometry_physics_schemas import (
     AnalysisFamilyV1,
@@ -15,17 +16,35 @@ from app.module2_simulation.geometry_physics_schemas import (
     MaterialSnapshot,
     PhysicsModelRequest,
     PhysicsModelV1,
+    SemanticMeshMapping,
     ValidationState,
     VolumetricHeatSourceBC,
 )
 from app.module2_simulation.materials import get_material
 from app.module2_simulation.meshing import GeneratedMesh
 
+if TYPE_CHECKING:
+    from app.module2_simulation.openfoam_fv_mesh import CFDGeneratedMeshV1
+
 
 class PhysicsValidationError(ValueError):
     def __init__(self, code: str, message: str):
         super().__init__(message)
         self.code = code
+
+
+@dataclass(frozen=True)
+class _PhysicsMeshBinding:
+    """Minimal authoritative mesh identity consumed by physics validation."""
+
+    design_hash: str
+    geometry_fingerprint: str
+    mesh_id: str
+    mesh_hash: str
+    domains: tuple[tuple[str, str, DomainKind], ...]
+    semantic_mappings: tuple[SemanticMeshMapping, ...]
+    validation_status: ValidationState
+    solver_requirements: tuple[str, ...]
 
 
 _REQUIRED_PROPERTIES: dict[AnalysisFamilyV1, dict[str, str]] = {
@@ -144,14 +163,15 @@ def _validate_minimum_bcs(family: AnalysisFamilyV1, types: set[str]) -> None:
             raise PhysicsValidationError("INCOMPLETE_BOUNDARY_CONDITIONS", f"{family.value} requires {description}")
 
 
-def build_physics_model(mesh: GeneratedMesh, request: PhysicsModelRequest) -> PhysicsModelV1:
-    if mesh.metadata.validation_status == ValidationState.INVALID:
+def _build_physics_model(binding: _PhysicsMeshBinding, request: PhysicsModelRequest) -> PhysicsModelV1:
+    if binding.validation_status == ValidationState.INVALID:
         raise PhysicsValidationError("INVALID_MESH", "Physics models require a validated mesh")
     requested_domains = {
         item.domain_id: (item.source_body_id, item.domain_kind) for item in request.domains
     }
     meshed_domains = {
-        item.domain_id: (item.source_body_id, item.domain_kind) for item in mesh.metadata.domains
+        domain_id: (source_body_id, domain_kind)
+        for domain_id, source_body_id, domain_kind in binding.domains
     }
     if requested_domains != meshed_domains:
         raise PhysicsValidationError("MESH_DOMAIN_MISMATCH", "Physics domains do not match the meshed CAD domains")
@@ -189,7 +209,7 @@ def build_physics_model(mesh: GeneratedMesh, request: PhysicsModelRequest) -> Ph
     if unsupported_outputs:
         raise PhysicsValidationError("UNSUPPORTED_OUTPUT", f"Unsupported requested outputs: {unsupported_outputs}")
 
-    mapping_by_tag = {item.semantic_region: item for item in mesh.metadata.semantic_mappings}
+    mapping_by_tag = {item.semantic_region: item for item in binding.semantic_mappings}
     bc_ids = [item.bc_id for item in request.boundary_conditions]
     if len(bc_ids) != len(set(bc_ids)):
         raise PhysicsValidationError("DUPLICATE_BOUNDARY_CONDITION", "Boundary condition identifiers must be unique")
@@ -222,9 +242,9 @@ def build_physics_model(mesh: GeneratedMesh, request: PhysicsModelRequest) -> Ph
     scientific_input = {
         "schema_version": "1.0",
         "analysis_family": request.analysis_family.value,
-        "design_hash": mesh.metadata.design_hash,
-        "geometry_fingerprint": mesh.metadata.geometry_fingerprint,
-        "mesh_hash": mesh.metadata.mesh_hash,
+        "design_hash": binding.design_hash,
+        "geometry_fingerprint": binding.geometry_fingerprint,
+        "mesh_hash": binding.mesh_hash,
         "domains": [item.model_dump(mode="json") for item in request.domains],
         "material_assignments": [item.model_dump(mode="json") for item in request.material_assignments],
         "material_snapshots": [
@@ -234,25 +254,85 @@ def build_physics_model(mesh: GeneratedMesh, request: PhysicsModelRequest) -> Ph
         "numerical_settings": request.numerical_settings.model_dump(mode="json"),
         "expected_outputs": sorted(request.expected_outputs),
     }
+    if "certified_finite_volume" in binding.solver_requirements:
+        scientific_input["certified_fv_mesh_id"] = binding.mesh_id
+        scientific_input["certified_fv_mesh_hash"] = binding.mesh_hash
     physics_hash = _hash(scientific_input)
     return PhysicsModelV1(
         physics_model_id=str(uuid.uuid5(uuid.NAMESPACE_URL, f"asre-lab:physics:{physics_hash}")),
         physics_hash=physics_hash,
         analysis_family=request.analysis_family,
-        design_hash=mesh.metadata.design_hash,
-        geometry_fingerprint=mesh.metadata.geometry_fingerprint,
-        mesh_id=mesh.metadata.mesh_id,
-        mesh_hash=mesh.metadata.mesh_hash,
+        design_hash=binding.design_hash,
+        geometry_fingerprint=binding.geometry_fingerprint,
+        mesh_id=binding.mesh_id,
+        mesh_hash=binding.mesh_hash,
         domains=request.domains,
         materials=[snapshots_by_name[name] for name in sorted(snapshots_by_name)],
         material_assignments=request.material_assignments,
-        semantic_mappings=mesh.metadata.semantic_mappings,
+        semantic_mappings=list(binding.semantic_mappings),
         boundary_conditions=request.boundary_conditions,
         numerical_settings=request.numerical_settings,
         expected_outputs=sorted(request.expected_outputs),
         solver_requirements=[
-            "authoritative_cad", "3d", "tetra4", request.analysis_family.value,
+            *binding.solver_requirements, request.analysis_family.value,
             *sorted(bc_types),
         ],
         validation_status=ValidationState.VALID,
     )
+
+
+def build_physics_model(mesh: GeneratedMesh, request: PhysicsModelRequest) -> PhysicsModelV1:
+    """Build the unchanged FEM/TET-bound physics model."""
+    metadata = mesh.metadata
+    binding = _PhysicsMeshBinding(
+        design_hash=metadata.design_hash,
+        geometry_fingerprint=metadata.geometry_fingerprint,
+        mesh_id=metadata.mesh_id,
+        mesh_hash=metadata.mesh_hash,
+        domains=tuple((item.domain_id, item.source_body_id, item.domain_kind) for item in metadata.domains),
+        semantic_mappings=tuple(metadata.semantic_mappings),
+        validation_status=metadata.validation_status,
+        solver_requirements=("authoritative_cad", "3d", "tetra4"),
+    )
+    return _build_physics_model(binding, request)
+
+
+def build_cfd_physics_model(mesh: CFDGeneratedMeshV1, request: PhysicsModelRequest) -> PhysicsModelV1:
+    """Bind CFD physics directly to a certified CAD-derived finite-volume mesh."""
+    from app.module2_simulation.openfoam_fv_mesh import CFDGeneratedMeshV1
+
+    if not isinstance(mesh, CFDGeneratedMeshV1):
+        raise PhysicsValidationError("CERTIFIED_FV_MESH_REQUIRED", "CFD physics requires a certified finite-volume mesh")
+    if request.analysis_family != AnalysisFamilyV1.CFD:
+        raise PhysicsValidationError("CFD_ANALYSIS_REQUIRED", "The certified finite-volume binding is CFD-only")
+
+    mappings: list[SemanticMeshMapping] = []
+    next_boundary_id = 1
+    for group_id, patch in enumerate(mesh.semantic_patches, 1):
+        boundary_ids = list(range(next_boundary_id, next_boundary_id + patch.final_face_count))
+        next_boundary_id += patch.final_face_count
+        mappings.append(SemanticMeshMapping(
+            semantic_region=patch.semantic_region,
+            body_id=mesh.source_body_id,
+            cad_resolution_status="EXACT",
+            topology_kind="face",
+            topology_signatures=patch.topology_signatures,
+            physical_group_id=group_id,
+            boundary_facet_ids=boundary_ids,
+            domain_ids=[mesh.fluid_domain_id],
+            mapping_status="EXACT",
+        ))
+    if next_boundary_id - 1 != mesh.boundary_face_count or any(not item.boundary_facet_ids for item in mappings):
+        raise PhysicsValidationError("INVALID_CFD_SEMANTIC_MAPPING", "Certified CFD patch faces do not cover the finite-volume boundary")
+
+    binding = _PhysicsMeshBinding(
+        design_hash=mesh.design_hash,
+        geometry_fingerprint=mesh.geometry_fingerprint,
+        mesh_id=mesh.mesh_id,
+        mesh_hash=mesh.mesh_hash,
+        domains=((mesh.fluid_domain_id, mesh.source_body_id, DomainKind.FLUID),),
+        semantic_mappings=tuple(mappings),
+        validation_status=mesh.validation_status,
+        solver_requirements=("authoritative_cad", "3d", "certified_finite_volume", *mesh.cell_types),
+    )
+    return _build_physics_model(binding, request)

@@ -30,8 +30,10 @@ from app.module2_simulation.openfoam_case import (
     SOLVER_VERSION,
     CFDCaseDefinition,
     CFDSolutionV1,
+    validate_fv_cfd_scope,
     validate_cfd_scope,
 )
+from app.module2_simulation.openfoam_fv_mesh import CFDGeneratedMeshV1, CFDMeshResolutionV1
 from app.module2_simulation.openfoam_mesh import PolyMeshExport
 
 BENCHMARK_ID = "cfd_square_duct_poiseuille_v1"
@@ -49,6 +51,11 @@ SERIES_TOLERANCE = 1e-14
 SERIES_MAX_TERMS = 100_000
 MESH_TARGETS_M = {"coarse": 0.005, "medium": 0.00375, "fine": 0.0025}
 PURE_TET_CFD_VALIDATION_STATUS = "FAILED_NOT_PRODUCTION_AUTHORITY"
+FV_MESH_RESOLUTIONS = {
+    "coarse": CFDMeshResolutionV1(transverse_cell_size_m=0.002, streamwise_cell_size_m=0.010),
+    "medium": CFDMeshResolutionV1(transverse_cell_size_m=0.0015, streamwise_cell_size_m=0.0075),
+    "fine": CFDMeshResolutionV1(transverse_cell_size_m=0.001, streamwise_cell_size_m=0.005),
+}
 
 
 class CFDBenchmarkError(ValueError):
@@ -148,6 +155,46 @@ class CFDFVAccuracyGateV1(_Strict):
     final_u_residual: float = Field(ge=0)
     final_p_residual: float = Field(ge=0)
     passed: bool
+
+
+class CFDFVBenchmarkLevelV1(_Strict):
+    level: Literal["coarse", "medium", "fine"]
+    resolution: CFDMeshResolutionV1
+    mesh_id: str
+    mesh_hash: str
+    source_surface_hash: str
+    cell_count: int = Field(gt=0)
+    face_count: int = Field(gt=0)
+    boundary_face_count: int = Field(gt=0)
+    check_mesh_ok: Literal[True] = True
+    cad_volume_relative_error: float = Field(ge=0)
+    maximum_boundary_deviation_m: float = Field(ge=0)
+    physics_model_id: str
+    physics_hash: str
+    case_fingerprint: str
+    analytical_gradient_pa_m: float = Field(gt=0)
+    numerical_gradient_pa_m: float = Field(gt=0)
+    normalized_pressure_gradient_error: float = Field(ge=0)
+    pressure_r_squared: float = Field(ge=0, le=1)
+    normalized_mass_imbalance: float = Field(ge=0)
+    final_u_residual: float = Field(ge=0)
+    final_p_residual: float = Field(ge=0)
+    maximum_velocity_m_s: float = Field(gt=0)
+    mean_velocity_m_s: float = Field(gt=0)
+    maximum_over_mean_velocity: float = Field(gt=0)
+    solver_converged: Literal[True] = True
+    passed_secondary_checks: Literal[True] = True
+
+
+class CFDFVRefinementResultV1(_Strict):
+    benchmark_id: Literal["cfd_square_duct_poiseuille_v1"] = BENCHMARK_ID
+    levels: tuple[CFDFVBenchmarkLevelV1, CFDFVBenchmarkLevelV1, CFDFVBenchmarkLevelV1]
+    errors: tuple[float, float, float]
+    monotonic_error_reduction: bool
+    observed_order: float | None
+    fine_error_limit: Literal[0.05] = FINE_ERROR_LIMIT
+    passed: bool
+    diagnostics: list[str]
 
 
 @dataclass(frozen=True)
@@ -418,4 +465,98 @@ def evaluate_certified_fv_accuracy_gate(case, mesh, definition: CFDCaseDefinitio
         normalized_mass_imbalance=solution.diagnostics.normalized_mass_imbalance,
         final_u_residual=solution.diagnostics.final_u_residual, final_p_residual=solution.diagnostics.final_p_residual,
         passed=passed,
+    )
+
+
+def evaluate_certified_fv_benchmark_level(
+    level: Literal["coarse", "medium", "fine"],
+    case,
+    mesh: CFDGeneratedMeshV1,
+    model: PhysicsModelV1,
+    definition: CFDCaseDefinition,
+    solution: CFDSolutionV1,
+) -> CFDFVBenchmarkLevelV1:
+    """Evaluate one predeclared real certified-FV benchmark level."""
+    inlet, outlet, wall, density, viscosity = validate_fv_cfd_scope(mesh, model)
+    expected_resolution = FV_MESH_RESOLUTIONS[level]
+    if mesh.resolution != expected_resolution:
+        raise CFDBenchmarkError("BENCHMARK_MESH_SEQUENCE_MISMATCH", "Certified FV resolution is not the fixed benchmark level")
+    if (inlet.semantic_region, outlet.semantic_region, wall.semantic_region) != ("low_end", "high_end", "walls"):
+        raise CFDBenchmarkError("BENCHMARK_BOUNDARY_MISMATCH", "Benchmark semantic boundaries are fixed server-side")
+    if tuple(inlet.velocity_m_s) != INLET_VELOCITY_M_S or outlet.pressure_pa != OUTLET_PRESSURE_PA or not wall.no_slip:
+        raise CFDBenchmarkError("BENCHMARK_BOUNDARY_MISMATCH", "Benchmark boundary values were changed")
+    if model.materials[0].material_name.lower() != "air" or density != 1.204 or viscosity != 1.81e-5:
+        raise CFDBenchmarkError("BENCHMARK_MATERIAL_MISMATCH", "Benchmark requires the authoritative air snapshot")
+    if (definition.inlet_velocity_m_s != INLET_VELOCITY_M_S or definition.outlet_pressure_pa != OUTLET_PRESSURE_PA
+            or definition.density_kg_m3 != density or definition.dynamic_viscosity_pa_s != viscosity):
+        raise CFDBenchmarkError("BENCHMARK_CASE_MISMATCH", "Generated case does not preserve benchmark science")
+    gate = evaluate_certified_fv_accuracy_gate(case, mesh, definition, solution)
+    if not gate.passed:
+        raise CFDBenchmarkError("BENCHMARK_SECONDARY_CHECK_FAILED", "Solver, fields, pressure fit, mass conservation, or accuracy failed")
+    return CFDFVBenchmarkLevelV1(
+        level=level,
+        resolution=mesh.resolution,
+        mesh_id=mesh.mesh_id,
+        mesh_hash=mesh.mesh_hash,
+        source_surface_hash=mesh.source_surface_hash,
+        cell_count=mesh.cell_count,
+        face_count=mesh.face_count,
+        boundary_face_count=mesh.boundary_face_count,
+        check_mesh_ok=mesh.check_mesh.mesh_ok,
+        cad_volume_relative_error=mesh.geometry_certification.relative_volume_error,
+        maximum_boundary_deviation_m=mesh.geometry_certification.maximum_boundary_deviation_m,
+        physics_model_id=model.physics_model_id,
+        physics_hash=model.physics_hash,
+        case_fingerprint=definition.case_fingerprint,
+        analytical_gradient_pa_m=gate.analytical_gradient_pa_m,
+        numerical_gradient_pa_m=gate.numerical_gradient_pa_m,
+        normalized_pressure_gradient_error=gate.normalized_pressure_gradient_error,
+        pressure_r_squared=gate.pressure_r_squared,
+        normalized_mass_imbalance=gate.normalized_mass_imbalance,
+        final_u_residual=gate.final_u_residual,
+        final_p_residual=gate.final_p_residual,
+        maximum_velocity_m_s=gate.maximum_velocity_m_s,
+        mean_velocity_m_s=gate.mean_velocity_m_s,
+        maximum_over_mean_velocity=gate.maximum_over_mean_velocity,
+        solver_converged=solution.converged,
+        passed_secondary_checks=True,
+    )
+
+
+def assemble_certified_fv_refinement(
+    levels: Sequence[CFDFVBenchmarkLevelV1],
+    models: Sequence[PhysicsModelV1],
+    definitions: Sequence[CFDCaseDefinition],
+) -> CFDFVRefinementResultV1:
+    """Aggregate the immutable unequal-ratio certified-FV refinement sequence."""
+    if [item.level for item in levels] != ["coarse", "medium", "fine"]:
+        raise CFDBenchmarkError("REFINEMENT_LEVEL_MISMATCH", "Levels must be coarse, medium, fine")
+    assert_identical_science(models, definitions)
+    for level, item in zip(("coarse", "medium", "fine"), levels):
+        if item.resolution != FV_MESH_RESOLUTIONS[level]:
+            raise CFDBenchmarkError("BENCHMARK_MESH_SEQUENCE_MISMATCH", "Refinement resolution was changed")
+    if len({item.source_surface_hash for item in levels}) != 1:
+        raise CFDBenchmarkError("REFINEMENT_GEOMETRY_MISMATCH", "Refinement levels do not share one certified CAD surface")
+    if len({item.mesh_hash for item in levels}) != 3 or len({item.physics_hash for item in levels}) != 3:
+        raise CFDBenchmarkError("REFINEMENT_MESH_IDENTITY_MISMATCH", "Refinement requires three distinct FV-bound scientific identities")
+
+    errors = tuple(item.normalized_pressure_gradient_error for item in levels)
+    monotonic = errors[0] > errors[1] > errors[2]
+    passed = bool(errors[2] <= FINE_ERROR_LIMIT and errors[2] < errors[0]
+                  and all(item.passed_secondary_checks for item in levels))
+    observed_order = None
+    diagnostics = ["REFINEMENT_MONOTONIC" if monotonic else f"NONMONOTONIC_ERRORS:{errors}"]
+    if monotonic and all(value > 0 and math.isfinite(value) for value in errors):
+        spacing = np.asarray([FV_MESH_RESOLUTIONS[name].transverse_cell_size_m for name in ("coarse", "medium", "fine")])
+        slope, _ = np.polyfit(np.log(spacing), np.log(np.asarray(errors)), 1)
+        if math.isfinite(float(slope)) and float(slope) > 0:
+            observed_order = float(slope)
+        else:
+            diagnostics.append("OBSERVED_ORDER_NOT_MEANINGFUL")
+    else:
+        diagnostics.append("OBSERVED_ORDER_OMITTED_NONMONOTONIC")
+    diagnostics.append("FINE_BENCHMARK_PASS" if passed else "FINE_BENCHMARK_FAIL")
+    return CFDFVRefinementResultV1(
+        levels=tuple(levels), errors=errors, monotonic_error_reduction=monotonic,
+        observed_order=observed_order, passed=passed, diagnostics=diagnostics,
     )

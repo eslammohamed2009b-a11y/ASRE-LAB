@@ -348,8 +348,8 @@ SOLVER_REGISTRY.update({
         validity_envelope={"flow": "steady incompressible Newtonian laminar single-phase isothermal internal", "mass_imbalance": "<= 1e-3"},
         convergence_requirements="Normal solver completion, SIMPLE residual convergence, finite reviewed fields, and normalized mass imbalance <= 1e-3.",
         implementation_reference="app.module2_simulation.solver_orchestrator.solve_openfoam_cfd_from_cad",
-        known_limitations=["No turbulence, transient, compressible, multiphase, non-Newtonian, porous, rotating-frame, CHT, FSI, or combustion support.", "Pure-TET CFD analytical validation failed and is not a production authority.", "Three-mesh certified-FV refinement remains pending Phase 3C-2B.1B."],
-        benchmark_references=["tests/integration/test_openfoam_fv_mesh.py::test_real_certified_fv_square_duct_accuracy (one-mesh analytical accuracy gate)"],
+        known_limitations=["No turbulence, transient, compressible, multiphase, non-Newtonian, porous, rotating-frame, CHT, FSI, or combustion support.", "Pure-TET CFD analytical validation failed and is not a production authority."],
+        benchmark_references=["tests/integration/test_openfoam_fv_mesh.py::test_real_certified_fv_square_duct_accuracy (one-mesh analytical accuracy gate)", "tests/integration/test_openfoam_cfd_benchmark.py::test_real_openfoam_square_duct_poiseuille_refinement (three-mesh certified-FV refinement)"],
     ),
 })
 
