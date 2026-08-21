@@ -346,7 +346,7 @@ class OpenFOAMAdapterFoundation:
 
 
 def solve_openfoam_cfd_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> CFDSolutionV1:
-    """Execute only the reviewed steady laminar OpenFOAM case in an isolated workspace."""
+    """Legacy pure-TET diagnostic bridge; not the production CFD authority."""
     adapter = OpenFOAMAdapterFoundation()
     with adapter.case_workspace() as case:
         poly, definition = prepare_laminar_case(mesh, model, case)
@@ -357,8 +357,40 @@ def solve_openfoam_cfd_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> CFDSolu
         return solution
 
 
-# Registered only after the concrete bounded adapter is defined; no dynamic module or user solver lookup exists.
-FIXED_SOLVER_ADAPTERS["cfd_openfoam_laminar_internal_3d_v1"] = FixedSolverAdapter(
-    "openfoam_laminar_internal_3d_v1", "cfd_openfoam_laminar_internal_3d_v1",
-    "openfoam-foundation-14", solve_openfoam_cfd_3d,
-)
+def solve_openfoam_cfd_from_cad(compiled, model: PhysicsModelV1, domain, resolution=None):
+    """Build and solve the certified production FV mesh from authoritative CAD."""
+    from app.module2_simulation.openfoam_case import generate_laminar_fv_case, parse_cfd_fv_solution
+    from app.module2_simulation.openfoam_fv_mesh import (
+        CFDMeshResolutionV1,
+        certify_final_cfd_mesh,
+        generate_certified_cfd_surface,
+        generate_snappyhex_case,
+        run_snappyhex_mesher,
+    )
+
+    categories: dict[str, str] = {}
+    for boundary in model.boundary_conditions:
+        category = {"velocity_inlet": "inlet", "pressure_boundary": "outlet", "wall": "wall"}.get(boundary.bc_type)
+        if category is None:
+            raise SolverOrchestrationError("UNSUPPORTED_CFD_BOUNDARY", "Production CFD meshing supports only velocity inlet, pressure outlet, and wall")
+        categories[boundary.semantic_region] = category
+    active_resolution = resolution or CFDMeshResolutionV1()
+    adapter = OpenFOAMAdapterFoundation(OpenFOAMExecutionConfig(timeout_seconds=model.numerical_settings.maximum_iterations * 2))
+    with adapter.case_workspace() as case:
+        surface = generate_certified_cfd_surface(compiled, domain, categories)
+        generated = generate_snappyhex_case(case, surface, active_resolution)
+        _, _, check_log = run_snappyhex_mesher(case, active_resolution)
+        mesh = certify_final_cfd_mesh(compiled, domain, generated, case, check_log)
+        definition = generate_laminar_fv_case(mesh, model, case)
+        completed = adapter.run_fixed_case(case)
+        solution = parse_cfd_fv_solution(mesh, model, definition, case, completed.stdout + completed.stderr)
+        if not solution.converged:
+            raise SolverOrchestrationError("CFD_NOT_CONVERGED", "OpenFOAM output failed residual or mass-conservation acceptance")
+        return mesh, solution
+
+
+# The production CFD adapter has a CAD-aware signature and is intentionally
+# separate from the GeneratedMesh/TET4 FEM dispatcher.
+FIXED_CAD_CFD_ADAPTERS = {
+    "cfd_openfoam_laminar_internal_3d_v1": solve_openfoam_cfd_from_cad,
+}

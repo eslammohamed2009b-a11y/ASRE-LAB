@@ -262,6 +262,84 @@ def prepare_laminar_case(mesh: GeneratedMesh, model: PhysicsModelV1, case: Path)
     return poly, generate_laminar_case(mesh, model, poly, case)
 
 
+def validate_fv_cfd_scope(mesh, model: PhysicsModelV1) -> tuple[VelocityInletBC, PressureBoundaryBC, WallBC, float, float]:
+    """Validate the certified FV path without falsely applying TET4 identity semantics."""
+    from app.module2_simulation.openfoam_fv_mesh import CFDGeneratedMeshV1
+
+    if not isinstance(mesh, CFDGeneratedMeshV1):
+        raise OpenFOAMCaseError("CERTIFIED_FV_MESH_REQUIRED", "Production CFD requires a certified finite-volume mesh artifact")
+    if model.analysis_family != AnalysisFamilyV1.CFD:
+        raise OpenFOAMCaseError("UNSUPPORTED_CFD_FAMILY", "Only the typed CFD analysis family is accepted")
+    if model.design_hash != mesh.design_hash or model.geometry_fingerprint != mesh.geometry_fingerprint:
+        raise OpenFOAMCaseError("AUTHORITATIVE_GEOMETRY_REQUIRED", "Physics and CFD mesh must derive from the same authoritative CAD BRep")
+    if len(model.domains) != 1 or model.domains[0].domain_id != mesh.fluid_domain_id or model.domains[0].source_body_id != mesh.source_body_id:
+        raise OpenFOAMCaseError("FLUID_DOMAIN_MISMATCH", "Certified CFD mesh does not match the typed fluid domain")
+    if any(domain.domain_kind.value != "fluid" or not domain.explicit_fluid_volume for domain in model.domains):
+        raise OpenFOAMCaseError("FLUID_DOMAIN_REQUIRED", "Only explicit FLUID CAD volumes are supported")
+    if model.numerical_settings.settings_type != "steady_flow":
+        raise OpenFOAMCaseError("UNSUPPORTED_CFD_SCOPE", "Only steady incompressible laminar flow is supported")
+    if any(isinstance(bc, FlowInletBC) for bc in model.boundary_conditions):
+        raise OpenFOAMCaseError("UNSUPPORTED_CFD_BOUNDARY", "FlowInletBC conversion is not implemented")
+    inlets = [bc for bc in model.boundary_conditions if isinstance(bc, VelocityInletBC)]
+    outlets = [bc for bc in model.boundary_conditions if isinstance(bc, PressureBoundaryBC)]
+    walls = [bc for bc in model.boundary_conditions if isinstance(bc, WallBC)]
+    if len(inlets) != 1 or len(outlets) != 1 or len(walls) != 1 or len(model.boundary_conditions) != 3 or not walls[0].no_slip:
+        raise OpenFOAMCaseError("UNSUPPORTED_CFD_BOUNDARY", "Exactly one velocity inlet, pressure outlet, and no-slip wall group are required")
+    density, viscosity, _, _ = _material(model)
+    return inlets[0], outlets[0], walls[0], density, viscosity
+
+
+def generate_laminar_fv_case(mesh, model: PhysicsModelV1, case: Path) -> CFDCaseDefinition:
+    """Generate the reviewed solver dictionaries for a certified CFD polyMesh."""
+    inlet, outlet, wall, density, viscosity = validate_fv_cfd_scope(mesh, model)
+    _, _, density_source, viscosity_source = _material(model)
+    patch_by_semantic = {item.semantic_region: item.final_patch for item in mesh.semantic_patches}
+    try:
+        inlet_patch, outlet_patch, wall_patch = patch_by_semantic[inlet.semantic_region], patch_by_semantic[outlet.semantic_region], patch_by_semantic[wall.semantic_region]
+    except KeyError as exc:
+        raise OpenFOAMCaseError("PATCH_MAPPING_MISMATCH", "A CFD boundary has no certified FV patch") from exc
+    if len({inlet_patch, outlet_patch, wall_patch}) != 3 or set(patch_by_semantic) != {inlet.semantic_region, outlet.semantic_region, wall.semantic_region}:
+        raise OpenFOAMCaseError("PATCH_MAPPING_MISMATCH", "CFD semantic boundaries must map one-to-one onto all certified patches")
+    tolerance = model.numerical_settings.tolerance; maximum_iterations = model.numerical_settings.maximum_iterations
+    nu = viscosity / density; pressure_kinematic = outlet.pressure_pa / density
+    u = " ".join(f"{value:.17g}" for value in inlet.velocity_m_s)
+    generated: dict[str, str] = {}
+    generated["system/controlDict"] = _foam_header("dictionary", "system", "controlDict") + (
+        f"solver incompressibleFluid;\nstartFrom startTime;\nstartTime 0;\nstopAt endTime;\nendTime {maximum_iterations};\n"
+        "deltaT 1;\nwriteControl timeStep;\nwriteInterval 1;\npurgeWrite 2;\nwriteFormat ascii;\nwritePrecision 17;\nwriteCompression off;\ntimeFormat general;\ntimePrecision 12;\nrunTimeModifiable false;\n"
+    )
+    generated["system/fvSchemes"] = _foam_header("dictionary", "system", "fvSchemes") + (
+        "ddtSchemes { default steadyState; }\ngradSchemes { default Gauss linear; }\n"
+        "divSchemes { default none; div(phi,U) bounded Gauss upwind; div((nuEff*dev2(T(grad(U))))) Gauss linear; }\n"
+        "laplacianSchemes { default Gauss linear corrected; }\ninterpolationSchemes { default linear; }\nsnGradSchemes { default corrected; }\nfluxRequired { default no; p; }\n"
+    )
+    generated["system/fvSolution"] = _foam_header("dictionary", "system", "fvSolution") + (
+        "solvers\n{\n p { solver PCG; preconditioner DIC; tolerance 1e-10; relTol 0.05; maxIter 200; }\n U { solver PBiCGStab; preconditioner DILU; tolerance 1e-10; relTol 0.05; maxIter 200; }\n}\n"
+        f"SIMPLE\n{{\n nNonOrthogonalCorrectors 2;\n residualControl {{ p {tolerance:.17g}; U {tolerance:.17g}; }}\n}}\nrelaxationFactors {{ fields {{ p 0.3; }} equations {{ U 0.7; }} }}\n"
+    )
+    generated["constant/physicalProperties"] = _foam_header("dictionary", "constant", "physicalProperties") + f"viscosityModel constant;\nnu {nu:.17g};\n"
+    generated["constant/momentumTransport"] = _foam_header("dictionary", "constant", "momentumTransport") + "simulationType laminar;\n"
+    generated["0/U"] = _foam_header("volVectorField", "0", "U") + (
+        "dimensions [0 1 -1 0 0 0 0];\ninternalField uniform (0 0 0);\nboundaryField\n{\n"
+        f" {inlet_patch} {{ type fixedValue; value uniform ({u}); }}\n {outlet_patch} {{ type zeroGradient; }}\n {wall_patch} {{ type noSlip; }}\n}}\n"
+    )
+    generated["0/p"] = _foam_header("volScalarField", "0", "p") + (
+        "dimensions [0 2 -2 0 0 0 0];\ninternalField uniform 0;\nboundaryField\n{\n"
+        f" {inlet_patch} {{ type zeroGradient; }}\n {outlet_patch} {{ type fixedValue; value uniform {pressure_kinematic:.17g}; }}\n {wall_patch} {{ type zeroGradient; }}\n}}\n"
+    )
+    if any(token in content for content in generated.values() for token in _DYNAMIC_TOKENS):
+        raise OpenFOAMCaseError("DYNAMIC_CODE_FORBIDDEN", "Generated case contains a forbidden OpenFOAM directive")
+    for relative, content in generated.items():
+        target = case / relative; target.parent.mkdir(parents=True, exist_ok=True); target.write_text(content, encoding="utf-8", newline="\n")
+    science = {
+        "generator": CASE_GENERATOR_VERSION, "solver": [SOLVER_ID, SOLVER_VERSION, BACKEND_ID, BACKEND_VERSION, "foamRun", "incompressibleFluid"],
+        "certified_fv_mesh": [mesh.mesh_id, mesh.mesh_hash, mesh.source_surface_hash], "physics_hash": model.physics_hash,
+        "materials": [item.model_dump(mode="json") for item in model.materials], "boundaries": [item.model_dump(mode="json") for item in model.boundary_conditions],
+        "settings": model.numerical_settings.model_dump(mode="json"), "patches": [item.model_dump(mode="json") for item in mesh.semantic_patches], "files": generated,
+    }
+    return CFDCaseDefinition(_hash(science), density, viscosity, density_source, viscosity_source, nu, tuple(inlet.velocity_m_s), outlet.pressure_pa, inlet_patch, outlet_patch, wall_patch, tuple(sorted(generated)))
+
+
 def _header_value(text: str, key: str) -> str:
     match = re.search(rf"\b{re.escape(key)}\s+([^;]+);", text)
     if not match:
@@ -418,4 +496,51 @@ def parse_cfd_solution(mesh: GeneratedMesh, model: PhysicsModelV1, poly: PolyMes
         diagnostics=diagnostics,
         warnings=["Analytical benchmark and mesh-refinement validation are pending Phase 3C-2B"],
         limitations=["Steady 3D incompressible Newtonian single-phase isothermal laminar internal flow only", "No turbulence, transient, compressible, multiphase, non-Newtonian, porous, rotating-frame, CHT, FSI, or combustion support"],
+    )
+
+
+def parse_cfd_fv_solution(mesh, model: PhysicsModelV1, definition: CFDCaseDefinition, case: Path, solver_log: str) -> CFDSolutionV1:
+    """Parse real fields from the certified finite-volume production CFD mesh."""
+    validate_fv_cfd_scope(mesh, model)
+    final = _latest_time(case)
+    u = parse_volume_field(final / "U", "U", mesh.cell_count)
+    p = parse_volume_field(final / "p", "p", mesh.cell_count)
+    patch_counts = {item.final_patch: item.final_face_count for item in mesh.semantic_patches}
+    if any(count <= 0 for count in patch_counts.values()):
+        raise OpenFOAMCaseError("PATCH_MAPPING_MISMATCH", "Certified FV patch counts must be positive")
+    phi = parse_surface_flux(final / "phi", patch_counts, mesh.internal_face_count)
+    iterations, u_residual, p_residual, log_converged = parse_residuals(solver_log)
+    q_in = -sum(phi.boundary_values[definition.inlet_patch]); q_out = sum(phi.boundary_values[definition.outlet_patch])
+    if q_in < 0 or q_out < 0:
+        raise OpenFOAMCaseError("FLOW_DIRECTION_INVALID", "Surface flux direction does not match inlet/outlet semantics")
+    density = definition.density_kg_m3
+    mass_in, mass_out, imbalance = mass_flow_diagnostics(q_in, q_out, density)
+    velocity = np.asarray(u.values, dtype=float); speed = np.linalg.norm(velocity, axis=1)
+    pressure = np.asarray(p.values, dtype=float)
+    tolerance = model.numerical_settings.tolerance
+    converged = bool(log_converged and u_residual <= tolerance and p_residual <= tolerance and imbalance <= MASS_IMBALANCE_LIMIT)
+    diagnostics = CFDDiagnosticsV1(
+        final_u_residual=u_residual, final_p_residual=p_residual, volumetric_flow_in_m3_s=q_in,
+        volumetric_flow_out_m3_s=q_out, mass_flow_in_kg_s=mass_in, mass_flow_out_kg_s=mass_out,
+        normalized_mass_imbalance=imbalance,
+    )
+    return CFDSolutionV1(
+        mesh_id=mesh.mesh_id, mesh_hash=mesh.mesh_hash, poly_mesh_hash=mesh.mesh_hash,
+        case_fingerprint=definition.case_fingerprint, converged=converged, iterations=iterations,
+        summary_metrics={
+            "max_velocity_m_s": float(speed.max()), "mean_velocity_m_s": float(speed.mean()),
+            "volumetric_flow_in_m3_s": q_in, "volumetric_flow_out_m3_s": q_out,
+            "mass_flow_in_kg_s": mass_in, "mass_flow_out_kg_s": mass_out,
+            "normalized_mass_imbalance": imbalance,
+            "physical_pressure_range_pa": density * float(pressure.max() - pressure.min()),
+        },
+        fields={"U": u, "p": p},
+        flux=CFDFluxFieldV1(dimensions=phi.dimensions, internal_face_count=phi.internal_count,
+            boundary_face_count=sum(len(items) for items in phi.boundary_values.values()),
+            total_face_count=phi.internal_count + sum(len(items) for items in phi.boundary_values.values())),
+        material=CFDMaterialV1(density_kg_m3=density, dynamic_viscosity_pa_s=definition.dynamic_viscosity_pa_s,
+            density_source=definition.density_source, dynamic_viscosity_source=definition.dynamic_viscosity_source),
+        pressure_interpretation=CFDPressureInterpretationV1(density_kg_m3=density, density_source=definition.density_source),
+        diagnostics=diagnostics,
+        limitations=["Steady 3D incompressible Newtonian single-phase isothermal laminar internal flow only", "Certified snappyHexMesh finite-volume geometry only"],
     )

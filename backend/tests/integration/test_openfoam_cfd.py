@@ -152,14 +152,11 @@ def test_cfd_orchestration_is_backend_bounded_and_stale_plan_fails(cfd_science, 
     mesh, model = cfd_science
     backend = BackendCapability("openfoam-foundation-14", BackendAvailability.AVAILABLE, "20260724",
         "test reviewed runtime", "dedicated CFD image")
-    plan = create_execution_plan("cfd_openfoam_laminar_internal_3d_v1", mesh, model, backend=backend)
-    assert plan.preflight_status == "PASS" and plan.execution_mode == "fixed_external_openfoam"
-    monkeypatch.setattr("app.module2_simulation.solver_orchestrator.detect_openfoam14_backend", lambda: backend)
-    changed_bc = model.boundary_conditions[0].model_copy(update={"velocity_m_s": (0.2, 0.0, 0.0)})
-    changed = model.model_copy(update={"boundary_conditions": [changed_bc, *model.boundary_conditions[1:]]})
     with pytest.raises(SolverOrchestrationError) as exc:
-        dispatch(plan, mesh, changed)
-    assert exc.value.code == "PLAN_INPUT_MISMATCH"
+        create_execution_plan("cfd_openfoam_laminar_internal_3d_v1", mesh, model, backend=backend)
+    assert exc.value.code == "UNKNOWN_SOLVER"
+    from app.module2_simulation.solver_orchestrator import FIXED_CAD_CFD_ADAPTERS
+    assert set(FIXED_CAD_CFD_ADAPTERS) == {"cfd_openfoam_laminar_internal_3d_v1"}
 
 
 @pytest.mark.skipif(os.getenv("ASRE_RUN_OPENFOAM_REAL") != "1", reason="explicit real OpenFOAM CFD gate")
