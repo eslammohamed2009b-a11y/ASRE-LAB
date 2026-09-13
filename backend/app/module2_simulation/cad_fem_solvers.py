@@ -34,6 +34,7 @@ CAD_FEM_SOLVERS = {
     "thermal_fem_3d_v1": "solve_thermal_fem_3d",
     "structural_linear_elasticity_3d_v1": "solve_structural_fem_3d",
     "modal_fem_3d_v1": "solve_modal_fem_3d",
+    "acoustic_helmholtz_fem_3d_v1": "solve_acoustic_fem_3d",
 }
 
 

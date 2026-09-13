@@ -19,6 +19,7 @@ def test_all_real_capabilities_and_coupling_are_registered():
             "acoustic_duct_1d_v1","electrostatic_rectangular_2d_v1",
             "cfd_laminar_channel_2d_v1","cfd_openfoam_laminar_internal_3d_v1","thermal_structural_one_way_v1",
         "thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
+    assert "acoustic_helmholtz_fem_3d_v1" not in {x.solver_id for x in REGISTRY.list()}
 
 
 def test_certified_fv_cfd_trust_is_server_owned_and_capped_at_moderate():
