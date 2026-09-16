@@ -7,6 +7,8 @@ from app.module2_simulation import router as simulation_router
 from app.module3_analysis import service as analysis_service
 from app.core.repository import LocalSQLiteRepository
 from app.v2.repository import EvidenceRepository
+from app.core.auth import get_current_user
+from app.main import app
 
 
 pytestmark = pytest.mark.integration
@@ -130,3 +132,40 @@ def test_invalid_material_is_a_safe_422_without_partial_records(authorized_clien
     assert response.status_code == 422
     assert "not in the material library" in response.json()["detail"]
     assert repo.list_simulation_jobs_for_experiment(study_id) == []
+
+
+def test_real_persisted_pyramid_runs_support_phase4_study_analysis(authorized_client, comparative_study):
+    """Real solver lifecycle: trusted runs -> linked Study -> bounded findings."""
+    repo, study_id, design_ids = comparative_study
+    started = authorized_client.post(f"/api/studies/{study_id}/comparative-runs", json=payload(design_ids))
+    assert started.status_code == 202
+    simulations = repo.list_simulation_jobs_for_experiment(study_id)
+    simulation_ids = [item.id for item in simulations]
+    definition = {
+        "factors": [{"name": "height", "source_path": "design.height_m", "unit": "m", "minimum": 1, "maximum": 5}],
+        "responses": [{"name": "heat", "column": "metric.integrated_heat_source_w", "unit": "W", "desired_direction": "minimize"}],
+        "constraints": [{"name": "bounded_heat", "column": "metric.integrated_heat_source_w", "operator": "<=", "value": 1e9, "unit": "W"}],
+        "objectives": [{"column": "metric.integrated_heat_source_w", "direction": "minimize", "weight": 1}],
+    }
+    assert authorized_client.patch(f"/api/studies/{study_id}", json=definition).status_code == 200
+    linked = authorized_client.post(f"/api/studies/{study_id}/simulations", json={"simulation_ids": simulation_ids})
+    assert linked.status_code == 200
+    assert authorized_client.patch(f"/api/studies/{study_id}", json={"responses": definition["responses"]}).status_code == 409
+    analysis = authorized_client.post(f"/api/studies/{study_id}/analyze", json={
+        "sensitivity": {"target": "metric.integrated_heat_source_w", "features": ["design.height_m"]},
+        "objectives": definition["objectives"],
+    })
+    assert analysis.status_code == 201, analysis.text
+    body = analysis.json(); assert body["findings"]["constraints"]["feasible_simulation_ids"]
+    assert body["findings"]["pareto"]["pareto_optimal"]
+    assert body["findings"]["ranking_stability"]["status"] == "completed"
+    findings = authorized_client.get(f"/api/studies/{study_id}/findings")
+    assert findings.status_code == 200 and findings.json()["run_quality"]
+    proposals = authorized_client.post(f"/api/studies/{study_id}/next-experiments", json={"candidate_count": 32, "count": 2, "seed": 4})
+    assert proposals.status_code == 201
+    assert all(1 <= item["factor_coordinates"]["height"] <= 5 for item in proposals.json()["proposals"])
+    manifest = authorized_client.get(f"/api/studies/{study_id}/manifest")
+    assert manifest.status_code == 200 and manifest.json()["analysis_reproducibility_hash"]
+    app.dependency_overrides[get_current_user] = lambda: {"id": "other-user", "role": "researcher"}
+    assert authorized_client.get(f"/api/studies/{study_id}/manifest").status_code == 404
+    app.dependency_overrides[get_current_user] = lambda: {"id": "user-test", "role": "researcher"}

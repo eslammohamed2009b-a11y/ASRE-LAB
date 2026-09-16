@@ -14,6 +14,15 @@ from app.v2.reasoning_reports import public_record
 from app.comparative_service import ComparativeRunRequest, build_comparison_plan, create_comparative_batch
 from app.module2_simulation.materials import MaterialNotFoundError, MaterialPropertyNotFoundError
 from app.module2_simulation.solvers.base_solver import SolverValidationError
+from app.module3_analysis.schemas import (
+    ConstraintSpec, DOEConfig, HypothesisSpec, NextExperimentRequest,
+    StudyAnalysisRequest, StudyFactor, StudyResponse, ExperimentDataset,
+)
+from app.module3_analysis.intelligence import AnalysisInputError
+from app.module3_analysis.study_engine import (
+    StudyError, assert_definition, definition_hash, generate_doe, manifest,
+    next_experiments, normalized_metadata, run_study_analysis,
+)
 
 
 router = APIRouter(
@@ -39,8 +48,8 @@ class StudyCreateRequest(BaseModel):
     title: str = Field(min_length=1, max_length=240)
     description: str = Field(default="", max_length=4000)
     research_question: str = Field(min_length=3, max_length=2000)
-    hypothesis: str | None = Field(default=None, max_length=2000)
-    geometry_family: str = Field(min_length=1, max_length=100)
+    hypothesis: str | HypothesisSpec | None = Field(default=None)
+    geometry_family: str = Field(default="study_scoped_authoritative_runs", min_length=1, max_length=100)
     independent_variables: list[VariableDefinition] = Field(default_factory=list, max_length=32)
     output_variables: list[VariableDefinition] = Field(default_factory=list, max_length=64)
     controlled_variables: list[ControlledVariable] = Field(default_factory=list, max_length=64)
@@ -50,13 +59,19 @@ class StudyCreateRequest(BaseModel):
     boundary_conditions: dict[str, Any] = Field(default_factory=dict)
     numerical_settings: dict[str, Any] = Field(default_factory=dict)
     design_space: dict[str, Any] = Field(default_factory=dict)
+    baseline_simulation_id: str | None = None
+    factors: list[StudyFactor] = Field(default_factory=list, max_length=16)
+    responses: list[StudyResponse] = Field(default_factory=list, max_length=32)
+    constraints: list[ConstraintSpec] = Field(default_factory=list, max_length=32)
+    doe: DOEConfig | None = None
+    linked_simulation_ids: list[str] = Field(default_factory=list, max_length=5000)
 
 
 class StudyUpdateRequest(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=240)
     description: str | None = Field(default=None, max_length=4000)
     research_question: str | None = Field(default=None, min_length=3, max_length=2000)
-    hypothesis: str | None = Field(default=None, max_length=2000)
+    hypothesis: str | HypothesisSpec | None = Field(default=None)
     geometry_family: str | None = Field(default=None, min_length=1, max_length=100)
     independent_variables: list[VariableDefinition] | None = Field(default=None, max_length=32)
     output_variables: list[VariableDefinition] | None = Field(default=None, max_length=64)
@@ -68,6 +83,24 @@ class StudyUpdateRequest(BaseModel):
     numerical_settings: dict[str, Any] | None = None
     design_space: dict[str, Any] | None = None
     status: Literal["draft", "active", "completed", "archived"] | None = None
+    factors: list[StudyFactor] | None = Field(default=None, max_length=16)
+    responses: list[StudyResponse] | None = Field(default=None, max_length=32)
+    constraints: list[ConstraintSpec] | None = Field(default=None, max_length=32)
+    doe: DOEConfig | None = None
+
+
+class StudyRevisionRequest(BaseModel):
+    research_question: str | None = Field(default=None, min_length=3, max_length=2000)
+    hypothesis: str | HypothesisSpec | None = None
+    factors: list[StudyFactor] | None = Field(default=None, max_length=16)
+    responses: list[StudyResponse] | None = Field(default=None, max_length=32)
+    constraints: list[ConstraintSpec] | None = Field(default=None, max_length=32)
+    objectives: list[dict[str, Any]] | None = Field(default=None, max_length=16)
+    doe: DOEConfig | None = None
+
+
+class SimulationLinksRequest(BaseModel):
+    simulation_ids: list[str] = Field(min_length=1, max_length=5000)
 
 
 def _owned_study(study_id: str, user_id: str) -> ExperimentRecord:
@@ -98,6 +131,8 @@ def _metadata(record: ExperimentRecord) -> dict[str, Any]:
         "boundary_conditions": {},
         "numerical_settings": {},
         "design_space": {},
+        "factors": [], "responses": [], "constraints": [], "doe": None,
+        "linked_simulation_ids": [], "revision": 1,
     }
 
 
@@ -156,6 +191,35 @@ def _summary(record: ExperimentRecord) -> dict[str, Any]:
     }
 
 
+def _phase4_metadata(record: ExperimentRecord) -> dict[str, Any]:
+    metadata = _metadata(record)
+    # Legacy Studies stored lifecycle state only on the experiment aggregate.
+    # Preserve that authoritative state when introducing Phase 4 metadata.
+    metadata.setdefault("status", record.status)
+    return normalized_metadata(metadata, study_id=record.id, owner_id=record.user_id, experiment_id=record.id)
+
+
+def _persist_metadata(repo, record: ExperimentRecord, metadata: dict, *, status: str | None = None, title: str | None = None) -> ExperimentRecord:
+    metadata = normalized_metadata(metadata, study_id=record.id, owner_id=record.user_id, experiment_id=record.id)
+    assert_definition(metadata)
+    repo.update_experiment(record.id, name=title, status=status or metadata.get("status"), input_specification={
+        **record.input_specification, "study": metadata, "schema_version": "research-study-v1",
+    })
+    return repo.get_experiment(record.id)
+
+
+def _study_evidence(repo, user_id: str, record: ExperimentRecord, metadata: dict, kind: str, payload: dict) -> str:
+    try:
+        evidence_repository = EvidenceRepository(repository=repo)
+    except TypeError:  # legacy test/local dependency injection adapter
+        evidence_repository = EvidenceRepository()
+    evidence = evidence_repository.create(user_id, {
+        "record_type": f"study_{kind}", "experiment_id": record.id, "simulation_id": None,
+        "status": "completed", "payload": {"study_id": record.id, "definition_hash": metadata["definition_hash"], "revision": metadata["revision"], **payload},
+    })
+    return evidence["id"]
+
+
 @router.post("", status_code=201)
 def create_study(
     payload: StudyCreateRequest, current_user: dict = Depends(get_current_user),
@@ -167,7 +231,11 @@ def create_study(
         current_user["id"], payload.title, {"study": metadata, "schema_version": "research-study-v1"}
     )
     repo.update_experiment(study_id, status="draft")
-    return _summary(repo.get_experiment(study_id))
+    record = repo.get_experiment(study_id)
+    metadata = _phase4_metadata(record)
+    record = _persist_metadata(repo, record, metadata, status="draft")
+    _study_evidence(repo, current_user["id"], record, metadata, "definition", {"definition": metadata})
+    return _summary(record)
 
 
 @router.get("")
@@ -197,20 +265,140 @@ def update_study(
     changes = payload.model_dump(exclude_unset=True, mode="json")
     title = changes.pop("title", None)
     status = changes.pop("status", None)
-    metadata = _metadata(record)
+    metadata = _phase4_metadata(record)
     metadata.pop("title", None)
+    scientific = {"research_question", "hypothesis", "factors", "responses", "constraints", "objectives", "doe"}
+    if record.status == "active" and metadata.get("linked_simulation_ids") and scientific & set(changes):
+        raise HTTPException(status_code=409, detail="Active Study scientific definition is immutable; create an explicit revision")
     metadata.update(changes)
-    repo.update_experiment(
-        study_id,
-        name=title,
-        status=status,
-        input_specification={
-            **record.input_specification,
-            "study": metadata,
-            "schema_version": "research-study-v1",
-        },
-    )
-    return _summary(repo.get_experiment(study_id))
+    try:
+        updated = _persist_metadata(repo, record, metadata, status=status, title=title)
+    except StudyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _summary(updated)
+
+
+@router.post("/{study_id}/revisions", status_code=201)
+def create_revision(study_id: str, payload: StudyRevisionRequest, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"])
+    metadata = _phase4_metadata(record)
+    changes = payload.model_dump(exclude_unset=True, mode="json")
+    if not changes:
+        raise HTTPException(status_code=422, detail="Revision must change at least one scientific definition field")
+    history = list(metadata.get("revision_history", []))
+    history.append({"revision": metadata["revision"], "definition_hash": metadata["definition_hash"]})
+    metadata.update(changes); metadata["revision"] += 1; metadata["revision_history"] = history
+    try:
+        updated = _persist_metadata(repo, record, metadata, status="draft")
+    except StudyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    fresh = _phase4_metadata(updated)
+    _study_evidence(repo, current_user["id"], updated, fresh, "definition", {"definition": fresh, "revision_of": history[-1]})
+    return _summary(updated)
+
+
+@router.post("/{study_id}/activate")
+def activate_study(study_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    if not metadata.get("linked_simulation_ids"):
+        raise HTTPException(status_code=422, detail="Study cannot activate without linked authoritative simulations")
+    try:
+        updated = _persist_metadata(repo, record, metadata, status="active")
+    except StudyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _summary(updated)
+
+
+@router.post("/{study_id}/simulations")
+def link_study_simulations(study_id: str, payload: SimulationLinksRequest, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    available = {item.id: item for item in repo.list_simulation_jobs_for_experiment(record.id)}
+    existing = list(metadata.get("linked_simulation_ids", []))
+    if len(set(payload.simulation_ids)) != len(payload.simulation_ids):
+        raise HTTPException(status_code=422, detail="Duplicate simulation link requested")
+    for simulation_id in payload.simulation_ids:
+        job = available.get(simulation_id)
+        if job is None or job.user_id != current_user["id"]:
+            raise HTTPException(status_code=404, detail="Simulation not found in this Study experiment")
+        if simulation_id in existing:
+            raise HTTPException(status_code=409, detail="Simulation is already linked to this Study")
+    metadata["linked_simulation_ids"] = existing + payload.simulation_ids
+    updated = _persist_metadata(repo, record, metadata)
+    fresh = _phase4_metadata(updated)
+    _study_evidence(repo, current_user["id"], updated, fresh, "links", {"linked_simulation_ids": fresh["linked_simulation_ids"]})
+    return _summary(updated)
+
+
+@router.delete("/{study_id}/simulations/{simulation_id}")
+def unlink_study_simulation(study_id: str, simulation_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    if simulation_id not in metadata.get("linked_simulation_ids", []):
+        raise HTTPException(status_code=404, detail="Study simulation link not found")
+    metadata["linked_simulation_ids"] = [item for item in metadata["linked_simulation_ids"] if item != simulation_id]
+    return _summary(_persist_metadata(repo, record, metadata))
+
+
+@router.post("/{study_id}/doe", status_code=201)
+def plan_study_doe(study_id: str, payload: DOEConfig, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    try:
+        plan = generate_doe(metadata.get("factors", []), payload)
+    except StudyError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    metadata["doe"] = plan
+    updated = _persist_metadata(repo, record, metadata)
+    fresh = _phase4_metadata(updated)
+    evidence_id = _study_evidence(repo, current_user["id"], updated, fresh, "doe", {"doe": plan})
+    return {**plan, "evidence_id": evidence_id, "study_id": study_id, "definition_hash": fresh["definition_hash"]}
+
+
+@router.post("/{study_id}/analyze", status_code=201)
+def analyze_study(study_id: str, payload: StudyAnalysisRequest, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    try:
+        analysis = run_study_analysis(repo, record, current_user["id"], metadata, payload)
+    except (StudyError, AnalysisInputError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    metadata["analysis_ids"] = list(dict.fromkeys([*metadata.get("analysis_ids", []), analysis.id])); metadata["latest_analysis_id"] = analysis.id
+    _persist_metadata(repo, record, metadata)
+    return {"id": analysis.id, "study_id": study_id, "dataset_hash": analysis.dataset_hash, "reproducibility_hash": analysis.reproducibility_hash, "findings": analysis.result.get("findings", {}), "warnings": analysis.warnings}
+
+
+@router.get("/{study_id}/analyses")
+def list_study_analyses(study_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"])
+    items = [item for item in repo.list_analyses_for_experiment(study_id) if item.analysis_type == "research_study" and item.user_id == current_user["id"]]
+    return {"items": [{"id": item.id, "dataset_hash": item.dataset_hash, "reproducibility_hash": item.reproducibility_hash, "created_at": item.created_at} for item in items]}
+
+
+@router.get("/{study_id}/findings")
+def get_study_findings(study_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    analysis_id = metadata.get("latest_analysis_id")
+    analysis = repo.get_analysis(analysis_id) if analysis_id else None
+    if analysis is None or analysis.user_id != current_user["id"]:
+        raise HTTPException(status_code=404, detail="No authoritative Study analysis found")
+    return analysis.result.get("findings", {})
+
+
+@router.post("/{study_id}/next-experiments", status_code=201)
+def propose_next_experiments(study_id: str, payload: NextExperimentRequest, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    analysis = repo.get_analysis(metadata.get("latest_analysis_id")) if metadata.get("latest_analysis_id") else None
+    if analysis is None or analysis.user_id != current_user["id"]:
+        raise HTTPException(status_code=422, detail="Next-experiment proposals require an authoritative Study analysis")
+    dataset = ExperimentDataset.model_validate(analysis.result["dataset"])
+    plan = next_experiments(dataset, metadata.get("factors", []), payload, source_analysis_id=analysis.id)
+    evidence_id = _study_evidence(repo, current_user["id"], record, metadata, "next_experiment", {"analysis_id": analysis.id, "plan": plan})
+    return {**plan, "evidence_id": evidence_id}
+
+
+@router.get("/{study_id}/manifest")
+def study_manifest(study_id: str, current_user: dict = Depends(get_current_user)) -> dict[str, Any]:
+    repo = get_repository(); record = _owned_study(study_id, current_user["id"]); metadata = _phase4_metadata(record)
+    analysis = repo.get_analysis(metadata.get("latest_analysis_id")) if metadata.get("latest_analysis_id") else None
+    if analysis is not None and analysis.user_id != current_user["id"]: analysis = None
+    return manifest(record, metadata, analysis)
 
 
 @router.post("/{study_id}/comparison-plan")

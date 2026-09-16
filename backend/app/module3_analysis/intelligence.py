@@ -51,9 +51,11 @@ def descriptive_statistics(dataset: ExperimentDataset) -> dict:
     return output
 
 
-def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
+def correlations(dataset: ExperimentDataset, method: str = "both", fdr_alpha: float = 0.05) -> dict:
     if method not in {"pearson", "spearman", "both"}:
         raise AnalysisInputError("Unsupported correlation method")
+    if not 0 < fdr_alpha <= 0.25:
+        raise AnalysisInputError("FDR alpha must be in (0, 0.25]")
     usable = [
         column for column in dataset.columns
         if column not in dataset.quality.constant_columns and dataset.units.get(column) != "incompatible"
@@ -94,6 +96,26 @@ def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
                 "The label describes association magnitude only, not physical importance or causation."
             )
             relationships.append(item)
+    # Benjamini-Hochberg correction is applied separately to each declared
+    # method across the complete family of tested column pairs.  It controls
+    # discovery-rate interpretation without changing the underlying effects.
+    for key in ("pearson", "spearman"):
+        tested = [(index, item[key]["p_value"]) for index, item in enumerate(relationships) if key in item]
+        total = len(tested)
+        if not total:
+            continue
+        ordered = sorted(tested, key=lambda item: (item[1], item[0]))
+        adjusted = [0.0] * total
+        running = 1.0
+        for position in range(total - 1, -1, -1):
+            _, p_value = ordered[position]
+            running = min(running, p_value * total / (position + 1))
+            adjusted[position] = float(min(1.0, running))
+        for (relationship_index, _), q_value in zip(ordered, adjusted):
+            relationships[relationship_index][key].update({
+                "q_value": q_value, "fdr_alpha": fdr_alpha,
+                "significant_after_fdr": bool(q_value <= fdr_alpha),
+            })
     relationships.sort(
         key=lambda item: (
             -max(abs(item.get("pearson", {}).get("coefficient", 0)),
@@ -103,12 +125,12 @@ def correlations(dataset: ExperimentDataset, method: str = "both") -> dict:
     )
     warnings = [
         "Correlation does not establish causation.",
-        "P-values are uncorrected for multiple comparisons.",
+        "Benjamini-Hochberg FDR correction is reported per correlation method; correlation does not establish causation.",
     ]
     if len(dataset.rows) < 3:
         warnings.append("At least three pairwise-valid observations are required for correlation.")
     return {
-        "dataset_hash": dataset.dataset_hash, "method": method, "relationships": relationships,
+        "dataset_hash": dataset.dataset_hash, "method": method, "fdr_alpha": fdr_alpha, "relationships": relationships,
         "warnings": warnings,
     }
 
@@ -152,6 +174,46 @@ def regression_sensitivity(dataset: ExperimentDataset, spec: SensitivitySpec) ->
         for name, value in zip(features, coefficients[1:])
     ]
     items.sort(key=lambda item: (-item["absolute_importance"], item["feature"]))
+    degrees_of_freedom = len(evidence) - design.shape[1]
+    adjusted_r_squared = (
+        float(1.0 - (1.0 - r_squared) * (len(evidence) - 1) / degrees_of_freedom)
+        if degrees_of_freedom > 0 else None
+    )
+    mse = residual_sum / degrees_of_freedom if degrees_of_freedom > 0 else None
+    covariance = np.linalg.pinv(design.T @ design) * mse if mse is not None else None
+    standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0)) if covariance is not None else None
+    hat = design @ np.linalg.pinv(design.T @ design) @ design.T
+    leverage = np.diag(hat)
+    # VIF is defined on the standardized feature matrix.  Singular designs
+    # deliberately report infinity rather than manufacturing a finite value.
+    vifs = {}
+    for index, name in enumerate(features):
+        others = np.delete(x_scaled, index, axis=1)
+        if others.shape[1] == 0:
+            vifs[name] = 1.0
+        else:
+            beta, _, rank_other, _ = np.linalg.lstsq(np.column_stack([np.ones(len(x_scaled)), others]), x_scaled[:, index], rcond=None)
+            fitted = np.column_stack([np.ones(len(x_scaled)), others]) @ beta
+            sst = float(np.sum((x_scaled[:, index] - x_scaled[:, index].mean()) ** 2))
+            r2_feature = 1.0 - float(np.sum((x_scaled[:, index] - fitted) ** 2)) / sst if sst else 1.0
+            vifs[name] = float("inf") if rank_other < others.shape[1] + 1 or r2_feature >= 1 - 1e-12 else float(1 / (1 - r2_feature))
+    bootstrap_seed, bootstrap_count, confidence_level = 20260401, 500, 0.95
+    bootstrap_intervals = None
+    if len(evidence) >= minimum + 2 and rank == design.shape[1]:
+        rng = np.random.default_rng(bootstrap_seed)
+        samples = []
+        for _ in range(bootstrap_count):
+            indexes = rng.integers(0, len(evidence), len(evidence))
+            fit, _, fit_rank, _ = np.linalg.lstsq(design[indexes], y_scaled[indexes], rcond=None)
+            if fit_rank == design.shape[1] and np.isfinite(fit).all():
+                samples.append(fit[1:])
+        if samples:
+            sample_array = np.asarray(samples)
+            alpha = (1 - confidence_level) / 2
+            bootstrap_intervals = {
+                name: {"lower": float(np.quantile(sample_array[:, index], alpha)), "upper": float(np.quantile(sample_array[:, index], 1 - alpha))}
+                for index, name in enumerate(features)
+            }
     warnings = ["Regression association is not proof of causation."]
     if rank < design.shape[1] or condition_number > 30:
         warnings.append("Multicollinearity detected; individual coefficients may be unstable.")
@@ -162,11 +224,23 @@ def regression_sensitivity(dataset: ExperimentDataset, spec: SensitivitySpec) ->
     return {
         "target": spec.target, "features": items, "sample_count": len(evidence),
         "dataset_hash": dataset.dataset_hash,
-        "r_squared": float(r_squared), "condition_number": condition_number,
+        "r_squared": float(r_squared), "adjusted_r_squared": adjusted_r_squared,
+        "rank": int(rank), "condition_number": condition_number,
+        "variance_inflation_factors": vifs,
+        "coefficient_uncertainty": ({name: float(standard_errors[index + 1]) for index, name in enumerate(features)} if standard_errors is not None else None),
+        "bootstrap": {
+            "seed": bootstrap_seed, "count": bootstrap_count, "confidence_level": confidence_level,
+            "coefficient_intervals": bootstrap_intervals,
+            "limitation": "Intervals quantify fitted-data sampling uncertainty, not physical-model uncertainty.",
+        },
         "residual_diagnostics": {
             "root_mean_squared_standardized_residual": float(np.sqrt(np.mean((y_scaled - prediction) ** 2))),
             "maximum_absolute_standardized_residual": float(np.max(np.abs(y_scaled - prediction))),
             "mean_standardized_residual": float(np.mean(y_scaled - prediction)),
+            "rmse": float(np.sqrt(np.mean((y_scaled - prediction) ** 2))),
+            "maximum_absolute_residual": float(np.max(np.abs(y_scaled - prediction))),
+            "maximum_leverage": float(np.max(leverage)),
+            "leverage": [float(value) for value in leverage],
         },
         "evidence_simulation_ids": [row.simulation_id for row in evidence],
         "evidence_ids": sorted({item for row in evidence for item in row.evidence_ids}),

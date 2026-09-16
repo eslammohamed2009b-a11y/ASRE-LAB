@@ -1,7 +1,7 @@
 {
-  "contract_version": "3.5.0-acoustics-closure",
-  "openapi_sha256": "c5ff4394c1f88914da097913c90b6d06d8fbafa0216fb654135045553173153f",
-  "path_count": 116,
+  "contract_version": "4.0.0-research-study-engine",
+  "openapi_sha256": "a0cc1f0b6ab4a795af2efd3bf715dab42dc04264ff5f904472bb62a5c4bb550c",
+  "path_count": 126,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],
   "proposal_states": ["generated", "accepted", "rejected", "superseded", "executed", "failed"],
