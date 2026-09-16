@@ -388,7 +388,14 @@ def propose_next_experiments(study_id: str, payload: NextExperimentRequest, curr
     if analysis is None or analysis.user_id != current_user["id"]:
         raise HTTPException(status_code=422, detail="Next-experiment proposals require an authoritative Study analysis")
     dataset = ExperimentDataset.model_validate(analysis.result["dataset"])
-    plan = next_experiments(dataset, metadata.get("factors", []), payload, source_analysis_id=analysis.id)
+    findings = analysis.result.get("findings", {})
+    plan = next_experiments(
+        dataset, metadata.get("factors", []), payload, source_analysis_id=analysis.id,
+        response_surface_result=findings.get("response_surface"),
+        declared_response_columns={item["column"] for item in metadata.get("responses", [])},
+        study_definition_hash=metadata["definition_hash"], study_revision=metadata["revision"],
+        analysis_reproducibility_hash=analysis.reproducibility_hash,
+    )
     evidence_id = _study_evidence(repo, current_user["id"], record, metadata, "next_experiment", {"analysis_id": analysis.id, "plan": plan})
     return {**plan, "evidence_id": evidence_id}
 
