@@ -416,7 +416,7 @@ class PhysicsCreateRequest(MeshCreateRequest):
 
 
 class PhysicsExecutionRequest(StrictModel):
-    solver_id: Literal["thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"]
+    solver_id: Literal["thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1", "acoustic_helmholtz_fem_3d_v1"]
 
 
 class PhysicsExecutionResult(StrictModel):

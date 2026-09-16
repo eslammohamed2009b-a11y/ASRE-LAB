@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import itertools
 import math
-import warnings
 from typing import Literal
 
 import numpy as np
@@ -27,6 +26,10 @@ SOLVER_VERSION = "1.0.0"
 SPL_REFERENCE_PRESSURE_PA = 20e-6
 MAX_K_H = 0.5
 RESIDUAL_TOLERANCE = 1e-8
+# Sparse one-norm reciprocal-condition estimates below 1e-10 are rejected.
+# In IEEE-754 double precision this caps the first-order amplification of
+# roundoff at roughly 2e-6, comfortably below the 5% field-validation gate.
+MIN_RECIPROCAL_CONDITION_ESTIMATE = 1e-10
 
 
 class AcousticFEMError(FEMError):
@@ -50,6 +53,8 @@ class AcousticFEMSolutionV1(BaseModel):
     k_h_max: float = Field(ge=0)
     converged: bool
     normalized_algebraic_residual: float = Field(ge=0)
+    reciprocal_condition_estimate: float = Field(gt=0, le=1)
+    condition_number_estimate: float = Field(ge=1)
     pressure_real_pa: list[float]
     pressure_imag_pa: list[float]
     pressure_amplitude_pa: list[float]
@@ -140,6 +145,27 @@ def _set_pressure(prescribed: dict[int, complex], facet: tuple[int, int, int], v
         prescribed[node] = value
 
 
+def _reciprocal_condition_estimate(matrix: sparse.csr_matrix, factor) -> float:
+    """Estimate 1/cond_1(A) without converting the production matrix to dense.
+
+    ``onenormest`` applies a bounded number of sparse matrix products.  The
+    inverse operator is evaluated through the already-required sparse SuperLU
+    factors, including the Hermitian-transpose solve needed by the estimator.
+    """
+    norm_a = float(sparse_linalg.onenormest(matrix))
+    inverse = sparse_linalg.LinearOperator(
+        matrix.shape,
+        matvec=lambda vector: factor.solve(np.asarray(vector, dtype=np.complex128)),
+        rmatvec=lambda vector: factor.solve(np.asarray(vector, dtype=np.complex128), trans="H"),
+        dtype=np.complex128,
+    )
+    norm_inverse = float(sparse_linalg.onenormest(inverse))
+    product = norm_a * norm_inverse
+    if not math.isfinite(product) or product <= 0:
+        return 0.0
+    return min(1.0, 1.0 / product)
+
+
 def solve_acoustic_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> AcousticFEMSolutionV1:
     """Solve the lossless complex Helmholtz equation with first-order TET4 FEM."""
     _verify(mesh, model)
@@ -199,11 +225,16 @@ def solve_acoustic_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> Acousti
                 raise AcousticFEMError("UNSUPPORTED_ACOUSTIC_BC", "Unsupported acoustic boundary condition")
     reduced, rhs, free = _apply_dirichlet(matrix.tocsr(), prescribed)
     try:
-        with warnings.catch_warnings():
-            warnings.simplefilter("error", sparse_linalg.MatrixRankWarning)
-            solution = sparse_linalg.spsolve(reduced, rhs)
-    except (sparse_linalg.MatrixRankWarning, np.linalg.LinAlgError, RuntimeError) as exc:
+        factor = sparse_linalg.splu(reduced.tocsc())
+    except (np.linalg.LinAlgError, RuntimeError) as exc:
         raise AcousticFEMError("ACOUSTIC_SYSTEM_SINGULAR", "Complex acoustic FEM system is singular or unusable") from exc
+    reciprocal_condition = _reciprocal_condition_estimate(reduced, factor)
+    if reciprocal_condition < MIN_RECIPROCAL_CONDITION_ESTIMATE:
+        raise AcousticFEMError(
+            "ACOUSTIC_SYSTEM_ILL_CONDITIONED",
+            "Complex acoustic FEM system is too close to singular for reliable double-precision use",
+        )
+    solution = factor.solve(rhs)
     if not np.isfinite(solution.real).all() or not np.isfinite(solution.imag).all():
         raise AcousticFEMError("NONFINITE_RESULT", "Acoustic FEM returned a non-finite complex pressure field")
     residual_vector = reduced @ solution - rhs
@@ -224,6 +255,8 @@ def solve_acoustic_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> Acousti
         frequency_hz=frequency, omega_rad_s=omega, wave_number_rad_m=wave_number,
         wavelength_m=2.0 * math.pi / wave_number, maximum_edge_length_m=maximum_edge,
         k_h_max=k_h_max, converged=True, normalized_algebraic_residual=normalized_residual,
+        reciprocal_condition_estimate=reciprocal_condition,
+        condition_number_estimate=1.0 / reciprocal_condition,
         pressure_real_pa=pressure.real.tolist(), pressure_imag_pa=pressure.imag.tolist(),
         pressure_amplitude_pa=amplitude.tolist(), pressure_phase_rad=phase.tolist(), spl_db=spl,
         summary_metrics={"max_pressure_amplitude_pa": float(amplitude.max()),
@@ -231,7 +264,9 @@ def solve_acoustic_fem_3d(mesh: GeneratedMesh, model: PhysicsModelV1) -> Acousti
                          "max_spl_db": max(defined_spl) if defined_spl else None,
                          "mean_spl_db": float(np.mean(defined_spl)) if defined_spl else None},
         diagnostics={"node_count": len(nodes), "tetrahedron_count": len(mesh.tetrahedra),
-                     "nonzero_count": int(matrix.nnz), "solver_method": "scipy.sparse.linalg.spsolve",
+                     "nonzero_count": int(matrix.nnz), "solver_method": "scipy.sparse.linalg.splu",
+                     "conditioning_metric": "sparse one-norm reciprocal condition estimate",
+                     "conditioning_minimum": MIN_RECIPROCAL_CONDITION_ESTIMATE,
                      "time_convention": "p(x,t) = Re{P exp(i omega t)}", "spl_zero_amplitude_nodes": len(spl) - len(defined_spl)},
         limitations=["Lossless stationary homogeneous isotropic fluid with no mean flow.",
                      "No radiation, PML, coupling, transient, thermoviscous, porous, nonlinear, or volumetric source model."],

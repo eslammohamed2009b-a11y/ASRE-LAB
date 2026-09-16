@@ -38,6 +38,7 @@ def _thermal_fem_3d(x): return x["cold_k"] + (x["hot_k"] - x["cold_k"]) * x.get(
 def _structural_fem_3d(x): return x["load_n"] * x["length_m"] / (x["youngs_modulus_pa"] * x["area_m2"])
 def _modal_fem_3d(x): return 1.875104068711961 ** 2 / (2 * math.pi) * math.sqrt(x["youngs_modulus_pa"] * x["inertia_m4"] / (x["density_kg_m3"] * x["area_m2"] * x["length_m"] ** 4))
 def _server_owned_cfd(_x): raise ValueError("The certified CFD benchmark is server-owned and cannot be evaluated from client formulas")
+def _server_owned_acoustic_3d(_x): raise ValueError("The 3D acoustic benchmark is server-owned and cannot be evaluated from client formulas")
 
 
 _COMMON_ASSUMPTIONS = {
@@ -91,6 +92,19 @@ _DEFINITIONS = [
     TrustCapability("modal_fem_3d_v1", "Authoritative TET4 undamped modal analysis", ("linear modes", "consistent mass", "mass normalization"),
         {"frequency":"Hz"}, {"nodes":(4,5000)}, "modal_fem_cantilever", "Euler-Bernoulli cantilever first frequency", "frequency_hz", 3e-1, _modal_fem_3d),
     TrustCapability(
+        solver_id="acoustic_helmholtz_fem_3d_v1",
+        physical_model="Linear 3D frequency-domain pressure acoustics on authoritative CAD-derived TET4 meshes",
+        assumptions=("lossless", "stationary homogeneous isotropic fluid", "no mean flow", "single frequency", "linear pressure acoustics"),
+        units={"pressure": "Pa", "phase": "rad", "sound_pressure_level": "dB", "frequency": "Hz"},
+        limits={"nodes": (4, 5000), "frequency_hz": (1e-9, 1e9)},
+        benchmark_id="acoustic_rectangular_duct_plane_wave_v1",
+        benchmark_title="Server-owned rectangular-duct complex plane-wave field and three-mesh refinement",
+        benchmark_metric="normalized_complex_l2_error",
+        benchmark_tolerance=0.05,
+        benchmark_formula=_server_owned_acoustic_3d,
+        maximum_trust_level="moderate",
+    ),
+    TrustCapability(
         solver_id="cfd_openfoam_laminar_internal_3d_v1",
         physical_model="Steady 3D incompressible Newtonian laminar internal flow on certified CAD-derived finite-volume meshes",
         assumptions=("steady", "incompressible", "Newtonian", "single-phase", "isothermal", "laminar", "fixed geometry", "internal flow"),
@@ -119,6 +133,7 @@ _SOLVER_BENCHMARK_ASSOCIATIONS = {
     "thermal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_thermal_linear_cube_benchmark",
     "structural_linear_elasticity_3d_v1": "tests/integration/test_cad_fem_3d.py::test_structural_axial_prism_benchmark_and_pressure_direction",
     "modal_fem_3d_v1": "tests/integration/test_cad_fem_3d.py::test_modal_constrained_modes_are_mass_normalized_and_refinement_changes_frequency",
+    "acoustic_helmholtz_fem_3d_v1": "tests/integration/test_acoustic_fem_3d.py::test_real_acoustic_3d_plane_wave_accuracy",
     "cfd_openfoam_laminar_internal_3d_v1": "tests/integration/test_openfoam_cfd_benchmark.py::test_real_openfoam_square_duct_poiseuille_refinement (three-mesh certified-FV refinement)",
 }
 
@@ -129,6 +144,9 @@ TRUST_BENCHMARK_DEFINITIONS = {
         "thermal_fem_linear_prism": ("normalized_l2_error", 1e-8),
         "thermal_fem_uniform_generation_prism": ("normalized_l2_error", 1e-2),
     },
+    "acoustic_helmholtz_fem_3d_v1": {
+        "acoustic_rectangular_duct_plane_wave_v1": ("normalized_complex_l2_error", 0.05),
+    },
 }
 
 
@@ -138,7 +156,7 @@ def compatible_benchmarks(solver_id: str) -> dict[str, tuple[str, float]]:
     # case binding. Structural/modal recognizers do not yet exist, so their
     # client-formula capabilities are intentionally excluded from trust.
     fallback = ({item.benchmark_id: (item.benchmark_metric, item.benchmark_tolerance)}
-                if item and solver_id not in {"thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1", "cfd_openfoam_laminar_internal_3d_v1"}
+                if item and solver_id not in {"thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1", "acoustic_helmholtz_fem_3d_v1", "cfd_openfoam_laminar_internal_3d_v1"}
                 else {})
     return {**fallback, **TRUST_BENCHMARK_DEFINITIONS.get(solver_id, {})}
 
@@ -184,6 +202,22 @@ def metadata(item: TrustCapability) -> dict[str, Any]:
             "benchmark_reference":item.solver_benchmark_reference,
             "benchmark_result_contract":"CFDFVRefinementResultV1",
             "regression_expectations":{"fine_error":0.008737062159076001,"monotonic":True,"observed_order":1.9383718918150699},
+            "client_formula_fallback":False,
+        }
+    if item.solver_id=="acoustic_helmholtz_fem_3d_v1":
+        result["server_validation"]={
+            "authority":"server-owned real CAD/TET4 execution and persisted-field evaluation",
+            "benchmark_reference":item.solver_benchmark_reference,
+            "benchmark_result_contract":"AcousticRefinementResultV1 and typed refinement_convergence evidence",
+            "validation_metric":"normalized complex pressure-field L2 error",
+            "benchmark_tolerance":0.05,
+            "dispersion_gate":"k*h_max <= 0.5",
+            "algebraic_residual":"normalized residual <= 1e-8",
+            "conditioning_requirement":"sparse one-norm reciprocal condition estimate >= 1e-10",
+            "refinement":"three real CAD-derived TET4 meshes at 20, 15, and 10 mm targets",
+            "validation_classification":"partially_validated",
+            "maximum_trust":"moderate",
+            "unsupported_claims":["general acoustics validation","exterior acoustics","PML","vibroacoustics","aeroacoustics","thermoviscous acoustics","porous acoustics","nonlinear acoustics","transient acoustics","structural-acoustic coupling"],
             "client_formula_fallback":False,
         }
     return result

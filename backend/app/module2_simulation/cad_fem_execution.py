@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import time
 
 import numpy as np
 
@@ -27,7 +28,7 @@ class FEMExecutionError(ValueError):
 
 _FAMILY_BY_SOLVER = {
     "thermal_fem_3d_v1": "thermal", "structural_linear_elasticity_3d_v1": "structural",
-    "modal_fem_3d_v1": "modal",
+    "modal_fem_3d_v1": "modal", "acoustic_helmholtz_fem_3d_v1": "acoustics",
 }
 
 
@@ -75,7 +76,10 @@ def _validate_solver(solver_id: str, model: PhysicsModelV1, mesh: GeneratedMesh)
     if "tetra4" not in entry.accepted_element_types or "tetra4" not in mesh.metadata.element_types:
         raise FEMExecutionError("Solver and mesh element types are incompatible")
     supported = set(entry.supported_boundary_conditions)
-    unsupported = [bc.bc_type for bc in model.boundary_conditions if bc.bc_type not in supported]
+    unsupported = [bc.bc_type for bc in model.boundary_conditions if (
+        bc.bc_type not in supported
+        and f"{bc.bc_type}:{getattr(bc, 'condition', '')}" not in supported
+    )]
     if unsupported:
         raise FEMExecutionError("PhysicsModel contains unsupported boundary conditions")
     if model.mesh_hash != mesh.metadata.mesh_hash or model.design_hash != mesh.metadata.design_hash:
@@ -89,6 +93,31 @@ def _axes(values: np.ndarray, location: str) -> list[dict]:
 
 
 def _fields(solution, mesh: GeneratedMesh):
+    if solution.solver_id == "acoustic_helmholtz_fem_3d_v1":
+        identity = {
+            "location_type": "nodal", "mesh_hash": mesh.metadata.mesh_hash,
+            "physics_model_id": solution.physics_model_id, "physics_hash": solution.physics_hash,
+            "node_count": len(mesh.nodes_m), "frequency_hz": solution.frequency_hz,
+        }
+        values = {
+            "pressure_real_pa": ("Pa", solution.pressure_real_pa, "complex_pressure_real"),
+            "pressure_imag_pa": ("Pa", solution.pressure_imag_pa, "complex_pressure_imaginary"),
+            "pressure_amplitude_pa": ("Pa", solution.pressure_amplitude_pa, "pressure_amplitude"),
+            "pressure_phase_rad": ("rad", solution.pressure_phase_rad, "pressure_phase"),
+        }
+        for name, (unit, field, quantity) in values.items():
+            yield name, unit, np.asarray(field, dtype=float), "nodal", {**identity, "quantity": quantity}
+        defined = np.asarray([item is not None for item in solution.spl_db], dtype=float)
+        spl = np.asarray([0.0 if item is None else item for item in solution.spl_db], dtype=float)
+        yield "sound_pressure_level_db", "dB", spl, "nodal", {
+            **identity, "quantity": "sound_pressure_level",
+            "reference_pressure_pa": 20e-6, "undefined_fill_value": 0.0,
+            "validity_mask_variable": "sound_pressure_level_defined",
+        }
+        yield "sound_pressure_level_defined", "dimensionless", defined, "nodal", {
+            **identity, "quantity": "sound_pressure_level_validity_mask",
+        }
+        return
     for name, (unit, values) in solution.fields.items():
         array = np.asarray(values, dtype=float)
         if name == "mode_shapes":
@@ -124,38 +153,86 @@ def execute_cad_fem(*, repository, storage, user_id: str, experiment_id: str, de
             if not repository.list_field_results(existing.id):
                 raise FEMExecutionError("A legacy partial FEM result cannot be repaired without its field solution")
             persist_automatic_evidence(repository, existing.id)
+            if solver_id == "acoustic_helmholtz_fem_3d_v1":
+                from app.module2_simulation.acoustic_evidence import persist_acoustic_benchmark_if_eligible
+                persist_acoustic_benchmark_if_eligible(
+                    repository=repository, storage=storage, user_id=user_id,
+                    simulation_id=existing.id, mesh=mesh, model=model,
+                )
         return existing.id
     simulation_id = repository.create_simulation_job(user_id, solver_id, experiment_id, design_id, idempotency_key)
     repository.update_simulation_job(simulation_id, status="running", progress_percent=5)
     repository.record_simulation_input(simulation_id, "PhysicsModelV1", material_snapshots, {"length": "m"}, {},
         input_payload["boundary_conditions"], input_payload["numerical_settings"], input_payload)
     try:
+        started = time.monotonic()
         try:
             solution = dispatch(create_execution_plan(solver_id, mesh, model), mesh, model)
         except SolverOrchestrationError as exc:
             raise FEMExecutionError(str(exc)) from exc
-        residual_key = "maximum_eigenpair_residual" if solver_id == "modal_fem_3d_v1" else "algebraic_residual"
-        residual = float(solution.diagnostics[residual_key])
-        tolerance = float(getattr(model.numerical_settings, "tolerance", 1e-8))
-        result_hash = _stable_hash({"input": input_payload, "solver_id": solver_id, "summary": solution.summary,
-            "residual": residual, "fields": {name: hashlib.sha256(np.asarray(value[1], dtype='<f8').tobytes()).hexdigest() for name, value in solution.fields.items()}})
+        if solver_id == "acoustic_helmholtz_fem_3d_v1":
+            residual = float(solution.normalized_algebraic_residual)
+            tolerance = 1e-8
+            summary = {
+                **solution.summary_metrics,
+                "frequency_hz": solution.frequency_hz,
+                "wavelength_m": solution.wavelength_m,
+                "h_max_m": solution.maximum_edge_length_m,
+                "k_h_max": solution.k_h_max,
+                "reciprocal_condition_estimate": solution.reciprocal_condition_estimate,
+            }
+        else:
+            residual_key = "maximum_eigenpair_residual" if solver_id == "modal_fem_3d_v1" else "algebraic_residual"
+            residual = float(solution.diagnostics[residual_key])
+            tolerance = float(getattr(model.numerical_settings, "tolerance", 1e-8))
+            summary = solution.summary
+        field_payloads = list(_fields(solution, mesh))
+        result_hash = _stable_hash({"input": input_payload, "solver_id": solver_id, "summary": summary,
+            "residual": residual, "fields": {name: hashlib.sha256(np.asarray(values, dtype='<f8').tobytes()).hexdigest()
+                for name, _unit, values, _location, _metadata in field_payloads}})
         metadata = {"input_fingerprint": request_fingerprint, "material_properties_used": evidence_material_properties,
+            "owner_id": user_id, "simulation_id": simulation_id,
             "validation_status": SOLVER_REGISTRY[solver_id].validation_status.value, "physics_model_hash": model.physics_hash,
-            "mesh_hash": model.mesh_hash, "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
+            "physics_model_id": model.physics_model_id, "mesh_id": model.mesh_id, "mesh_hash": model.mesh_hash,
+            "design_hash": model.design_hash, "geometry_fingerprint": model.geometry_fingerprint,
+            "material_snapshot_hashes": {item.material_name: item.snapshot_hash for item in model.materials},
+            "frequency_hz": getattr(model.numerical_settings, "frequency_hz", None),
+            "numerical_settings": model.numerical_settings.model_dump(mode="json"),
             "convergence_metric": "generalized_eigenpair_residual" if solver_id == "modal_fem_3d_v1" else "algebraic_residual"}
+        if solver_id == "acoustic_helmholtz_fem_3d_v1":
+            metadata.update({
+                "convergence_metric": "normalized_algebraic_residual",
+                "conditioning_metric": "sparse_one_norm_reciprocal_condition_estimate",
+                "reciprocal_condition_estimate": solution.reciprocal_condition_estimate,
+                "minimum_reciprocal_condition_estimate": 1e-10,
+                "condition_number_estimate": solution.condition_number_estimate,
+                "k_h_max": solution.k_h_max, "maximum_k_h": 0.5,
+                "finite_reviewed_fields": True,
+            })
         repository.record_simulation_result(SimulationResultRecord(simulation_id=simulation_id, solver_id=solver_id,
             solver_version=SOLVER_REGISTRY[solver_id].version, governing_equations=SOLVER_REGISTRY[solver_id].governing_equations,
             warnings=list(solution.warnings), converged=residual <= tolerance, residual=residual, iteration_count=1,
-            tolerance=tolerance, summary_metrics=solution.summary, numerical_method=str(solution.diagnostics["solver_method"]),
-            validation_metadata=metadata, elapsed_time_seconds=float(solution.diagnostics["solve_time_seconds"]),
+            tolerance=tolerance, summary_metrics=summary, numerical_method=str(solution.diagnostics["solver_method"]),
+            validation_metadata=metadata, elapsed_time_seconds=time.monotonic() - started,
             reproducibility_hash=result_hash, source_design_id=design_id, status="completed" if residual <= tolerance else "failed"))
-        for name, unit, values, location, metadata in _fields(solution, mesh):
+        for name, unit, values, location, field_metadata in field_payloads:
+            field_metadata = {
+                **field_metadata, "design_hash": model.design_hash,
+                "geometry_fingerprint": model.geometry_fingerprint,
+                "material_snapshot_hashes": {item.material_name: item.snapshot_hash for item in model.materials},
+            }
             persist_field_result(repository=repository, storage=storage, user_id=user_id, experiment_id=experiment_id,
                 simulation_id=simulation_id, variable_name=name, unit=unit, axes=_axes(values, location), values=values,
-                solver_id=solver_id, solver_version=SOLVER_REGISTRY[solver_id].version, grid_metadata=metadata)
+                solver_id=solver_id, solver_version=SOLVER_REGISTRY[solver_id].version, grid_metadata=field_metadata)
         repository.update_simulation_job(simulation_id, status="completed" if residual <= tolerance else "failed", progress_percent=100)
         if residual <= tolerance:
             persist_automatic_evidence(repository, simulation_id)
+            if solver_id == "acoustic_helmholtz_fem_3d_v1":
+                from app.module2_simulation.acoustic_evidence import persist_acoustic_benchmark_if_eligible
+                persist_acoustic_benchmark_if_eligible(
+                    repository=repository, storage=storage, user_id=user_id,
+                    simulation_id=simulation_id, mesh=mesh, model=model,
+                )
         return simulation_id
     except (FEMError, FEMExecutionError, SolverOrchestrationError, ValueError) as exc:
         repository.update_simulation_job(simulation_id, status="failed", progress_percent=100,

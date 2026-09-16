@@ -24,6 +24,7 @@ from app.module2_simulation.cad_fem_solvers import (
     solve_structural_fem_3d,
     solve_thermal_fem_3d,
 )
+from app.module2_simulation.acoustic_fem_solvers import AcousticFEMSolutionV1, solve_acoustic_fem_3d
 from app.module2_simulation.fem_core import MAX_ELEMENTS, MAX_NODES, MAX_STRUCTURAL_DOFS
 from app.module2_simulation.geometry_physics_schemas import PhysicsModelRequest, PhysicsModelV1
 from app.module2_simulation.meshing import GeneratedMesh
@@ -91,7 +92,7 @@ class SolverOrchestrationError(ValueError):
         self.code = code
 
 
-SolverCallable = Callable[[GeneratedMesh, PhysicsModelV1], FEMSolution | CFDSolutionV1]
+SolverCallable = Callable[[GeneratedMesh, PhysicsModelV1], FEMSolution | CFDSolutionV1 | AcousticFEMSolutionV1]
 
 
 @dataclass(frozen=True)
@@ -108,6 +109,7 @@ FIXED_SOLVER_ADAPTERS: dict[str, FixedSolverAdapter] = {
     "thermal_fem_3d_v1": FixedSolverAdapter("cad_fem_thermal_v1", "thermal_fem_3d_v1", "python-scipy", solve_thermal_fem_3d),
     "structural_linear_elasticity_3d_v1": FixedSolverAdapter("cad_fem_structural_v1", "structural_linear_elasticity_3d_v1", "python-scipy", solve_structural_fem_3d),
     "modal_fem_3d_v1": FixedSolverAdapter("cad_fem_modal_v1", "modal_fem_3d_v1", "python-scipy", solve_modal_fem_3d),
+    "acoustic_helmholtz_fem_3d_v1": FixedSolverAdapter("cad_fem_acoustic_v1", "acoustic_helmholtz_fem_3d_v1", "python-scipy", solve_acoustic_fem_3d),
 }
 
 
@@ -228,7 +230,8 @@ def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1
         errors.append("SOLVER_BACKEND_MISMATCH")
     if entry.implementation_status != ImplementationStatus.REAL:
         errors.append("SOLVER_NOT_IMPLEMENTED")
-    if entry.family.value != model.analysis_family.value:
+    expected_family = "acoustics" if solver_id == "acoustic_helmholtz_fem_3d_v1" else entry.family.value
+    if expected_family != model.analysis_family.value:
         errors.append("SOLVER_FAMILY_MISMATCH")
     if not entry.consumes_authoritative_cad or model.mesh_hash != mesh.metadata.mesh_hash or model.mesh_id != mesh.metadata.mesh_id:
         errors.append("AUTHORITATIVE_MESH_REQUIRED")
@@ -238,11 +241,14 @@ def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1
         errors.append("UNSUPPORTED_ELEMENT_TYPE")
     if any(domain.domain_kind.value not in entry.supported_domain_types for domain in model.domains):
         errors.append("UNSUPPORTED_SOLVER_DOMAIN")
-    unsupported_bcs = sorted({bc.bc_type for bc in model.boundary_conditions} - set(entry.supported_boundary_conditions))
+    unsupported_bcs = sorted({bc.bc_type for bc in model.boundary_conditions if (
+        bc.bc_type not in entry.supported_boundary_conditions
+        and f"{bc.bc_type}:{getattr(bc, 'condition', '')}" not in entry.supported_boundary_conditions
+    )})
     if unsupported_bcs:
         errors.append("UNSUPPORTED_BOUNDARY_CONDITION")
     names = {property_.name for material in model.materials for property_ in material.properties}
-    required_by_family = {"thermal": {"thermal_conductivity"}, "structural": {"elastic_modulus", "poisson_ratio", "density"}, "modal": {"elastic_modulus", "poisson_ratio", "density"}, "cfd": {"density", "dynamic_viscosity"}}
+    required_by_family = {"thermal": {"thermal_conductivity"}, "structural": {"elastic_modulus", "poisson_ratio", "density"}, "modal": {"elastic_modulus", "poisson_ratio", "density"}, "acoustics": {"density", "speed_of_sound"}, "cfd": {"density", "dynamic_viscosity"}}
     if not required_by_family.get(model.analysis_family.value, set()).issubset(names):
         errors.append("MATERIAL_PROPERTY_MISSING")
     if len(mesh.nodes_m) > limits.maximum_nodes or len(mesh.tetrahedra) > limits.maximum_elements:
@@ -251,7 +257,7 @@ def _preflight_errors(solver_id: str, mesh: GeneratedMesh, model: PhysicsModelV1
     requested_modes = getattr(model.numerical_settings, "requested_modes", 0)
     if requested_iterations > limits.maximum_requested_iterations or requested_modes > limits.maximum_requested_modes:
         errors.append("RESOURCE_LIMIT")
-    dofs = len(mesh.nodes_m) * (3 if solver_id != "thermal_fem_3d_v1" else 1)
+    dofs = len(mesh.nodes_m) * (3 if solver_id in {"structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"} else 1)
     if dofs > limits.maximum_degrees_of_freedom:
         errors.append("RESOURCE_LIMIT")
     if backend.status not in {BackendAvailability.AVAILABLE, BackendAvailability.AVAILABLE_BUT_NOT_DEPLOYMENT_CERTIFIED}:
@@ -281,7 +287,7 @@ def create_execution_plan(solver_id: str, mesh: GeneratedMesh, model: PhysicsMod
     )
 
 
-def dispatch(plan: SolverExecutionPlanV1, mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolution | CFDSolutionV1:
+def dispatch(plan: SolverExecutionPlanV1, mesh: GeneratedMesh, model: PhysicsModelV1) -> FEMSolution | CFDSolutionV1 | AcousticFEMSolutionV1:
     """Dispatch only a preflight-passing plan to its fixed in-process callable."""
     if plan.preflight_status != PreflightStatus.PASS:
         raise SolverOrchestrationError(plan.diagnostics[0], "Solver preflight failed; no fallback solver was selected")

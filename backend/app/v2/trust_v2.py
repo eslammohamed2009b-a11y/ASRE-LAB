@@ -9,10 +9,17 @@ from app.v2.evidence_integrity import records_by_type, validate_scientific_recor
 from app.v2.evidence_models import BenchmarkEvidence, EvidenceType
 from app.v2.repository import EvidenceRepository
 from app.core.repository import get_repository
-from app.v2.scientific_trust import compatible_benchmarks
+from app.v2.scientific_trust import REGISTRY, compatible_benchmarks
 from app.module2_simulation.thermal_field_benchmark import validate_persisted_binding
 
 TRUST_VERSION = "2.0"
+
+
+def _valid_persisted_binding(model, repository, user_id: str) -> bool:
+    if model.solver_id == "acoustic_helmholtz_fem_3d_v1":
+        from app.module2_simulation.acoustic_evidence import validate_persisted_acoustic_binding
+        return validate_persisted_acoustic_binding(model, repository, user_id)
+    return validate_persisted_binding(model, repository, user_id)
 
 
 def _latest(items):
@@ -57,7 +64,7 @@ def _valid_benchmark_refinement(item, *, evidence, repository, user_id: str) -> 
             or model.solver_id != refinement.solver_id
             or model.solver_version != refinement.solver_version
             or model.simulation_id != model.source_simulation_id
-            or not validate_persisted_binding(model, repository, user_id)
+            or not _valid_persisted_binding(model, repository, user_id)
             or abs(model.computed_value - level.value) > 1e-12 * max(abs(level.value), 1.0)
         ):
             return False
@@ -77,7 +84,7 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
     benchmark_candidates = [item for item in grouped.get(EvidenceType.BENCHMARK, []) if (
         item[1].benchmark_id in definitions
         and definitions[item[1].benchmark_id] == (item[1].metric_name, item[1].tolerance)
-        and (not source.solver_id.endswith("_fem_3d_v1") or validate_persisted_binding(item[1], repository, user_id))
+        and (not source.solver_id.endswith("_fem_3d_v1") or _valid_persisted_binding(item[1], repository, user_id))
     )]
     current_by_case = {
         benchmark_id: _latest([item for item in benchmark_candidates if item[1].benchmark_id == benchmark_id])
@@ -146,6 +153,10 @@ def derive_trust_record(user_id: str, simulation_id: str, *, repository=None) ->
         overall, reason = "MODERATE", "BOUNDED_WARNING_OR_REFINEMENT_NOT_RUN"
     else:
         overall, reason = "HIGH", "ALL_REQUIRED_EVIDENCE_SATISFIED"
+
+    maximum = REGISTRY.get(source.solver_id).maximum_trust_level
+    if maximum == "moderate" and overall == "HIGH":
+        overall, reason = "MODERATE", "BOUNDED_MAXIMUM_TRUST"
 
     evidence_ids = sorted({item for value in dimensions.values() for item in value["evidence_ids"]})
     for evidence_id in evidence_ids:

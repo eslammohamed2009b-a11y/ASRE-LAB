@@ -7,6 +7,22 @@ from app.v2.repository import EvidenceRepository
 def _convergence_semantics(result) -> tuple[str, str, str, bool | None]:
     metadata = result.validation_metadata
     declared = metadata.get("convergence_metric")
+    if result.solver_id == "acoustic_helmholtz_fem_3d_v1":
+        required = {
+            "reciprocal_condition_estimate", "minimum_reciprocal_condition_estimate",
+            "k_h_max", "maximum_k_h", "finite_reviewed_fields",
+        }
+        passed = bool(
+            required <= set(metadata) and result.converged
+            and metadata["finite_reviewed_fields"]
+            and metadata["reciprocal_condition_estimate"] >= metadata["minimum_reciprocal_condition_estimate"]
+            and metadata["k_h_max"] <= metadata["maximum_k_h"]
+        )
+        return (
+            "acoustic_residual_dispersion_conditioning",
+            "normalized algebraic residual <= 1e-8; k*h_max <= 0.5; sparse reciprocal condition estimate >= 1e-10; persisted fields finite",
+            "completed" if passed else "not_converged", passed,
+        )
     if result.solver_id == "cfd_openfoam_laminar_internal_3d_v1":
         conditions = metadata.get("convergence_conditions", {})
         required = {
@@ -90,6 +106,11 @@ def persist_automatic_evidence(repository, simulation_id: str) -> list[dict]:
         "convergence": {
             "converged": result.converged, "iterations": result.iteration_count,
             "metric": result.residual, "tolerance": result.tolerance,
+            "conditioning_metric": result.validation_metadata.get("conditioning_metric"),
+            "reciprocal_condition_estimate": result.validation_metadata.get("reciprocal_condition_estimate"),
+            "minimum_reciprocal_condition_estimate": result.validation_metadata.get("minimum_reciprocal_condition_estimate"),
+            "k_h_max": result.validation_metadata.get("k_h_max"),
+            "maximum_k_h": result.validation_metadata.get("maximum_k_h"),
         },
         "warnings": result.warnings,
     })
@@ -155,6 +176,14 @@ def persist_automatic_evidence(repository, simulation_id: str) -> list[dict]:
         "source_ids": [numerical["id"]], "metric_type": metric_type,
         "metric_value": result.residual, "tolerance": result.tolerance,
         "iterations": result.iteration_count, "criterion": criterion, "passed": passed,
+        "diagnostics": {
+            "conditioning_metric": result.validation_metadata.get("conditioning_metric"),
+            "reciprocal_condition_estimate": result.validation_metadata.get("reciprocal_condition_estimate"),
+            "minimum_reciprocal_condition_estimate": result.validation_metadata.get("minimum_reciprocal_condition_estimate"),
+            "k_h_max": result.validation_metadata.get("k_h_max"),
+            "maximum_k_h": result.validation_metadata.get("maximum_k_h"),
+            "finite_reviewed_fields": result.validation_metadata.get("finite_reviewed_fields"),
+        },
     }))
     return records
 

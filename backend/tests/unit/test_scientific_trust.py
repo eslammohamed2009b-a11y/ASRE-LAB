@@ -18,8 +18,8 @@ def test_all_real_capabilities_and_coupling_are_registered():
             "thermal_conduction_v1","structural_linear_1d_v1","modal_eigen_1d_v1",
             "acoustic_duct_1d_v1","electrostatic_rectangular_2d_v1",
             "cfd_laminar_channel_2d_v1","cfd_openfoam_laminar_internal_3d_v1","thermal_structural_one_way_v1",
-        "thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1"}
-    assert "acoustic_helmholtz_fem_3d_v1" not in {x.solver_id for x in REGISTRY.list()}
+        "thermal_fem_3d_v1", "structural_linear_elasticity_3d_v1", "modal_fem_3d_v1",
+        "acoustic_helmholtz_fem_3d_v1"}
 
 
 def test_certified_fv_cfd_trust_is_server_owned_and_capped_at_moderate():
@@ -33,6 +33,21 @@ def test_certified_fv_cfd_trust_is_server_owned_and_capped_at_moderate():
     assert "test_real_openfoam_square_duct_poiseuille_refinement" in data["server_validation"]["benchmark_reference"]
     with pytest.raises(ValueError):
         reference_only(item, {"reynolds_number": 100.0})
+
+
+def test_geometry_aware_acoustic_trust_is_server_owned_and_capped_at_moderate():
+    item = REGISTRY.get("acoustic_helmholtz_fem_3d_v1")
+    data = metadata(item)
+    assert item.benchmark_id == "acoustic_rectangular_duct_plane_wave_v1"
+    assert item.benchmark_metric == "normalized_complex_l2_error"
+    assert item.benchmark_tolerance == 0.05
+    assert data["maximum_trust_level"] == "moderate"
+    assert data["validation_classification"] == "partially_validated"
+    assert data["server_validation"]["client_formula_fallback"] is False
+    assert data["server_validation"]["conditioning_requirement"].endswith(">= 1e-10")
+    with pytest.raises(ValueError):
+        reference_only(item, {})
+
 
 def test_trust_benchmarks_have_exact_solver_registry_associations():
     for item in REGISTRY.list():

@@ -91,6 +91,7 @@ class RunConvergenceEvidence(EvidenceBase):
     tolerance: float | None = None
     iterations: int | None = None
     criterion: str
+    diagnostics: dict[str, Any] = Field(default_factory=dict)
     passed: bool | None = None
     status: ConvergenceEvidenceStatus
 
@@ -152,6 +153,7 @@ class RefinementConvergenceEvidence(EvidenceBase):
     passed: bool | None = None
     metric_source: Literal["simulation_summary", "benchmark_evidence"] = "simulation_summary"
     benchmark_id: str | None = None
+    refinement_details: dict[str, Any] = Field(default_factory=dict)
     levels: list[RefinementLevel]
     status: ConvergenceEvidenceStatus
 

@@ -1,6 +1,6 @@
 from typing import Any,Literal
 from fastapi import APIRouter,Depends,HTTPException
-from pydantic import BaseModel,Field
+from pydantic import BaseModel,ConfigDict,Field
 from app.core.auth import get_current_user
 from app.v2.repository import EvidenceRepository
 from app.core.repository import get_repository
@@ -9,6 +9,10 @@ from app.module2_simulation.geometry_physics_router import _load_mesh
 from app.module2_simulation.thermal_field_benchmark import (
     LINEAR_BENCHMARK_ID, QUADRATIC_BENCHMARK_ID,
     persist_linear_prism_benchmark, persist_quadratic_prism_benchmark,
+)
+from app.module2_simulation.acoustic_benchmark import BENCHMARK_ID as ACOUSTIC_BENCHMARK_ID
+from app.module2_simulation.acoustic_evidence import (
+    persist_acoustic_refinement_evidence, validate_persisted_acoustic_binding,
 )
 from app.module2_simulation.source_resolution import (
     SimulationSourceError,
@@ -25,6 +29,7 @@ from app.v2.claim_integrity import is_authoritative_evidence
 router=APIRouter(prefix="/api/v2/scientific",tags=["Backend V2 - Scientific Trust"])
 class Inputs(BaseModel): inputs:dict[str,Any]
 class BenchmarkRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid")
     inputs:dict[str,float]=Field(default_factory=dict)
     computed_result:float|None=None
     source_simulation_id:str|None=None
@@ -39,6 +44,7 @@ class TrustRequest(BaseModel):
     computed_result:float|None=None;source_simulation_id:str|None=None;convergence_values:list[float]|None=None
     experiment_id:str|None=None;simulation_id:str|None=None
 class RefinementRequest(BaseModel):
+    model_config=ConfigDict(extra="forbid")
     simulation_ids:list[str]=Field(min_length=3,max_length=3)
     selected_metric:str=Field(min_length=1)
     refinement_parameter:str=Field(min_length=1)
@@ -75,13 +81,36 @@ def validate_inputs(solver_id:str,payload:Inputs,user:dict=Depends(get_current_u
 def execute_benchmark(solver_id:str,payload:BenchmarkRequest,user:dict=Depends(get_current_user)):
     if solver_id=="cfd_openfoam_laminar_internal_3d_v1":
         raise HTTPException(422,"CFD benchmark evidence is server-owned and cannot be created from an arbitrary user simulation")
-    fem_solvers={"thermal_fem_3d_v1","structural_linear_elasticity_3d_v1","modal_fem_3d_v1"}
+    fem_solvers={"thermal_fem_3d_v1","structural_linear_elasticity_3d_v1","modal_fem_3d_v1","acoustic_helmholtz_fem_3d_v1"}
     if solver_id in fem_solvers:
         case_id=payload.benchmark_case_id or payload.benchmark_id
         if payload.benchmark_case_id and payload.benchmark_id and payload.benchmark_case_id!=payload.benchmark_id:
             raise HTTPException(422,"benchmark_case_id and benchmark_id disagree")
         if payload.source_simulation_id is None or case_id is None:
             raise HTTPException(422,"source_simulation_id and benchmark_case_id are required for CAD FEM benchmarks")
+        if solver_id == "acoustic_helmholtz_fem_3d_v1":
+            if payload.inputs or payload.computed_result is not None or case_id != ACOUSTIC_BENCHMARK_ID:
+                raise HTTPException(422,"The 3D acoustic analytical field and result are exclusively server-owned")
+            try:
+                source=resolve_simulation_source(payload.source_simulation_id,user["id"],require_completed_result=True,repository=get_repository())
+                records=EvidenceRepository(repository=get_repository()).list_scientific_for_simulation(user["id"],source.simulation_id)
+                valid=[]
+                for record in records:
+                    if record["record_type"]=="scientific_benchmark":
+                        from app.v2.evidence_models import BenchmarkEvidence
+                        model=BenchmarkEvidence.model_validate(record["payload"])
+                        if validate_persisted_acoustic_binding(model,get_repository(),user["id"]):valid.append(record)
+                if len(valid)!=1:raise ValueError("A valid automatic server-owned acoustic benchmark is unavailable")
+                model=valid[0]["payload"]
+                return {"benchmark_id":model["benchmark_id"],"solver_id":solver_id,
+                    "selected_metric":model["metric_name"],"computed_result":model["computed_value"],
+                    "reference_result":model["reference_value"],"absolute_error":model["absolute_error"],
+                    "relative_error":model["relative_error"],"declared_tolerance":model["tolerance"],
+                    "passed":model["passed"],"source_simulation_id":source.simulation_id,
+                    "created_from_real_computation":True,"authoritative_binding":model["case_binding"],
+                    "evidence_id":valid[0]["id"]}
+            except SimulationSourceNotFoundError:raise HTTPException(404,"Source simulation not found")
+            except (SimulationSourceError,LookupError,ValueError) as exc:raise HTTPException(422,str(exc))
         if solver_id != "thermal_fem_3d_v1":
             raise HTTPException(422,"This CAD FEM solver has no server-bound authoritative analytical benchmark")
         repo=get_repository()
@@ -130,11 +159,11 @@ def execute_benchmark(solver_id:str,payload:BenchmarkRequest,user:dict=Depends(g
     except ValueError as exc:raise HTTPException(422,str(exc))
 @router.post("/solvers/{solver_id}/reference-only")
 def execute_reference_only(solver_id:str,payload:Inputs,user:dict=Depends(get_current_user)):
-    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD analytical validation is server-owned")
+    if solver_id in {"cfd_openfoam_laminar_internal_3d_v1","acoustic_helmholtz_fem_3d_v1"}:raise HTTPException(422,"Analytical validation is server-owned")
     return reference_only(_item(solver_id),payload.inputs)
 @router.post("/solvers/{solver_id}/convergence")
 def execute_convergence(solver_id:str,payload:ConvergenceRequest,user:dict=Depends(get_current_user)):
-    if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD refinement validation is server-owned")
+    if solver_id in {"cfd_openfoam_laminar_internal_3d_v1","acoustic_helmholtz_fem_3d_v1"}:raise HTTPException(422,"Refinement validation is server-owned")
     return {**convergence(_item(solver_id),payload.values,payload.configurations,payload.threshold),
             "authoritative":False,"evidence_id":None}
 @router.post("/solvers/{solver_id}/refinement",status_code=201)
@@ -143,6 +172,13 @@ def execute_refinement(solver_id:str,payload:RefinementRequest,user:dict=Depends
     if solver_id=="cfd_openfoam_laminar_internal_3d_v1":raise HTTPException(422,"CFD refinement validation is server-owned")
     repo=get_repository()
     try:
+        if solver_id=="acoustic_helmholtz_fem_3d_v1":
+            expected=(payload.selected_metric=="normalized_complex_l2_error"
+                and payload.refinement_parameter=="geometry.fem_refinement.mesh.specification.target_size.value"
+                and payload.metric_source=="benchmark_evidence" and payload.benchmark_id==ACOUSTIC_BENCHMARK_ID
+                and payload.threshold==0.05)
+            if not expected:raise ValueError("3D acoustic refinement configuration is fixed server-side")
+            return persist_acoustic_refinement_evidence(repository=repo,user_id=user["id"],simulation_ids=payload.simulation_ids)
         if payload.metric_source=="benchmark_evidence" and not payload.benchmark_id:
             raise ValueError("benchmark_id is required for benchmark-derived refinement")
         if payload.metric_source=="simulation_summary" and payload.benchmark_id:
