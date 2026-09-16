@@ -162,9 +162,13 @@ def _screen_study_run(repository: PersistenceRepository, job, result, user_id: s
         return {"simulation_id": simulation_id, "status": "evidence_incomplete", "included": False,
                 "reasons": [detail], "evidence_ids": []}
 
-    for evidence_type in (EvidenceType.VALIDITY, EvidenceType.RUN_CONVERGENCE):
+    for evidence_type in (
+        EvidenceType.VALIDITY, EvidenceType.RUN_CONVERGENCE,
+        EvidenceType.REFINEMENT_CONVERGENCE,
+    ):
         record_name = f"scientific_{evidence_type.value}"
-        if any(item.get("record_type") == record_name for item in raw_records) and not grouped.get(evidence_type):
+        raw_of_type = [item for item in raw_records if item.get("record_type") == record_name]
+        if raw_of_type and len(grouped.get(evidence_type, [])) != len(raw_of_type):
             return {"simulation_id": simulation_id, "status": "evidence_incomplete", "included": False,
                     "reasons": [f"{record_name} evidence integrity cannot be verified."], "evidence_ids": []}
 
@@ -197,6 +201,18 @@ def _screen_study_run(repository: PersistenceRepository, job, result, user_id: s
         return {"simulation_id": simulation_id, "status": "scientifically_invalid", "included": False,
                 "reasons": ["Applicable authoritative benchmark evidence failed."], "evidence_ids": []}
 
+    # Refinement is not a universal prerequisite: it applies only to a
+    # declared refinement comparison.  When present and authoritative, a
+    # failed comparison must remain visible and cannot be presented as a
+    # successful validation.  Existing trust evidence may impose a stricter
+    # conclusion below (including INVALID), without creating a new trust rule.
+    refinement = grouped.get(EvidenceType.REFINEMENT_CONVERGENCE, [])
+    failed_refinement = [model for _, model in refinement if (
+        model.status.value == "not_converged" or model.passed is False
+    )]
+    if failed_refinement:
+        reasons.append("Applicable authoritative refinement evidence did not satisfy its declared criterion.")
+
     # Trust is a separate evidence record, but it remains authoritative only
     # when its hash, dependencies, and source identity resolve through the
     # existing claim-integrity helper.
@@ -218,7 +234,8 @@ def _screen_study_run(repository: PersistenceRepository, job, result, user_id: s
                     "reasons": ["Authoritative scientific trust is invalid."], "evidence_ids": []}
 
     evidence_ids = sorted({record["id"] for items in grouped.values() for record, _ in items})
-    has_warning = bool(result.warnings) or any(model.status.value == "valid_with_warnings" for _, model in validity)
+    has_warning = bool(result.warnings) or bool(failed_refinement)
+    has_warning = has_warning or any(model.status.value == "valid_with_warnings" for _, model in validity)
     has_warning = has_warning or any(model.status.value in {"not_run", "not_applicable"} for _, model in convergence)
     has_warning = has_warning or any(str(item.get("payload", {}).get("overall_trust", "")).upper() in {"LOW", "MODERATE"}
                                      for item in trust_records)
@@ -262,7 +279,7 @@ def build_study_dataset(
         if screen["included"] and simulation_id in row_by_id:
             row = row_by_id[simulation_id].model_copy(update={"evidence_ids": screen["evidence_ids"]})
             included.append(row)
-        elif status == "non_converged" and include_nonconverged:
+        elif screen["status"] == "non_converged" and include_nonconverged:
             # Non-converged rows remain visible in screening, never silently
             # enter authoritative fitted analyses.
             screen["reasons"].append("Excluded from authoritative numerical analysis.")
