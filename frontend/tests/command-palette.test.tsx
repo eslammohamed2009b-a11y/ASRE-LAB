@@ -1,0 +1,33 @@
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { vi } from "vitest";
+import { CommandPalette } from "@/components/ui/command-palette";
+
+const commands = [
+  { label: "Research Studies", description: "Review persisted studies", href: "/app/dashboard", shortcut: "1" },
+  { label: "Scientific Scope", description: "Review supported physics", href: "/scientific-scope", shortcut: "4" },
+];
+
+describe("workspace command palette", () => {
+  it("opens with Ctrl+K and navigates the selected command with the keyboard", async () => {
+    const onNavigate = vi.fn();
+    render(<CommandPalette commands={commands} onNavigate={onNavigate} />);
+
+    fireEvent.keyDown(window, { key: "k", ctrlKey: true });
+    expect(screen.getByRole("dialog", { name: "Workspace command palette" })).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "Search workspace commands" })).toHaveFocus());
+
+    fireEvent.keyDown(window, { key: "ArrowDown" });
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onNavigate).toHaveBeenCalledWith("/scientific-scope");
+  });
+
+  it("filters destinations and closes with Escape", () => {
+    render(<CommandPalette commands={commands} onNavigate={vi.fn()} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace command palette" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search workspace commands" }), { target: { value: "scope" } });
+    expect(screen.queryByText("Research Studies")).not.toBeInTheDocument();
+    expect(screen.getByText("Scientific Scope")).toBeInTheDocument();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "Workspace command palette" })).not.toBeInTheDocument();
+  });
+});
