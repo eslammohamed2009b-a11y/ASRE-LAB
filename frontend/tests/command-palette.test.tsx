@@ -30,4 +30,23 @@ describe("workspace command palette", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "Workspace command palette" })).not.toBeInTheDocument();
   });
+
+  it("traps Tab focus while open and restores focus to its trigger when closed", async () => {
+    render(<CommandPalette commands={commands} onNavigate={vi.fn()} />);
+    const trigger = screen.getByRole("button", { name: "Open workspace command palette" });
+    trigger.focus();
+    fireEvent.click(trigger);
+
+    const input = screen.getByRole("textbox", { name: "Search workspace commands" });
+    const lastResult = screen.getByRole("option", { name: /Scientific Scope/ });
+    await waitFor(() => expect(input).toHaveFocus());
+
+    fireEvent.keyDown(window, { key: "Tab", shiftKey: true });
+    expect(lastResult).toHaveFocus();
+    fireEvent.keyDown(window, { key: "Tab" });
+    expect(input).toHaveFocus();
+
+    fireEvent.keyDown(window, { key: "Escape" });
+    await waitFor(() => expect(screen.getByRole("button", { name: "Open workspace command palette" })).toHaveFocus());
+  });
 });

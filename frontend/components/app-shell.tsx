@@ -18,10 +18,23 @@ const navigation: WorkspaceCommand[] = [
   { label: "Documentation", description: "Open ASRE-Lab research documentation", href: "/docs", shortcut: "5" },
 ];
 
-function isActive(pathname: string, href: string) { return href === "/app/dashboard" ? pathname === href : pathname === href || pathname.startsWith(`${href}/`); }
-function pageContext(pathname: string) {
+const studyResourceRoutes = ["/app/studies/", "/app/simulations/", "/app/jobs/", "/app/attempts/", "/app/decisions/", "/app/reasoning/", "/app/reports/", "/app/manifests/"];
+
+export function isWorkspaceNavigationActive(pathname: string, href: string) {
+  if (href === "/app/dashboard") return pathname === href || (pathname !== "/app/studies/new" && studyResourceRoutes.some((route) => pathname.startsWith(route)));
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
+export function workspacePageContext(pathname: string) {
   if (pathname.startsWith("/app/studies/new")) return "New research study";
   if (pathname.startsWith("/app/studies")) return "Research study";
+  if (pathname.startsWith("/app/simulations/")) return "Simulation result";
+  if (pathname.startsWith("/app/jobs/")) return "Generation job";
+  if (pathname.startsWith("/app/attempts/")) return "Execution attempt";
+  if (pathname.startsWith("/app/decisions/")) return "Engineering decision";
+  if (pathname.startsWith("/app/reasoning/")) return "Scientific reasoning";
+  if (pathname.startsWith("/app/reports/")) return "Reproducible report";
+  if (pathname.startsWith("/app/manifests/")) return "Execution manifest";
   if (pathname.startsWith("/app/open")) return "Evidence retrieval";
   if (pathname.startsWith("/scientific-scope")) return "Scientific scope";
   if (pathname.startsWith("/docs")) return "Documentation";
@@ -37,7 +50,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   useEffect(() => { if (!loading && !session && !signingOut) router.replace(`/auth/log-in?returnTo=${encodeURIComponent(pathname)}`); }, [loading, session, signingOut, pathname, router]);
   useEffect(() => { if (session) api<Account>("/api/v2/account/me").then(setAccount).catch(() => {}); }, [session]);
-  const activePage = useMemo(() => pageContext(pathname), [pathname]);
+  const activePage = useMemo(() => workspacePageContext(pathname), [pathname]);
 
   if (loading || !session) return <main className="app-loading" aria-live="polite">Restoring secure session…</main>;
 
@@ -45,7 +58,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <aside className="workspace-sidebar" aria-label="Research workspace navigation">
       <Link className="workspace-brand" href="/app/dashboard" aria-label="ASRE-Lab research workspace"><span className="workspace-brand-mark" aria-hidden="true">A</span><span>ASRE-Lab</span></Link>
       <p className="workspace-nav-label">Workspace</p>
-      <nav className="workspace-nav" aria-label="Application navigation">{navigation.map((item, index) => <Link key={item.href} href={item.href} data-active={isActive(pathname, item.href)}><span className="workspace-nav-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span><span>{item.label}</span></Link>)}</nav>
+      <nav className="workspace-nav" aria-label="Application navigation">{navigation.map((item, index) => <Link key={item.href} href={item.href} data-active={isWorkspaceNavigationActive(pathname, item.href)}><span className="workspace-nav-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span><span>{item.label}</span></Link>)}</nav>
       <div className="workspace-account">
         <div className="workspace-account-identity"><span className="workspace-account-avatar" aria-hidden="true">{(account?.email || session.user.email || "A").slice(0, 1).toUpperCase()}</span><span><strong>{account?.email || session.user.email}</strong><small>Authenticated researcher</small></span></div>
         {account?.founding_user && <p className="workspace-account-note">Founding User · First 1,000 #{account.founding_user_number}</p>}
@@ -54,7 +67,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       </div>
     </aside>
     <main className="app-main">
-      <header className="workspace-topbar"><div className="workspace-context"><span>ASRE /</span><strong>{activePage}</strong></div><CommandPalette commands={navigation} onNavigate={router.push} /><span className="workspace-evidence-state"><i aria-hidden="true" /> Evidence-first research</span></header>
+      <header className="workspace-topbar"><div className="workspace-context"><span>ASRE /</span><strong>{activePage}</strong></div><CommandPalette commands={navigation} onNavigate={router.push} /><span className="workspace-evidence-state">Evidence-first research</span></header>
       <div className="workspace-content">{children}</div>
     </main>
   </div>;

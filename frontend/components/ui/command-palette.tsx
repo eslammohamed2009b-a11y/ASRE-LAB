@@ -14,17 +14,15 @@ type CommandPaletteProps = {
   onNavigate: (href: string) => void;
 };
 
-function isEditableTarget(target: EventTarget | null) {
-  const element = target as HTMLElement | null;
-  return Boolean(element?.closest("input, textarea, select, [contenteditable='true']"));
-}
-
 export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isMac, setIsMac] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const wasOpenRef = useRef(false);
 
   const results = useMemo(() => {
     const term = query.trim().toLocaleLowerCase();
@@ -66,6 +64,18 @@ export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
       } else if (event.key === "Enter") {
         event.preventDefault();
         activate(results[selectedIndex]);
+      } else if (event.key === "Tab") {
+        const focusable = dialogRef.current?.querySelectorAll<HTMLElement>("input:not([disabled]), button:not([disabled])");
+        if (!focusable?.length) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
       }
     };
     window.addEventListener("keydown", onKeyDown);
@@ -77,7 +87,13 @@ export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
   }, [query]);
 
   useEffect(() => {
-    if (open) window.requestAnimationFrame(() => inputRef.current?.focus());
+    if (open) {
+      wasOpenRef.current = true;
+      window.requestAnimationFrame(() => inputRef.current?.focus());
+    } else if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      window.requestAnimationFrame(() => triggerRef.current?.focus());
+    }
   }, [open]);
 
   useEffect(() => {
@@ -88,6 +104,7 @@ export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
     return (
       <button
         type="button"
+        ref={triggerRef}
         className="command-trigger"
         onClick={() => setOpen(true)}
         aria-label="Open workspace command palette"
@@ -102,7 +119,7 @@ export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
     <div className="command-overlay" role="presentation" onMouseDown={(event) => {
       if (event.target === event.currentTarget) close();
     }}>
-      <section className="command-palette" role="dialog" aria-modal="true" aria-label="Workspace command palette">
+      <section ref={dialogRef} className="command-palette" role="dialog" aria-modal="true" aria-label="Workspace command palette">
         <div className="command-search-row">
           <span className="command-search-mark" aria-hidden="true">⌕</span>
           <input
@@ -111,13 +128,11 @@ export function CommandPalette({ commands, onNavigate }: CommandPaletteProps) {
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Search research workspace"
             aria-label="Search workspace commands"
-            onKeyDown={(event) => {
-              if (isEditableTarget(event.target) && event.key === "Tab") close();
-            }}
+            aria-controls="workspace-command-results"
           />
           <kbd>Esc</kbd>
         </div>
-        <div className="command-list" role="listbox" aria-label="Workspace destinations">
+        <div id="workspace-command-results" className="command-list" role="listbox" aria-label="Workspace destinations">
           {results.length ? results.map((command, index) => (
             <button
               type="button"
