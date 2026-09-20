@@ -39,7 +39,7 @@ function Viewport({ geometry, wireframe, viewportKey }: { geometry: BufferGeomet
 
 function statusText(status: string) { return status.replaceAll("_", " "); }
 
-export function ScientificCanvas({ designs, simulations, solverId }: { designs: CanvasDesign[]; simulations: CanvasSimulation[]; solverId: string }) {
+export function ScientificCanvas({ designs, simulations, solverId, selectedDesignId, selectedSimulationId, onDesignChange, onSimulationChange }: { designs: CanvasDesign[]; simulations: CanvasSimulation[]; solverId: string; selectedDesignId?: string; selectedSimulationId?: string; onDesignChange?: (id: string) => void; onSimulationChange?: (id: string) => void }) {
   const [designId, setDesignId] = useState("");
   const [runId, setRunId] = useState("");
   const [viewMode, setViewMode] = useState<ViewMode>("geometry");
@@ -49,16 +49,21 @@ export function ScientificCanvas({ designs, simulations, solverId }: { designs: 
   const [loadError, setLoadError] = useState("");
   const [viewportKey, setViewportKey] = useState(0);
 
-  const selectedDesign = designs.find(item => item.id === designId) || designs[0] || null;
+  const currentDesignId = selectedDesignId ?? designId;
+  const currentRunId = selectedSimulationId ?? runId;
+  const selectedDesign = designs.find(item => item.id === currentDesignId) || designs[0] || null;
   const matchingRuns = selectedDesign ? simulations.filter(item => item.design_id === selectedDesign.id) : [];
-  const selectedRun = matchingRuns.find(item => item.id === runId) || matchingRuns[0] || null;
+  const selectedRun = matchingRuns.find(item => item.id === currentRunId) || matchingRuns[0] || null;
   const stlFile = selectedDesign?.files.find(file => file.file_format.toLowerCase() === "stl") || null;
   const stlFileId = stlFile?.id;
   const activeSolver = selectedRun?.solver_id || solverId;
   const isPyramidThermal = activeSolver === "pyramid_thermal_conduction_v1";
 
-  useEffect(() => { if (selectedDesign && selectedDesign.id !== designId) setDesignId(selectedDesign.id); }, [designId, selectedDesign]);
-  useEffect(() => { if (selectedRun && selectedRun.id !== runId) setRunId(selectedRun.id); }, [runId, selectedRun]);
+  function selectDesign(id: string) { setDesignId(id); onDesignChange?.(id); }
+  function selectRun(id: string) { setRunId(id); onSimulationChange?.(id); }
+
+  useEffect(() => { if (selectedDesign && selectedDesign.id !== currentDesignId) { setDesignId(selectedDesign.id); onDesignChange?.(selectedDesign.id); } }, [currentDesignId, onDesignChange, selectedDesign]);
+  useEffect(() => { if (selectedRun && selectedRun.id !== currentRunId) { setRunId(selectedRun.id); onSimulationChange?.(selectedRun.id); } }, [currentRunId, onSimulationChange, selectedRun]);
 
   useEffect(() => {
     let active = true;
@@ -92,7 +97,7 @@ export function ScientificCanvas({ designs, simulations, solverId }: { designs: 
 
   return <section className="scientific-canvas" aria-label="Scientific canvas">
     <header className="scientific-canvas-toolbar">
-      <label>Design<select aria-label="Persisted design" value={selectedDesign.id} onChange={event => { setDesignId(event.target.value); setRunId(""); }}><option value={selectedDesign.id}>Design {String(selectedDesign.variation_index + 1).padStart(2, "0")}</option>{designs.filter(item => item.id !== selectedDesign.id).map(item => <option key={item.id} value={item.id}>Design {String(item.variation_index + 1).padStart(2, "0")}</option>)}</select></label>
+      <label>Design<select aria-label="Persisted design" value={selectedDesign.id} onChange={event => { selectDesign(event.target.value); selectRun(""); }}><option value={selectedDesign.id}>Design {String(selectedDesign.variation_index + 1).padStart(2, "0")}</option>{designs.filter(item => item.id !== selectedDesign.id).map(item => <option key={item.id} value={item.id}>Design {String(item.variation_index + 1).padStart(2, "0")}</option>)}</select></label>
       <div className="scientific-canvas-modes" role="group" aria-label="Canvas mode"><button type="button" className={viewMode === "geometry" ? "active" : "secondary"} aria-pressed={viewMode === "geometry"} onClick={() => setViewMode("geometry")}>Geometry</button><button type="button" className={viewMode === "result" ? "active" : "secondary"} aria-pressed={viewMode === "result"} onClick={() => setViewMode("result")}>Result</button></div>
       <div className="scientific-canvas-tools"><button type="button" className="secondary" onClick={() => setWireframe(value => !value)} aria-pressed={wireframe}>{wireframe ? "Solid CAD" : "CAD triangulation"}</button><button type="button" className="secondary" onClick={() => setViewportKey(value => value + 1)}>Fit view</button></div>
     </header>
@@ -107,7 +112,7 @@ export function ScientificCanvas({ designs, simulations, solverId }: { designs: 
     </div>
     <footer className="scientific-canvas-footer"><span><b>CAD artifact</b> {stlFile ? "Persisted STL geometry" : "No STL artifact"} · <span className="mono">{selectedDesign.id}</span></span><span><b>Solver model</b> {isPyramidThermal ? "Masked Cartesian finite-difference pyramid model" : activeSolver}</span></footer>
     {isPyramidThermal && <p className="scientific-canvas-disclosure">The solver reconstructs its numerical domain from the persisted dimensions; the displayed STL is a design artifact, not the solver mesh.</p>}
-    <div className="scientific-canvas-trace"><label>Persisted simulation<select aria-label="Persisted simulation" value={selectedRun?.id || ""} disabled={!matchingRuns.length} onChange={event => setRunId(event.target.value)}>{!matchingRuns.length && <option value="">No persisted simulation for this design</option>}{matchingRuns.map(run => <option key={run.id} value={run.id}>{run.id} · {statusText(run.status)}</option>)}</select></label>{selectedRun && <span>Design <span className="mono">{selectedDesign.id}</span> → Simulation <span className="mono">{selectedRun.id}</span> → {selectedRun.solver_id} → {statusText(selectedRun.status)}</span>}</div>
+    <div className="scientific-canvas-trace"><label>Persisted simulation<select aria-label="Persisted simulation" value={selectedRun?.id || ""} disabled={!matchingRuns.length} onChange={event => selectRun(event.target.value)}>{!matchingRuns.length && <option value="">No persisted simulation for this design</option>}{matchingRuns.map(run => <option key={run.id} value={run.id}>{run.id} · {statusText(run.status)}</option>)}</select></label>{selectedRun && <span>Design <span className="mono">{selectedDesign.id}</span> → Simulation <span className="mono">{selectedRun.id}</span> → {selectedRun.solver_id} → {statusText(selectedRun.status)}</span>}</div>
     {selectedRun?.fields.length ? <div className="scientific-canvas-fields"><p className="workspace-stage-kicker">FIELD ARTIFACT INVENTORY</p>{selectedRun.fields.map((field, index) => { const fieldId = typeof field.id === "string" ? field.id : `field-${index}`; const name = String(field.field_name || field.name || "field"); return <div key={fieldId}><span>{name}</span><span className="mono">{fieldId}</span>{typeof field.id === "string" && <button type="button" className="secondary" onClick={() => downloadField(field)}>Download NPZ</button>}</div>; })}</div> : null}
   </section>;
 }

@@ -34,6 +34,14 @@ it("updates matching persisted run context when the selected design changes", ()
   expect(screen.getByText("temperature")).toBeInTheDocument();
 });
 
+it("uses the parent-selected persisted run and reports user selection changes", () => {
+  const onSimulationChange = vi.fn();
+  render(<ScientificCanvas designs={[firstDesign, secondDesign]} simulations={[firstRun, secondRun]} solverId="pyramid_thermal_conduction_v1" selectedDesignId="design-2" selectedSimulationId="run-2" onSimulationChange={onSimulationChange} />);
+  expect(screen.getByLabelText("Persisted simulation")).toHaveValue("run-2");
+  fireEvent.change(screen.getByLabelText("Persisted simulation"), { target: { value: "run-2" } });
+  expect(onSimulationChange).toHaveBeenCalledWith("run-2");
+});
+
 it("shows real result metadata without a fabricated spatial field visualization", () => {
   render(<ScientificCanvas designs={[secondDesign]} simulations={[secondRun]} solverId="pyramid_thermal_conduction_v1" />);
   fireEvent.click(screen.getByRole("button", { name: "Result" }));

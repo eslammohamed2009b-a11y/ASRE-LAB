@@ -5,14 +5,19 @@ import { EvidenceScatter } from "@/components/evidence-scatter";
 import { api } from "@/lib/api";
 
 const push = vi.fn();
+let evidenceMode: "existing" | "derive" | "missing-validity" = "existing";
+let derived = false;
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({
   api: vi.fn((path: string) => {
+    if (path === "/api/simulations/run-1/evidence") { if (evidenceMode === "derive" && !derived) return Promise.resolve([]); return Promise.resolve([{ id: "trust-1", record_type: "scientific_trust", status: "complete", schema_version: "1.0", simulation_id: "run-1", created_at: "2026-08-05T00:00:00Z", payload: { overall_trust: evidenceMode === "missing-validity" ? "LOW" : "MODERATE", dimensions: { validity: evidenceMode === "missing-validity" ? { state: "NOT_RUN", evidence_ids: [] } : { state: "PASS", evidence_ids: ["validity-1"] }, benchmark: { state: "WARNING", evidence_ids: ["benchmark-1"] }, run_convergence: { state: "PASS", evidence_ids: ["convergence-1"] } }, reason_code: evidenceMode === "missing-validity" ? "VALIDITY_EVIDENCE_NOT_RUN" : "BENCHMARK_WARNING", evidence_ids: ["validity-1", "benchmark-1", "convergence-1"], limitations: ["Evidence-state classification only"], result_hash: "result-hash", trust_hash: "trust-hash" } }]); }
+    if (path === "/api/v2/scientific/trust/simulations/run-1") { derived = true; return Promise.resolve({ id: "trust-1" }); }
+    if (path === "/api/v2/scientific/trust/trust-1") return Promise.resolve({ id: "trust-1" });
     if (path.startsWith("/api/studies/")) {
       const decisionStatus = path.endsWith("study-actioned") ? "accepted" : undefined;
       return Promise.resolve({
       id: "study-1", title: "Persisted pyramid study", description: "", research_question: "How does height matter?",
-      hypothesis: null, geometry_family: "pyramid", status: "active", designs: [], generation_jobs: [], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
+      hypothesis: null, geometry_family: "pyramid", status: "active", designs: [{ id: "design-1", variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, generation_status: "completed", files: [] }], generation_jobs: [], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
       analyses: [], decisions: decisionStatus ? [{ id: "decision-actioned", status: decisionStatus, payload: { status: decisionStatus } }] : [], reports: [], updated_at: "2026-08-05T00:00:00Z",
       });
     }
@@ -23,6 +28,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("durable research study workspace", () => {
+  afterEach(() => { evidenceMode = "existing"; derived = false; vi.mocked(api).mockClear(); });
   it("renders the human-facing study tree and tracks the active stage", async () => {
     render(<ResearchStudy studyId="study-1" />);
     expect(await screen.findByRole("heading", { name: "Persisted pyramid study" })).toBeInTheDocument();
@@ -37,7 +43,7 @@ describe("durable research study workspace", () => {
   it("keeps existing study actions reachable through their remapped stages", async () => {
     render(<ResearchStudy studyId="study-1" />);
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
-    fireEvent.click(screen.getByRole("button", { name: "Design" }));
+    fireEvent.click(screen.getByRole("button", { name: "Design, complete" }));
     expect(screen.getByRole("button", { name: "Parse into editable parameters" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Physics" }));
     expect(screen.getByRole("button", { name: "Build pre-run comparison" })).toBeInTheDocument();
@@ -84,6 +90,41 @@ describe("durable research study workspace", () => {
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/v2/decisions", expect.objectContaining({ method: "POST" })));
     const call = vi.mocked(api).mock.calls.find(([path]) => path === "/api/v2/decisions");
     expect(JSON.parse(String(call?.[1]?.body)).objectives[0]).toMatchObject({ metric_code: "max_temperature_c", unit: "degC" });
+    expect(JSON.parse(String(call?.[1]?.body)).designs[0]).toMatchObject({ validity_status: "valid", confidence: "moderate", evidence_ids: ["trust-1"] });
+    expect(JSON.stringify(JSON.parse(String(call?.[1]?.body)))).not.toContain("run-1\"]");
+  });
+
+  it("keeps the canvas selection, evidence ledger, trust panel, and inspector on one persisted run", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Evidence, persisted result available" }));
+    expect(await screen.findByLabelText("Evidence ledger")).toHaveTextContent("trust-1");
+    expect(screen.getByLabelText("Scientific Trust")).toHaveTextContent("MODERATE");
+    expect(screen.getByRole("complementary", { name: "Study inspector" })).toHaveTextContent("Selected evidence context");
+  });
+
+  it("derives missing trust through the backend and refreshes the selected run evidence", async () => {
+    evidenceMode = "derive";
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Evidence, persisted result available" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Derive Scientific Trust" }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/v2/scientific/trust/simulations/run-1", { method: "POST" }));
+    expect(vi.mocked(api)).toHaveBeenCalledWith("/api/v2/scientific/trust/trust-1");
+    expect(await screen.findByLabelText("Scientific Trust")).toHaveTextContent("MODERATE");
+  });
+
+  it("blocks a decision when authoritative validity evidence is not run", async () => {
+    evidenceMode = "missing-validity";
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build decision from completed evidence" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Decision support requires authoritative validity evidence for every candidate.");
+    expect(vi.mocked(api).mock.calls.some(([path]) => path === "/api/v2/decisions")).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "Evidence, persisted result available" }));
+    expect(await screen.findByLabelText("Scientific Trust")).toHaveTextContent("LOW");
+    expect(screen.getByLabelText("Evidence Spine")).toHaveTextContent("completed · run-1");
   });
 
   it("marks a proposed decision as awaiting human action, not complete", async () => {
