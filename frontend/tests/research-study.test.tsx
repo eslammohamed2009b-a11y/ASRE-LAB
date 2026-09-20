@@ -8,11 +8,14 @@ const push = vi.fn();
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({
   api: vi.fn((path: string) => {
-    if (path === "/api/studies/study-1") return Promise.resolve({
+    if (path.startsWith("/api/studies/")) {
+      const decisionStatus = path.endsWith("study-actioned") ? "accepted" : undefined;
+      return Promise.resolve({
       id: "study-1", title: "Persisted pyramid study", description: "", research_question: "How does height matter?",
       hypothesis: null, geometry_family: "pyramid", status: "active", designs: [], generation_jobs: [], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
-      analyses: [], decisions: [], reports: [], updated_at: "2026-08-05T00:00:00Z",
-    });
+      analyses: [], decisions: decisionStatus ? [{ id: "decision-actioned", status: decisionStatus, payload: { status: decisionStatus } }] : [], reports: [], updated_at: "2026-08-05T00:00:00Z",
+      });
+    }
     if (path === "/api/v2/decisions") return Promise.resolve({ id: "decision-1", payload: { status: "proposed", recommendation: { statement: "Review" } } });
     return Promise.resolve({});
   }),
@@ -23,10 +26,11 @@ describe("durable research study workspace", () => {
   it("renders the human-facing study tree and tracks the active stage", async () => {
     render(<ResearchStudy studyId="study-1" />);
     expect(await screen.findByRole("heading", { name: "Persisted pyramid study" })).toBeInTheDocument();
-    for (const stage of ["Question", "Design", "Physics", "Validation", "Run", "Evidence", "Decision", "Report"]) expect(screen.getByRole("button", { name: stage })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Question" })).toHaveAttribute("aria-current", "step");
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
-    expect(screen.getByRole("button", { name: "Run" })).toHaveAttribute("aria-current", "step");
+    for (const stage of ["Question", "Design", "Physics", "Validation", "Run", "Evidence", "Decision", "Report"]) expect(screen.getByRole("button", { name: new RegExp(`^${stage}(,|$)`) })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Question, complete" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: "Run, completed" })).toHaveAccessibleName("Run, completed");
+    fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
+    expect(screen.getByRole("button", { name: "Run, completed" })).toHaveAttribute("aria-current", "step");
     expect(screen.getByRole("heading", { name: "Durable batch execution" })).toBeInTheDocument();
   });
 
@@ -37,7 +41,7 @@ describe("durable research study workspace", () => {
     expect(screen.getByRole("button", { name: "Parse into editable parameters" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Physics" }));
     expect(screen.getByRole("button", { name: "Build pre-run comparison" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("button", { name: "Evidence" }));
+    fireEvent.click(screen.getByRole("button", { name: "Evidence, persisted result available" }));
     expect(screen.getByRole("button", { name: "Run persisted analysis" })).toBeInTheDocument();
   });
 
@@ -46,8 +50,13 @@ describe("durable research study workspace", () => {
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
     const inspector = screen.getByRole("complementary", { name: "Study inspector" });
     expect(inspector).toHaveTextContent("Study metadata");
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
     expect(inspector).toHaveTextContent("Execution trace");
+    expect(inspector).toHaveTextContent("Latest persisted result");
+    expect(inspector).toHaveTextContent("Solver version");
+    expect(inspector).toHaveTextContent("Governing equations");
+    expect(inspector).toHaveTextContent("Validation metadata");
+    expect(inspector).toHaveTextContent("Reproducibility hash");
     expect(inspector).not.toHaveTextContent(/high trust|validated/i);
   });
 
@@ -61,7 +70,7 @@ describe("durable research study workspace", () => {
   it("shows authoritative iterative solver convergence without claiming spatial convergence", async () => {
     render(<ResearchStudy studyId="study-1" />);
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
-    fireEvent.click(screen.getByRole("button", { name: "Run" }));
+    fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
     expect(screen.getByRole("columnheader", { name: "Iterative convergence" })).toBeInTheDocument();
     expect(screen.getByText("PASS")).toBeInTheDocument();
     expect(screen.queryByText(/spatial convergence/i)).not.toBeInTheDocument();
@@ -75,5 +84,22 @@ describe("durable research study workspace", () => {
     await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/v2/decisions", expect.objectContaining({ method: "POST" })));
     const call = vi.mocked(api).mock.calls.find(([path]) => path === "/api/v2/decisions");
     expect(JSON.parse(String(call?.[1]?.body)).objectives[0]).toMatchObject({ metric_code: "max_temperature_c", unit: "degC" });
+  });
+
+  it("marks a proposed decision as awaiting human action, not complete", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Decision" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build decision from completed evidence" }));
+    const decisionStage = await screen.findByRole("button", { name: "Decision, awaiting human action" });
+    expect(decisionStage.querySelector(".study-tree-marker")).toHaveClass("available");
+    expect(decisionStage.querySelector(".study-tree-marker")).not.toHaveClass("complete");
+  });
+
+  it("marks an actioned decision as complete without claiming scientific success", async () => {
+    render(<ResearchStudy studyId="study-actioned" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    const decisionStage = screen.getByRole("button", { name: "Decision, human action recorded" });
+    expect(decisionStage.querySelector(".study-tree-marker")).toHaveClass("complete");
   });
 });
