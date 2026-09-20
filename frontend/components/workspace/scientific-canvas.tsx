@@ -69,10 +69,13 @@ export function ScientificCanvas({ designs, simulations, solverId }: { designs: 
     setLoadState("loading");
     download(`/api/design/files/${encodeURIComponent(stlFileId)}/download`).then(async artifact => {
       const bytes = await artifact.blob.arrayBuffer();
-      parsed = new STLLoader().parse(bytes);
-      parsed.computeVertexNormals();
-      parsed.center();
-      if (active) { setGeometry(parsed); setLoadState("idle"); }
+      const nextGeometry = new STLLoader().parse(bytes);
+      nextGeometry.computeVertexNormals();
+      nextGeometry.center();
+      if (!active) { nextGeometry.dispose(); return; }
+      parsed = nextGeometry;
+      setGeometry(nextGeometry);
+      setLoadState("idle");
     }).catch(error => { if (active) { setLoadState("error"); setLoadError(error instanceof Error ? error.message : "The persisted STL artifact could not be loaded."); } });
     return () => { active = false; parsed?.dispose(); };
   }, [stlFileId]);
@@ -99,7 +102,7 @@ export function ScientificCanvas({ designs, simulations, solverId }: { designs: 
       {!stlFile && <div className="scientific-canvas-state">No persisted STL artifact is available for this design.</div>}
       {geometry && <Viewport geometry={geometry} wireframe={wireframe} viewportKey={viewportKey} />}
       {viewMode === "result" && <div className="scientific-canvas-result-hud" aria-label="Persisted result context">
-        {selectedRun?.result ? <><p className="workspace-stage-kicker">PERSISTED RESULT</p><dl><div><dt>Run</dt><dd className="mono">{selectedRun.id}</dd></div><div><dt>Status</dt><dd>{statusText(selectedRun.status)}</dd></div><div><dt>Solver</dt><dd className="mono">{selectedRun.solver_id}</dd></div><div><dt>Solver version</dt><dd className="mono">{selectedRun.result.solver_version}</dd></div><div><dt>Iterative convergence</dt><dd>{String(selectedRun.result.converged)}</dd></div>{Object.entries(selectedRun.result.summary_metrics).map(([metric, value]) => <div key={metric}><dt>{knownMetricLabels[metric]?.label || metric}</dt><dd>{value}{knownMetricLabels[metric]?.unit ? ` ${knownMetricLabels[metric].unit}` : ""}</dd></div>)}</dl>{selectedRun.result.warnings.length > 0 && <p className="scientific-canvas-warning">Warnings: {selectedRun.result.warnings.join("; ")}</p>}<p className="scientific-canvas-field-notice">Spatial field visualization is unavailable from the current browser data contract. Numerical result remains available as persisted evidence.</p></> : <p className="scientific-canvas-field-notice">No persisted result is available for the selected design.</p>}
+        {selectedRun?.result ? <><p className="workspace-stage-kicker">PERSISTED RESULT</p><dl><div><dt>Run</dt><dd className="mono">{selectedRun.id}</dd></div><div><dt>Status</dt><dd>{statusText(selectedRun.status)}</dd></div><div><dt>Solver</dt><dd className="mono">{selectedRun.solver_id}</dd></div><div><dt>Solver version</dt><dd className="mono">{selectedRun.result.solver_version}</dd></div><div><dt>Solver convergence</dt><dd>{String(selectedRun.result.converged)}</dd></div>{Object.entries(selectedRun.result.summary_metrics).map(([metric, value]) => <div key={metric}><dt>{knownMetricLabels[metric]?.label || metric}</dt><dd>{value}{knownMetricLabels[metric]?.unit ? ` ${knownMetricLabels[metric].unit}` : ""}</dd></div>)}</dl>{selectedRun.result.warnings.length > 0 && <p className="scientific-canvas-warning">Warnings: {selectedRun.result.warnings.join("; ")}</p>}<p className="scientific-canvas-field-notice">Spatial field visualization is unavailable from the current browser data contract. Numerical result remains available as persisted evidence.</p></> : <p className="scientific-canvas-field-notice">No persisted result is available for the selected design.</p>}
       </div>}
     </div>
     <footer className="scientific-canvas-footer"><span><b>CAD artifact</b> {stlFile ? "Persisted STL geometry" : "No STL artifact"} · <span className="mono">{selectedDesign.id}</span></span><span><b>Solver model</b> {isPyramidThermal ? "Masked Cartesian finite-difference pyramid model" : activeSolver}</span></footer>

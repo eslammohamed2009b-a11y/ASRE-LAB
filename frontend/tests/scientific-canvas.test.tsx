@@ -40,6 +40,8 @@ it("shows real result metadata without a fabricated spatial field visualization"
   expect(screen.getByLabelText("Persisted result context")).toHaveTextContent("run-2");
   expect(screen.getByLabelText("Persisted result context")).toHaveTextContent("Max temperature");
   expect(screen.getByLabelText("Persisted result context")).toHaveTextContent("31.25 °C");
+  expect(screen.getByLabelText("Persisted result context")).toHaveTextContent("Solver convergence");
+  expect(screen.getByLabelText("Persisted result context")).not.toHaveTextContent("Iterative convergence");
   expect(screen.getByText(/Spatial field visualization is unavailable/)).toBeInTheDocument();
   expect(screen.queryByText(/high trust|validated|contour/i)).not.toBeInTheDocument();
 });
