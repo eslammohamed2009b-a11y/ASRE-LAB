@@ -1,4 +1,4 @@
-import { api, ApiError } from "@/lib/api";
+import { api, ApiError, download } from "@/lib/api";
 import { vi } from "vitest";
 
 vi.mock("@/lib/supabase", () => ({
@@ -14,9 +14,18 @@ describe("authenticated API transport", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     await api("/api/v2/execution/runs", { method: "POST", body: "{}", idempotencyKey: "key-1" });
+    expect(fetchMock).toHaveBeenCalledWith("/_asre-api/api/v2/execution/runs", expect.any(Object));
     const request = fetchMock.mock.calls[0][1];
     expect(request.headers.get("Authorization")).toBe("Bearer test-token");
     expect(request.headers.get("Idempotency-Key")).toBe("key-1");
+  });
+  it("proxies artifact downloads while preserving authorization and disposition", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(new Response("artifact", { status: 200, headers: { "content-disposition": "attachment; filename=result.csv" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const artifact = await download("/api/simulations/run-1/export/csv");
+    expect(fetchMock).toHaveBeenCalledWith("/_asre-api/api/simulations/run-1/export/csv", expect.any(Object));
+    expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer test-token");
+    expect(artifact.disposition).toBe("attachment; filename=result.csv");
   });
   it("preserves safe backend errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Invalid input", code: "INVALID_INPUT" }), { status: 422 })));
