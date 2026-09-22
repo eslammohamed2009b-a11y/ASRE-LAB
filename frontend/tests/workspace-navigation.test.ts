@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isWorkspaceNavigationActive, workspacePageContext } from "@/components/app-shell";
+import { isWorkspaceNavigationActive, workspaceNavigation, workspacePageContext } from "@/components/app-shell";
 
 describe("workspace route context", () => {
   it("keeps Research Studies active for persisted study resources", () => {
@@ -23,5 +23,11 @@ describe("workspace route context", () => {
     expect(workspacePageContext("/app/reasoning/reasoning-1")).toBe("Scientific reasoning");
     expect(workspacePageContext("/app/reports/report-1")).toBe("Reproducible report");
     expect(workspacePageContext("/app/manifests/manifest-1")).toBe("Execution manifest");
+    expect(workspacePageContext("/app/scientific-scope")).toBe("Scientific scope");
+  });
+
+  it("keeps Scientific Scope inside the authenticated workspace", () => {
+    expect(workspaceNavigation.find((item) => item.label === "Scientific Scope")?.href).toBe("/app/scientific-scope");
+    expect(isWorkspaceNavigationActive("/app/scientific-scope", "/app/scientific-scope")).toBe(true);
   });
 });
