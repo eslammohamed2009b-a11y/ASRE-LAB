@@ -51,12 +51,15 @@ def run_experiment_analysis(
     user_id: str,
     request: AnalysisCreateRequest,
     repository: PersistenceRepository | None = None,
+    *,
+    simulation_ids: list[str] | None = None,
 ) -> AnalysisResponse:
     repository = repository or get_repository()
     dataset = build_experiment_dataset(
         repository, experiment_id, user_id,
         include_nonconverged=request.include_nonconverged,
         require_authoritative_evidence=True,
+        simulation_ids=simulation_ids,
     )
     if not dataset.rows:
         raise AnalysisInputError("No valid persisted simulation results are available for analysis")

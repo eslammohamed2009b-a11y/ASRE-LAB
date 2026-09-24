@@ -87,6 +87,7 @@ def build_experiment_dataset(
     *,
     include_nonconverged: bool = False,
     require_authoritative_evidence: bool | None = None,
+    simulation_ids: list[str] | None = None,
 ) -> ExperimentDataset:
     experiment = repository.get_experiment(experiment_id)
     if experiment is None or experiment.user_id != user_id:
@@ -94,6 +95,20 @@ def build_experiment_dataset(
 
     designs = {item.id: item for item in repository.list_design_models_for_experiment(experiment_id)}
     jobs = repository.list_simulation_jobs_for_experiment(experiment_id)
+    if simulation_ids is not None:
+        requested_simulation_ids = set(simulation_ids)
+        if not requested_simulation_ids:
+            raise DatasetBuildError("Analysis simulation scope cannot be empty")
+        if len(requested_simulation_ids) != len(simulation_ids):
+            raise DatasetBuildError("Analysis simulation scope contains duplicate simulation IDs")
+        available_simulation_ids = {job.id for job in jobs}
+        missing_simulation_ids = sorted(requested_simulation_ids - available_simulation_ids)
+        if missing_simulation_ids:
+            raise DatasetBuildError(
+                "Analysis simulation scope contains simulations outside the experiment: "
+                + ", ".join(missing_simulation_ids)
+            )
+        jobs = [job for job in jobs if job.id in requested_simulation_ids]
     if len(jobs) > MAX_ROWS:
         raise DatasetBuildError(f"Experiment exceeds the {MAX_ROWS}-simulation analysis limit")
 

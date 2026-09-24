@@ -5,7 +5,8 @@ import pytest
 from app import comparative_service, comparative_tasks, study_router
 from app.module2_simulation import router as simulation_router
 from app.module3_analysis import service as analysis_service
-from app.core.repository import LocalSQLiteRepository
+from app.core.repository import LocalSQLiteRepository, SimulationResultRecord
+from app.module3_analysis.dataset import DatasetBuildError, build_experiment_dataset
 from app.v2.repository import EvidenceRepository
 from app.core.auth import get_current_user
 from app.main import app
@@ -111,6 +112,81 @@ def test_controlled_five_design_geometry_aware_study(authorized_client, comparat
         assert exported_simulation.status_code == 200
         exported_analysis = authorized_client.get(f"/api/analyze/{analyses[0].id}/export/{fmt}")
         assert exported_analysis.status_code == 200
+
+
+def test_comparative_batch_analysis_excludes_legacy_runs_without_evidence(
+    authorized_client, comparative_study,
+):
+    """A batch analyzes only its submitted cohort, never unrelated legacy runs."""
+    repo, study_id, design_ids = comparative_study
+    legacy_simulation_id = repo.create_simulation_job(
+        "user-test", "pyramid_thermal_conduction_v1", study_id, design_ids[0],
+    )
+    repo.record_simulation_input(
+        legacy_simulation_id,
+        "concrete",
+        {"thermal_conductivity_w_mk": 1.4},
+        {"thermal_conductivity_w_mk": "W/(m*K)"},
+        {},
+        {
+            "ambient_temperature_c": 20.0,
+            "prescribed_temperature_c": 20.0,
+            "heat_source_w_m3": 1000.0,
+        },
+        {"max_iterations": 1000, "tolerance": 1e-6},
+        {
+            "dimension": "pyramid3d", "base_length_m": 2.0,
+            "height_m": 1.0, "grid_resolution": 9,
+        },
+    )
+    repo.record_simulation_result(SimulationResultRecord(
+        simulation_id=legacy_simulation_id,
+        solver_id="pyramid_thermal_conduction_v1",
+        solver_version="1.0.0",
+        converged=True,
+        residual=1e-7,
+        iteration_count=20,
+        tolerance=1e-6,
+        summary_metrics={"maximum_temperature_c": 30.0},
+        validation_metadata={
+            "input_fingerprint": "legacy-input-fingerprint",
+            "material_properties_used": {"thermal_conductivity_w_mk": 1.4},
+            "validation_status": "partially_validated",
+        },
+        reproducibility_hash="legacy-result-hash",
+    ))
+    repo.update_simulation_job(legacy_simulation_id, status="completed", progress_percent=100)
+
+    with pytest.raises(DatasetBuildError, match=legacy_simulation_id):
+        build_experiment_dataset(
+            repo, study_id, "user-test", require_authoritative_evidence=True,
+        )
+
+    started = authorized_client.post(
+        f"/api/studies/{study_id}/comparative-runs", json=payload(design_ids[1:3]),
+    )
+    assert started.status_code == 202
+    job = repo.get_job(started.json()["job_id"])
+    assert job.status == "completed"
+    assert job.error_code is None
+
+    analyses = repo.list_analyses_for_experiment(study_id)
+    assert len(analyses) == 1
+    cohort = {
+        item.id for item in repo.list_simulation_jobs_for_experiment(study_id)
+    } - {legacy_simulation_id}
+    assert set(analyses[0].source_simulation_ids) == cohort
+    assert legacy_simulation_id not in analyses[0].source_simulation_ids
+    evidence = EvidenceRepository(repository=repo)
+    for simulation_id in cohort:
+        types = {
+            record["record_type"]
+            for record in evidence.list_scientific_for_simulation("user-test", simulation_id)
+        }
+        assert {
+            "scientific_numerical_result", "scientific_field_result",
+            "scientific_validity", "scientific_run_convergence",
+        } <= types
 
 
 def test_invalid_geometry_is_blocked_before_any_simulation_record(authorized_client, comparative_study):

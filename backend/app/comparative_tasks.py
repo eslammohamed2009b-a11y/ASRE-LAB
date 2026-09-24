@@ -46,7 +46,11 @@ def run_comparative_batch(job_id: str, study_id: str, user_id: str, specificatio
     if completed:
         try:
             analysis_id = run_experiment_analysis(
-                study_id, user_id, AnalysisCreateRequest(), repository=repo
+                study_id,
+                user_id,
+                AnalysisCreateRequest(),
+                repository=repo,
+                simulation_ids=[specification["simulation_id"] for specification in specifications],
             ).id
         except Exception:
             analysis_error = True
