@@ -51,6 +51,10 @@ replaced with a deprecation notice pointing here.
     atomic, non-recycled Founding User ordinals for the first 1,000 accounts.
 14. `014_simulation_geometry_inputs.sql` - immutable solver-geometry snapshots
     for reconstructing every persisted simulation input. Depends on 005.
+15. `015_scientific_evidence_record_types.sql` - permits the existing immutable
+    Evidence envelope to persist validated scientific and lifecycle records.
+16. `016_study_evidence_record_types.sql` - permits immutable Study definition,
+    linkage, DOE, and next-experiment evidence records. Depends on 015.
 
 Each file is idempotent (`create table if not exists`, `create index if
 not exists`, `drop policy/constraint if exists` before recreating) and
@@ -76,6 +80,8 @@ psql "$DATABASE_URL" -f database/migrations/011_backend_v2_foundation.sql
 psql "$DATABASE_URL" -f database/migrations/012_api_role_and_private_storage.sql
 psql "$DATABASE_URL" -f database/migrations/013_accounts_and_founders.sql
 psql "$DATABASE_URL" -f database/migrations/014_simulation_geometry_inputs.sql
+psql "$DATABASE_URL" -f database/migrations/015_scientific_evidence_record_types.sql
+psql "$DATABASE_URL" -f database/migrations/016_study_evidence_record_types.sql
 ```
 
 **These migrations have NOT been applied to any live Supabase project in

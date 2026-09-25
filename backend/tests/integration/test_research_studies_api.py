@@ -40,6 +40,10 @@ def test_create_list_update_and_reopen_server_persisted_study(authorized_client,
     study_id = created.json()["id"]
     assert created.json()["status"] == "draft"
 
+    detail = authorized_client.get(f"/api/studies/{study_id}")
+    assert detail.status_code == 200
+    assert [item["record_type"] for item in detail.json()["evidence"]] == ["study_definition"]
+
     listed = authorized_client.get("/api/studies")
     assert listed.status_code == 200
     assert [item["id"] for item in listed.json()["items"]] == [study_id]
