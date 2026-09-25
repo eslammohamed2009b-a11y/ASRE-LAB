@@ -15,7 +15,7 @@ export const workspaceNavigation: WorkspaceCommand[] = [
   { label: "New Research Study", description: "Define a new evidence-backed investigation", href: "/app/studies/new", shortcut: "2" },
   { label: "Open Evidence Item", description: "Retrieve a scientific record by identifier", href: "/app/open", shortcut: "3" },
   { label: "Scientific Scope", description: "Review supported physics and validity limits", href: "/app/scientific-scope", shortcut: "4" },
-  { label: "Documentation", description: "Open ASRE-Lab research documentation", href: "/docs", shortcut: "5" },
+  { label: "Documentation", description: "Open ASRE-Lab research documentation", href: "/app/docs", shortcut: "5" },
 ];
 
 const studyResourceRoutes = ["/app/studies/", "/app/simulations/", "/app/jobs/", "/app/attempts/", "/app/decisions/", "/app/reasoning/", "/app/reports/", "/app/manifests/"];
@@ -37,7 +37,7 @@ export function workspacePageContext(pathname: string) {
   if (pathname.startsWith("/app/manifests/")) return "Execution manifest";
   if (pathname.startsWith("/app/open")) return "Evidence retrieval";
   if (pathname.startsWith("/app/scientific-scope")) return "Scientific scope";
-  if (pathname.startsWith("/docs")) return "Documentation";
+  if (pathname.startsWith("/app/docs")) return "Documentation";
   return "Research studies";
 }
 

@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { CommandPalette } from "@/components/ui/command-palette";
+import { workspaceNavigation } from "@/components/app-shell";
 
 const commands = [
   { label: "Research Studies", description: "Review persisted studies", href: "/app/dashboard", shortcut: "1" },
@@ -48,5 +49,14 @@ describe("workspace command palette", () => {
 
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(screen.getByRole("button", { name: "Open workspace command palette" })).toHaveFocus());
+  });
+
+  it("opens workspace Documentation without leaving the app route", () => {
+    const onNavigate = vi.fn();
+    render(<CommandPalette commands={workspaceNavigation} onNavigate={onNavigate} />);
+    fireEvent.click(screen.getByRole("button", { name: "Open workspace command palette" }));
+    fireEvent.change(screen.getByRole("textbox", { name: "Search workspace commands" }), { target: { value: "documentation" } });
+    fireEvent.click(screen.getByRole("option", { name: /Documentation/ }));
+    expect(onNavigate).toHaveBeenCalledWith("/app/docs");
   });
 });

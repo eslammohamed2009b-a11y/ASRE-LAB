@@ -30,4 +30,11 @@ describe("workspace route context", () => {
     expect(workspaceNavigation.find((item) => item.label === "Scientific Scope")?.href).toBe("/app/scientific-scope");
     expect(isWorkspaceNavigationActive("/app/scientific-scope", "/app/scientific-scope")).toBe(true);
   });
+
+  it("keeps Documentation inside the authenticated workspace", () => {
+    expect(workspaceNavigation.find((item) => item.label === "Documentation")?.href).toBe("/app/docs");
+    expect(isWorkspaceNavigationActive("/app/docs", "/app/docs")).toBe(true);
+    expect(workspacePageContext("/app/docs")).toBe("Documentation");
+    expect(isWorkspaceNavigationActive("/docs", "/app/docs")).toBe(false);
+  });
 });
