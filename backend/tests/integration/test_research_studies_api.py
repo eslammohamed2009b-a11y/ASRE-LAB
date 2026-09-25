@@ -70,3 +70,25 @@ def test_study_owner_isolation_returns_indistinguishable_404(authorized_client, 
     response = authorized_client.get(f"/api/studies/{other_id}")
     assert response.status_code == 404
     assert response.json()["detail"] == "Study not found"
+
+
+def test_list_studies_excludes_legacy_experiments_and_preserves_archived_filtering(authorized_client, study_repo, monkeypatch):
+    active = authorized_client.post("/api/studies", json=setup_payload("Active research study"))
+    archived = authorized_client.post("/api/studies", json=setup_payload("Archived research study"))
+    assert active.status_code == archived.status_code == 201
+    archived_id = archived.json()["id"]
+    study_repo.update_experiment(archived_id, status="archived")
+    legacy_id = study_repo.create_experiment(
+        "test-user", "generate-single: GeometryType.PYRAMID", {"prompt": "legacy geometry generation"},
+    )
+    assert authorized_client.get(f"/api/studies/{active.json()['id']}").status_code == 200
+    monkeypatch.setattr(study_router, "_study_graph", lambda _: (_ for _ in ()).throw(AssertionError("list loaded full graph")))
+
+    listed = authorized_client.get("/api/studies")
+    assert listed.status_code == 200
+    assert [item["id"] for item in listed.json()["items"]] == [active.json()["id"]]
+
+    including_archived = authorized_client.get("/api/studies?include_archived=true")
+    assert including_archived.status_code == 200
+    assert {item["id"] for item in including_archived.json()["items"]} == {active.json()["id"], archived_id}
+    assert study_repo.get_experiment(legacy_id) is not None

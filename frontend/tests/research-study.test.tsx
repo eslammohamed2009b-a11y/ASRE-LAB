@@ -10,9 +10,14 @@ vi.mock("@/lib/api",()=>({
   api:vi.fn((path:string)=>{
     if(path==="/api/studies/study-1")return Promise.resolve({
       id:"study-1",title:"Persisted pyramid study",description:"",research_question:"How does height matter?",
-      hypothesis:null,geometry_family:"pyramid",status:"active",designs:[],generation_jobs:[],simulations:[{id:"run-1",design_id:"design-1",solver_id:"pyramid_thermal_conduction_v1",status:"completed",input:null,fields:[],result:{solver_version:"1",summary_metrics:{max_temperature_c:30},converged:true,governing_equations:[],assumptions:[],warnings:[],validation_metadata:{convergence_evidence:{resolution_refinement_performed_for_current_run:false}},reproducibility_hash:"hash"}}],
+      hypothesis:null,geometry_family:"pyramid",status:"active",designs:[{id:"design-1",variation_index:0,generation_status:"completed",parameters:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"},files:[]}],generation_jobs:[],simulations:[{id:"run-1",design_id:"design-1",solver_id:"pyramid_thermal_conduction_v1",status:"completed",input:null,fields:[],result:{solver_version:"1",summary_metrics:{max_temperature_c:30},converged:true,governing_equations:[],assumptions:[],warnings:[],validation_metadata:{convergence_evidence:{resolution_refinement_performed_for_current_run:false}},reproducibility_hash:"hash"}}],
       analyses:[],decisions:[],reports:[],updated_at:"2026-08-05T00:00:00Z",
     });
+    if(path==="/api/design/parse")return Promise.resolve({params:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"}});
+    if(path==="/api/design/design-space/preview")return Promise.resolve({variant_count:2,variants:[{variation_index:0,parameters:{geometry_type:"pyramid",base_length_m:2,height_m:2,slope_angle_deg:45,material:"concrete"},varied_values:{}},{variation_index:1,parameters:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"},varied_values:{}}]});
+    if(path==="/api/design/generate-batch")return Promise.resolve({job_id:"cad-job",study_id:"study-1",status:"completed"});
+    if(path==="/api/studies/study-1/comparison-plan")return Promise.resolve({evaluation_class:"comparative",model_disclosure:"controlled",variant_count:1,varies:["height_m"],held_constant:{}});
+    if(path==="/api/studies/study-1/comparative-runs")return Promise.resolve({job_id:"simulation-job",study_id:"study-1",status:"queued"});
     if(path==="/api/v2/decisions")return Promise.resolve({id:"decision-1",payload:{status:"proposed",recommendation:{statement:"Review"}}});
     return Promise.resolve({});
   }),
@@ -56,5 +61,32 @@ describe("durable research study",()=>{
     await waitFor(()=>expect(vi.mocked(api)).toHaveBeenCalledWith("/api/v2/decisions",expect.objectContaining({method:"POST"})));
     const call=vi.mocked(api).mock.calls.find(([path])=>path==="/api/v2/decisions");
     expect(JSON.parse(String(call?.[1]?.body)).objectives[0]).toMatchObject({metric_code:"max_temperature_c",unit:"degC"});
+  });
+
+  it("keeps CAD generation in Design Space instead of misleading simulation Execution",async()=>{
+    render(<ResearchStudy studyId="study-1"/>);
+    await screen.findByRole("heading",{name:"Persisted pyramid study"});
+    fireEvent.click(screen.getByRole("button",{name:"Design"}));
+    fireEvent.click(screen.getByRole("button",{name:"Parse into editable parameters"}));
+    await screen.findByRole("button",{name:"Define design space"});
+    fireEvent.click(screen.getByRole("button",{name:"Define design space"}));
+    fireEvent.click(screen.getByRole("button",{name:"Resolve final variants"}));
+    expect(await screen.findByRole("button",{name:"Generate 2 CAD variants"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Generate 2 CAD variants"}));
+    await waitFor(()=>expect(vi.mocked(api)).toHaveBeenCalledWith("/api/design/generate-batch",expect.anything()));
+    expect(screen.getByRole("heading",{name:"Deterministic design space"})).toBeInTheDocument();
+    expect(screen.queryByRole("heading",{name:/Durable batch execution/i})).not.toBeInTheDocument();
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith("/api/studies/study-1/comparative-runs",expect.anything());
+  });
+
+  it("uses Execution only after comparative simulation execution starts",async()=>{
+    render(<ResearchStudy studyId="study-1"/>);
+    await screen.findByRole("heading",{name:"Persisted pyramid study"});
+    fireEvent.click(screen.getByRole("button",{name:"Physics"}));
+    fireEvent.click(screen.getByRole("button",{name:"Build pre-run comparison"}));
+    expect(await screen.findByRole("button",{name:"Confirm and execute 1 runs"})).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Confirm and execute 1 runs"}));
+    expect(await screen.findByRole("heading",{name:/Durable batch execution/i})).toBeInTheDocument();
+    expect(vi.mocked(api)).toHaveBeenCalledWith("/api/studies/study-1/comparative-runs",expect.anything());
   });
 });
