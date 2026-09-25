@@ -7,17 +7,23 @@ import { api } from "@/lib/api";
 const push = vi.fn();
 let evidenceMode: "existing" | "derive" | "missing-validity" = "existing";
 let derived = false;
+let cadJobStatus = "completed";
 vi.mock("next/navigation", () => ({ useRouter: () => ({ push }) }));
 vi.mock("@/lib/api", () => ({
   api: vi.fn((path: string) => {
     if (path === "/api/simulations/run-1/evidence") { if (evidenceMode === "derive" && !derived) return Promise.resolve([]); return Promise.resolve([{ id: "trust-1", record_type: "scientific_trust", status: "complete", schema_version: "1.0", simulation_id: "run-1", created_at: "2026-08-05T00:00:00Z", payload: { overall_trust: evidenceMode === "missing-validity" ? "LOW" : "MODERATE", dimensions: { validity: evidenceMode === "missing-validity" ? { state: "NOT_RUN", evidence_ids: [] } : { state: "PASS", evidence_ids: ["validity-1"] }, benchmark: { state: "WARNING", evidence_ids: ["benchmark-1"] }, run_convergence: { state: "PASS", evidence_ids: ["convergence-1"] } }, reason_code: evidenceMode === "missing-validity" ? "VALIDITY_EVIDENCE_NOT_RUN" : "BENCHMARK_WARNING", evidence_ids: ["validity-1", "benchmark-1", "convergence-1"], limitations: ["Evidence-state classification only"], result_hash: "result-hash", trust_hash: "trust-hash" } }]); }
     if (path === "/api/v2/scientific/trust/simulations/run-1") { derived = true; return Promise.resolve({ id: "trust-1" }); }
     if (path === "/api/v2/scientific/trust/trust-1") return Promise.resolve({ id: "trust-1" });
+    if (path === "/api/design/parse") return Promise.resolve({ params: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" } });
+    if (path === "/api/design/design-space/preview") return Promise.resolve({ variant_count: 2, variants: [{ variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 2, slope_angle_deg: 45, material: "concrete" }, varied_values: {} }, { variation_index: 1, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, varied_values: {} }] });
+    if (path === "/api/design/generate-batch") return Promise.resolve({ job_id: "cad-job", study_id: "study-1", status: cadJobStatus });
+    if (path === "/api/studies/study-1/comparison-plan") return Promise.resolve({ evaluation_class: "comparative", model_disclosure: "controlled", variant_count: 1, varies: ["height_m"], held_constant: {} });
+    if (path === "/api/studies/study-1/comparative-runs") return Promise.resolve({ job_id: "simulation-job", study_id: "study-1", status: "queued" });
     if (path.startsWith("/api/studies/")) {
       const decisionStatus = path.endsWith("study-actioned") ? "accepted" : undefined;
       return Promise.resolve({
       id: "study-1", title: "Persisted pyramid study", description: "", research_question: "How does height matter?",
-      hypothesis: null, geometry_family: "pyramid", status: "active", designs: [{ id: "design-1", variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, generation_status: "completed", files: [] }], generation_jobs: [], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
+      hypothesis: null, geometry_family: "pyramid", status: "active", designs: [{ id: "design-1", variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, generation_status: "completed", files: [] }], generation_jobs: [{ id: "cad-generation-job", status: "completed", progress_percent: 100, completed_count: 2, failed_count: 0 }], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
       analyses: [], decisions: decisionStatus ? [{ id: "decision-actioned", status: decisionStatus, payload: { status: decisionStatus } }] : [], reports: [], updated_at: "2026-08-05T00:00:00Z",
       });
     }
@@ -28,7 +34,7 @@ vi.mock("@/lib/api", () => ({
 }));
 
 describe("durable research study workspace", () => {
-  afterEach(() => { evidenceMode = "existing"; derived = false; vi.mocked(api).mockClear(); });
+  afterEach(() => { evidenceMode = "existing"; derived = false; cadJobStatus = "completed"; vi.mocked(api).mockClear(); });
   it("renders the human-facing study tree and tracks the active stage", async () => {
     render(<ResearchStudy studyId="study-1" />);
     expect(await screen.findByRole("heading", { name: "Persisted pyramid study" })).toBeInTheDocument();
@@ -142,5 +148,46 @@ describe("durable research study workspace", () => {
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
     const decisionStage = screen.getByRole("button", { name: "Decision, human action recorded" });
     expect(decisionStage.querySelector(".study-tree-marker")).toHaveClass("complete");
+  });
+
+  it("keeps active CAD generation in Design and labels it as CAD work", async () => {
+    cadJobStatus = "queued";
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Design, complete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Parse into editable parameters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Define design space" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve final variants" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Generate 2 CAD variants" }));
+    expect(await screen.findByRole("heading", { name: "Generating CAD variants..." })).toBeInTheDocument();
+    expect(screen.getByText("CAD design artifacts are being generated. Physics simulations have not run yet.")).toBeInTheDocument();
+    expect(screen.queryByRole("heading", { name: "Durable batch execution" })).not.toBeInTheDocument();
+  });
+
+  it("shows completed CAD artifacts with an explicit Physics handoff", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Design, complete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Parse into editable parameters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Define design space" }));
+    fireEvent.click(screen.getByRole("button", { name: "Resolve final variants" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Generate 2 CAD variants" }));
+    expect(await screen.findByRole("heading", { name: "CAD generation completed" })).toBeInTheDocument();
+    expect(screen.getByText("2 CAD design variants are ready. Physics simulations have not run yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Continue to Physics" }));
+    expect(await screen.findByRole("heading", { name: "Comparable physics" })).toBeInTheDocument();
+    expect(vi.mocked(api)).not.toHaveBeenCalledWith("/api/studies/study-1/comparative-runs", expect.anything());
+  });
+
+  it("uses Run only for comparative simulations and omits CAD job rows", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
+    expect(screen.queryByText("cad-generation-job")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Physics" }));
+    fireEvent.click(screen.getByRole("button", { name: "Build pre-run comparison" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Confirm and execute 1 runs" }));
+    expect(await screen.findByRole("heading", { name: "Durable batch execution" })).toBeInTheDocument();
+    expect(vi.mocked(api)).toHaveBeenCalledWith("/api/studies/study-1/comparative-runs", expect.anything());
   });
 });
