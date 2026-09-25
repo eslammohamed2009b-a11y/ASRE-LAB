@@ -1,0 +1,7 @@
+import { trustPayload, type ScientificEvidenceRecord } from "@/lib/scientific-evidence";
+
+export function ScientificTrustPanel({ trust, disabled, deriving, onDerive }: { trust: ScientificEvidenceRecord | null; disabled?: boolean; deriving?: boolean; onDerive: () => void }) {
+  const payload = trustPayload(trust);
+  if (!payload) return <section className="workspace-subsection scientific-trust-panel" aria-label="Scientific Trust"><h3>Scientific Trust</h3><p>No persisted Scientific Trust record is available for the selected simulation.</p><button disabled={disabled || deriving} onClick={onDerive}>{deriving ? "Deriving Scientific Trust…" : "Derive Scientific Trust"}</button></section>;
+  return <section className="workspace-subsection scientific-trust-panel" aria-label="Scientific Trust"><h3>Scientific Trust</h3><p><b>Classification</b> {payload.overall_trust}</p><p className="mono">{trust?.id}</p><dl>{Object.entries(payload.dimensions).map(([name, dimension]) => <div key={name}><dt>{name.replaceAll("_", " ")}</dt><dd>{dimension.state}{dimension.warning ? ` · ${dimension.warning}` : ""}<br /><span className="mono">{dimension.evidence_ids.join(", ") || "No linked evidence"}</span></dd></div>)}</dl><p><b>Reason code</b> {payload.reason_code || "Not returned"}</p><p><b>Linked records</b> {payload.evidence_ids.length}</p>{payload.limitations.length > 0 && <p><b>Limitations</b> {payload.limitations.join("; ")}</p>}<p className="mono">Result hash: {payload.result_hash || "Not returned"}<br />Trust hash: {payload.trust_hash || "Not returned"}</p></section>;
+}
