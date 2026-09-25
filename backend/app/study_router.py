@@ -191,6 +191,30 @@ def _summary(record: ExperimentRecord) -> dict[str, Any]:
     }
 
 
+def _list_summary(record: ExperimentRecord) -> dict[str, Any]:
+    """Return list counts without loading per-run result or field payloads."""
+    repo = get_repository()
+    simulations = repo.list_simulation_jobs_for_experiment(record.id)
+    evidence = EvidenceRepository().list(record.user_id, experiment_id=record.id)
+    return {
+        "id": record.id,
+        **_metadata(record),
+        "status": record.status,
+        "created_at": record.created_at,
+        "updated_at": record.updated_at,
+        "design_count": len(repo.list_design_models_for_experiment(record.id)),
+        "simulation_count": len(simulations),
+        "completed_run_count": sum(item.status in {"completed", "partial_failure"} for item in simulations),
+        "failed_run_count": sum(item.status == "failed" for item in simulations),
+        "analysis_count": len(repo.list_analyses_for_experiment(record.id)),
+        "report_count": sum(item["record_type"] == "research_report" for item in evidence),
+    }
+
+
+def _is_research_study(record: ExperimentRecord) -> bool:
+    return record.input_specification.get("schema_version") == "research-study-v1"
+
+
 def _phase4_metadata(record: ExperimentRecord) -> dict[str, Any]:
     metadata = _metadata(record)
     # Legacy Studies stored lifecycle state only on the experiment aggregate.
@@ -242,10 +266,13 @@ def create_study(
 def list_studies(
     include_archived: bool = False, current_user: dict = Depends(get_current_user),
 ) -> dict[str, Any]:
-    records = get_repository().list_experiments_for_user(current_user["id"])
+    records = [
+        record for record in get_repository().list_experiments_for_user(current_user["id"])
+        if _is_research_study(record)
+    ]
     if not include_archived:
         records = [record for record in records if record.status != "archived"]
-    return {"items": [_summary(record) for record in records]}
+    return {"items": [_list_summary(record) for record in records]}
 
 
 @router.get("/{study_id}")
