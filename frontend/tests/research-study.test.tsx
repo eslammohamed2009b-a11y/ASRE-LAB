@@ -5,17 +5,18 @@ import {EvidenceScatter} from "@/components/evidence-scatter";
 import {api} from "@/lib/api";
 
 const push=vi.fn();
+const cadJob=vi.hoisted(()=>({status:"completed"}));
 vi.mock("next/navigation",()=>({useRouter:()=>({push})}));
 vi.mock("@/lib/api",()=>({
   api:vi.fn((path:string)=>{
     if(path==="/api/studies/study-1")return Promise.resolve({
       id:"study-1",title:"Persisted pyramid study",description:"",research_question:"How does height matter?",
-      hypothesis:null,geometry_family:"pyramid",status:"active",designs:[{id:"design-1",variation_index:0,generation_status:"completed",parameters:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"},files:[]}],generation_jobs:[],simulations:[{id:"run-1",design_id:"design-1",solver_id:"pyramid_thermal_conduction_v1",status:"completed",input:null,fields:[],result:{solver_version:"1",summary_metrics:{max_temperature_c:30},converged:true,governing_equations:[],assumptions:[],warnings:[],validation_metadata:{convergence_evidence:{resolution_refinement_performed_for_current_run:false}},reproducibility_hash:"hash"}}],
+      hypothesis:null,geometry_family:"pyramid",status:"active",designs:[{id:"design-1",variation_index:0,generation_status:"completed",parameters:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"},files:[]}],generation_jobs:[{id:"cad-generation-job",status:"completed",progress_percent:100,completed_count:2,failed_count:0}],simulations:[{id:"run-1",design_id:"design-1",solver_id:"pyramid_thermal_conduction_v1",status:"completed",input:null,fields:[],result:{solver_version:"1",summary_metrics:{max_temperature_c:30},converged:true,governing_equations:[],assumptions:[],warnings:[],validation_metadata:{convergence_evidence:{resolution_refinement_performed_for_current_run:false}},reproducibility_hash:"hash"}}],
       analyses:[],decisions:[],reports:[],updated_at:"2026-08-05T00:00:00Z",
     });
     if(path==="/api/design/parse")return Promise.resolve({params:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"}});
     if(path==="/api/design/design-space/preview")return Promise.resolve({variant_count:2,variants:[{variation_index:0,parameters:{geometry_type:"pyramid",base_length_m:2,height_m:2,slope_angle_deg:45,material:"concrete"},varied_values:{}},{variation_index:1,parameters:{geometry_type:"pyramid",base_length_m:2,height_m:4,slope_angle_deg:45,material:"concrete"},varied_values:{}}]});
-    if(path==="/api/design/generate-batch")return Promise.resolve({job_id:"cad-job",study_id:"study-1",status:"completed"});
+    if(path==="/api/design/generate-batch")return Promise.resolve({job_id:"cad-job",study_id:"study-1",status:cadJob.status});
     if(path==="/api/studies/study-1/comparison-plan")return Promise.resolve({evaluation_class:"comparative",model_disclosure:"controlled",variant_count:1,varies:["height_m"],held_constant:{}});
     if(path==="/api/studies/study-1/comparative-runs")return Promise.resolve({job_id:"simulation-job",study_id:"study-1",status:"queued"});
     if(path==="/api/v2/decisions")return Promise.resolve({id:"decision-1",payload:{status:"proposed",recommendation:{statement:"Review"}}});
@@ -63,7 +64,7 @@ describe("durable research study",()=>{
     expect(JSON.parse(String(call?.[1]?.body)).objectives[0]).toMatchObject({metric_code:"max_temperature_c",unit:"degC"});
   });
 
-  it("keeps CAD generation in Design Space instead of misleading simulation Execution",async()=>{
+  it("keeps CAD generation in Design Space with an explicit Physics handoff",async()=>{
     render(<ResearchStudy studyId="study-1"/>);
     await screen.findByRole("heading",{name:"Persisted pyramid study"});
     fireEvent.click(screen.getByRole("button",{name:"Design"}));
@@ -75,8 +76,26 @@ describe("durable research study",()=>{
     fireEvent.click(screen.getByRole("button",{name:"Generate 2 CAD variants"}));
     await waitFor(()=>expect(vi.mocked(api)).toHaveBeenCalledWith("/api/design/generate-batch",expect.anything()));
     expect(screen.getByRole("heading",{name:"Deterministic design space"})).toBeInTheDocument();
-    expect(screen.queryByRole("heading",{name:/Durable batch execution/i})).not.toBeInTheDocument();
+    expect(await screen.findByRole("heading",{name:"CAD generation completed"})).toBeInTheDocument();
+    expect(screen.getByText("2 CAD design variants are ready. Physics simulations have not run yet.")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button",{name:"Continue to Physics"}));
+    expect(await screen.findByRole("heading",{name:"Comparable physics"})).toBeInTheDocument();
+    expect(screen.queryByRole("heading",{name:/Durable simulation execution/i})).not.toBeInTheDocument();
     expect(vi.mocked(api)).not.toHaveBeenCalledWith("/api/studies/study-1/comparative-runs",expect.anything());
+  });
+
+  it("labels an active CAD job as generation rather than simulation execution",async()=>{
+    cadJob.status="queued";
+    render(<ResearchStudy studyId="study-1"/>);
+    await screen.findByRole("heading",{name:"Persisted pyramid study"});
+    fireEvent.click(screen.getByRole("button",{name:"Design"}));
+    fireEvent.click(screen.getByRole("button",{name:"Parse into editable parameters"}));
+    fireEvent.click(await screen.findByRole("button",{name:"Define design space"}));
+    fireEvent.click(screen.getByRole("button",{name:"Resolve final variants"}));
+    fireEvent.click(await screen.findByRole("button",{name:"Generate 2 CAD variants"}));
+    expect(await screen.findByRole("heading",{name:"Generating CAD variants..."})).toBeInTheDocument();
+    expect(screen.getByText("CAD design artifacts are being generated. Physics simulations have not run yet.")).toBeInTheDocument();
+    cadJob.status="completed";
   });
 
   it("uses Execution only after comparative simulation execution starts",async()=>{
@@ -86,7 +105,8 @@ describe("durable research study",()=>{
     fireEvent.click(screen.getByRole("button",{name:"Build pre-run comparison"}));
     expect(await screen.findByRole("button",{name:"Confirm and execute 1 runs"})).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button",{name:"Confirm and execute 1 runs"}));
-    expect(await screen.findByRole("heading",{name:/Durable batch execution/i})).toBeInTheDocument();
+    expect(await screen.findByRole("heading",{name:/Durable simulation execution/i})).toBeInTheDocument();
+    expect(screen.queryByText("cad-generation-job")).not.toBeInTheDocument();
     expect(vi.mocked(api)).toHaveBeenCalledWith("/api/studies/study-1/comparative-runs",expect.anything());
   });
 });
