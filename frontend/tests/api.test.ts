@@ -1,4 +1,4 @@
-import { api, ApiError, download } from "@/lib/api";
+import { api, ApiError, download, normalizeApiError } from "@/lib/api";
 import { vi } from "vitest";
 
 vi.mock("@/lib/supabase", () => ({
@@ -37,5 +37,11 @@ describe("authenticated API transport", () => {
       expect((error as ApiError).status).toBe(422);
       expect((error as ApiError).code).toBe("INVALID_INPUT");
     }
+  });
+  it("normalizes FastAPI strings, validation arrays, nested objects, and unknown bodies", () => {
+    expect(normalizeApiError({ detail: "Base length must be greater than zero" })).toBe("Base length must be greater than zero");
+    expect(normalizeApiError({ detail: [{ loc: ["body", "base_length_m"], msg: "Input should be greater than 0" }] })).toBe("base_length_m: Input should be greater than 0");
+    expect(normalizeApiError({ detail: { boundary_conditions: { heat_source_w_m3: { message: "Must be non-negative" } } } })).toContain("Must be non-negative");
+    expect(normalizeApiError({ detail: { type: "validation_error" } })).not.toBe("[object Object]");
   });
 });

@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import "./globals.css";
 import "./unified-ux.css";
+import "./release-blockers.css";
 
 export const metadata: Metadata = {
   title: "ASRE–Lab · Evidence-backed engineering",
