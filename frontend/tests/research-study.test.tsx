@@ -20,11 +20,13 @@ vi.mock("@/lib/api", () => ({
     if (path === "/api/studies/study-1/comparison-plan") return Promise.resolve({ evaluation_class: "comparative", model_disclosure: "controlled", variant_count: 1, varies: ["height_m"], held_constant: {} });
     if (path === "/api/studies/study-1/comparative-runs") return Promise.resolve({ job_id: "simulation-job", study_id: "study-1", status: "queued" });
     if (path.startsWith("/api/studies/")) {
-      const decisionStatus = path.endsWith("study-actioned") ? "accepted" : undefined;
+      const hasReport = path.endsWith("study-report");
+      const hasAnalysis = path.endsWith("study-analysis");
+      const decisionStatus = path.endsWith("study-actioned") || hasReport ? "accepted" : undefined;
       return Promise.resolve({
       id: "study-1", title: "Persisted pyramid study", description: "", research_question: "How does height matter?",
       hypothesis: null, geometry_family: "pyramid", status: "active", designs: [{ id: "design-1", variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, generation_status: "completed", files: [] }], generation_jobs: [{ id: "cad-generation-job", status: "completed", progress_percent: 100, completed_count: 2, failed_count: 0 }], simulations: [{ id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", input: null, fields: [], result: { solver_version: "1", summary_metrics: { max_temperature_c: 30 }, converged: true, governing_equations: [], assumptions: [], warnings: [], validation_metadata: { convergence_evidence: { resolution_refinement_performed_for_current_run: false } }, reproducibility_hash: "hash" } }],
-      analyses: [], decisions: decisionStatus ? [{ id: "decision-actioned", status: decisionStatus, payload: { status: decisionStatus } }] : [], reports: [], updated_at: "2026-08-05T00:00:00Z",
+      analyses: hasAnalysis ? [{ id: "analysis-1", dataset_hash: "dataset-hash", data_quality: {}, result: {}, warnings: [] }] : [], decisions: decisionStatus ? [{ id: "decision-actioned", status: decisionStatus, payload: { status: decisionStatus } }] : [], reports: hasReport ? [{ id: "report-1", status: "complete", payload: { status: "complete" } }] : [], updated_at: "2026-08-05T00:00:00Z",
       });
     }
     if (path === "/api/v2/decisions") return Promise.resolve({ id: "decision-1", payload: { status: "proposed", recommendation: { statement: "Review" } } });
@@ -39,7 +41,8 @@ describe("durable research study workspace", () => {
     render(<ResearchStudy studyId="study-1" />);
     expect(await screen.findByRole("heading", { name: "Persisted pyramid study" })).toBeInTheDocument();
     for (const stage of ["Question", "Design", "Physics", "Validation", "Run", "Evidence", "Decision", "Report"]) expect(screen.getByRole("button", { name: new RegExp(`^${stage}(,|$)`) })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Question, complete" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByRole("button", { name: "Evidence, persisted result available" })).toHaveAttribute("aria-current", "step");
+    expect(screen.getByLabelText("Study progress")).toHaveTextContent("Continue from Evidence");
     expect(screen.getByRole("button", { name: "Run, completed" })).toHaveAccessibleName("Run, completed");
     fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
     expect(screen.getByRole("button", { name: "Run, completed" })).toHaveAttribute("aria-current", "step");
@@ -61,7 +64,7 @@ describe("durable research study workspace", () => {
     render(<ResearchStudy studyId="study-1" />);
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
     const inspector = screen.getByRole("complementary", { name: "Study inspector" });
-    expect(inspector).toHaveTextContent("Study metadata");
+    expect(inspector).toHaveTextContent("Selected evidence context");
     fireEvent.click(screen.getByRole("button", { name: "Run, completed" }));
     expect(inspector).toHaveTextContent("Execution trace");
     expect(inspector).toHaveTextContent("Latest persisted result");
@@ -98,6 +101,9 @@ describe("durable research study workspace", () => {
     expect(JSON.parse(String(call?.[1]?.body)).objectives[0]).toMatchObject({ metric_code: "max_temperature_c", unit: "degC" });
     expect(JSON.parse(String(call?.[1]?.body)).designs[0]).toMatchObject({ validity_status: "valid", confidence: "moderate", evidence_ids: ["trust-1"] });
     expect(JSON.stringify(JSON.parse(String(call?.[1]?.body)))).not.toContain("run-1\"]");
+    expect(await screen.findByLabelText("Decision basis")).toHaveTextContent("Human decision basis");
+    expect(screen.getByLabelText("Decision basis")).toHaveTextContent("Design 01");
+    expect(screen.getByLabelText("Decision basis")).toHaveTextContent("Analysis not yet generated");
   });
 
   it("keeps the canvas selection, evidence ledger, trust panel, and inspector on one persisted run", async () => {
@@ -148,6 +154,21 @@ describe("durable research study workspace", () => {
     await screen.findByRole("heading", { name: "Persisted pyramid study" });
     const decisionStage = screen.getByRole("button", { name: "Decision, human action recorded" });
     expect(decisionStage.querySelector(".study-tree-marker")).toHaveClass("complete");
+  });
+
+  it("shows an in-product summary for an available report", async () => {
+    render(<ResearchStudy studyId="study-report" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    expect(screen.getByLabelText("Research report summary")).toHaveTextContent("Persisted pyramid study");
+    expect(screen.getByLabelText("Research report summary")).toHaveTextContent("Design 01");
+    expect(screen.getByLabelText("Research report summary")).toHaveTextContent("accepted");
+  });
+
+  it("labels rerunning analysis as a new persisted analysis", async () => {
+    render(<ResearchStudy studyId="study-analysis" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    expect(screen.getByLabelText("Analysis state")).toHaveTextContent("Analysis available");
+    expect(screen.getByRole("button", { name: "Run a new persisted analysis" })).toBeInTheDocument();
   });
 
   it("keeps active CAD generation in Design and labels it as CAD work", async () => {

@@ -13,6 +13,10 @@ it("renders Documentation inside AppShell with an active workspace route", () =>
   expect(screen.getByRole("complementary", { name: "Research workspace navigation" })).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("href", "/app/docs");
   expect(screen.getByRole("link", { name: "Documentation" })).toHaveAttribute("data-active", "true");
-  expect(screen.getByRole("heading", { name: "Engineering workflow reference" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "From a research question to a traceable engineering record" })).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "What ASRE-Lab does" })).toBeInTheDocument();
+  expect(screen.getByText("CAD generation ≠ physics simulation")).toBeInTheDocument();
+  expect(screen.getByText("Simulation convergence ≠ spatial refinement")).toBeInTheDocument();
+  expect(screen.getByText("Human Decision")).toBeInTheDocument();
   expect(screen.getByRole("link", { name: "Back to Studies" })).toHaveAttribute("href", "/app/dashboard");
 });

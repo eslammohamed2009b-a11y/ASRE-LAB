@@ -11,11 +11,13 @@ it("renders only persisted evidence and exact Scientific Trust dimensions", () =
   render(<><ScientificTrustPanel trust={trust} onDerive={vi.fn()} /><ScientificTrustPanel trust={notApplicableTrust} onDerive={vi.fn()} /><EvidenceLedger records={[trust, { ...trust, id: "field-1", record_type: "field_result", payload: { field: "temperature" } }]} /></>);
   expect(screen.getAllByLabelText("Scientific Trust")[0]).toHaveTextContent("Classification HIGH");
   expect(screen.getAllByLabelText("Scientific Trust")[0]).toHaveTextContent(/validity\s*PASS/);
-  expect(screen.getAllByLabelText("Scientific Trust")[0]).toHaveTextContent(/run convergence\s*FAIL/);
+  expect(screen.getAllByLabelText("Scientific Trust")[0]).toHaveTextContent(/Run \/ iterative convergence\s*FAIL/);
   expect(screen.getAllByLabelText("Scientific Trust")[0]).toHaveTextContent(/refinement\s*NOT_RUN/);
   expect(screen.getAllByLabelText("Scientific Trust")[1]).toHaveTextContent(/NOT_APPLICABLE/);
   expect(screen.getByLabelText("Evidence ledger")).toHaveTextContent("field_result");
-  expect(screen.queryByText(/confidence|percentage|validated/i)).not.toBeInTheDocument();
+  expect(screen.getAllByText(/not a percentage and does not replace a human decision/i)).toHaveLength(2);
+  expect(screen.getAllByText(/NOT_RUN means no such comparison was performed/i)).toHaveLength(2);
+  expect(screen.getAllByText(/NOT_RUN means no spatial refinement study was performed/i)).toHaveLength(2);
 });
 
 it("offers backend derivation only when the selected run has no persisted trust", () => {
