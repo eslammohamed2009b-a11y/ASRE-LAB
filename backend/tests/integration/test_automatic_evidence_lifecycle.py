@@ -1,5 +1,6 @@
 import json
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 
@@ -218,3 +219,122 @@ def test_owner_scoped_retrieval_is_typed_traceable_and_leaks_no_storage_location
     assert client.get("/api/simulations/not-real/evidence").status_code == 404
     assert client.post(f"/api/simulations/{simulation_id}/evidence", json={}).status_code == 405
     app.dependency_overrides.clear()
+
+
+def test_evidence_read_retries_remote_protocol_error_then_succeeds(tmp_path, monkeypatch):
+    repo, _, simulation_id, _ = _run(tmp_path)
+    original_list = service.list_simulation_evidence
+    calls = 0
+
+    def flaky_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.RemoteProtocolError("Server disconnected")
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(service, "get_repository", lambda: repo)
+    monkeypatch.setattr(service, "list_simulation_evidence", flaky_list)
+    monkeypatch.setattr(service.time, "sleep", lambda _: None)
+    app.dependency_overrides[get_current_user] = lambda: {"id": "owner-a"}
+    try:
+        response = TestClient(app).get(f"/api/simulations/{simulation_id}/evidence")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()
+    assert calls == 2
+
+
+def test_evidence_read_retries_write_error_then_succeeds(tmp_path, monkeypatch):
+    repo, _, simulation_id, _ = _run(tmp_path)
+    original_list = service.list_simulation_evidence
+    calls = 0
+
+    def flaky_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.WriteError("Broken pipe")
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(service, "get_repository", lambda: repo)
+    monkeypatch.setattr(service, "list_simulation_evidence", flaky_list)
+    monkeypatch.setattr(service.time, "sleep", lambda _: None)
+    app.dependency_overrides[get_current_user] = lambda: {"id": "owner-a"}
+    try:
+        response = TestClient(app).get(f"/api/simulations/{simulation_id}/evidence")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()
+    assert calls == 2
+
+
+def test_evidence_read_returns_safe_503_after_transient_transport_retries(tmp_path, monkeypatch):
+    repo, _, simulation_id, _ = _run(tmp_path)
+    calls = 0
+
+    def unavailable_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise httpx.TransportError("temporary connection reset")
+
+    monkeypatch.setattr(service, "get_repository", lambda: repo)
+    monkeypatch.setattr(service, "list_simulation_evidence", unavailable_list)
+    monkeypatch.setattr(service.time, "sleep", lambda _: None)
+    app.dependency_overrides[get_current_user] = lambda: {"id": "owner-a"}
+    try:
+        response = TestClient(app).get(f"/api/simulations/{simulation_id}/evidence")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 503
+    assert response.json() == {"detail": "Evidence storage is temporarily unavailable. Please retry."}
+    assert calls == 3
+
+
+def test_evidence_read_does_not_retry_owner_or_not_found_failures(tmp_path, monkeypatch):
+    repo, _, simulation_id, _ = _run(tmp_path)
+    calls = 0
+
+    def missing_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        raise LookupError("Simulation not found")
+
+    monkeypatch.setattr(service, "get_repository", lambda: repo)
+    monkeypatch.setattr(service, "list_simulation_evidence", missing_list)
+    app.dependency_overrides[get_current_user] = lambda: {"id": "owner-a"}
+    try:
+        response = TestClient(app).get(f"/api/simulations/{simulation_id}/evidence")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 404
+    assert calls == 1
+
+
+def test_evidence_read_normal_request_remains_single_attempt(tmp_path, monkeypatch):
+    repo, _, simulation_id, _ = _run(tmp_path)
+    original_list = service.list_simulation_evidence
+    calls = 0
+
+    def counted_list(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        return original_list(*args, **kwargs)
+
+    monkeypatch.setattr(service, "get_repository", lambda: repo)
+    monkeypatch.setattr(service, "list_simulation_evidence", counted_list)
+    app.dependency_overrides[get_current_user] = lambda: {"id": "owner-a"}
+    try:
+        response = TestClient(app).get(f"/api/simulations/{simulation_id}/evidence")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json()
+    assert calls == 1
