@@ -233,6 +233,45 @@ def test_partial_simulation_failure_keeps_the_comparative_batch_partial(comparat
     assert job.status == "partial_failure"
     assert job.completed_count == 0
     assert job.failed_count == 1
+    assert job.error_code == "partial_failure"
+    assert job.safe_error_message
+
+
+@pytest.mark.parametrize(
+    ("simulation_status", "analysis_failure", "expected_status", "expected_error_code"),
+    [
+        ("failed", False, "failed", "partial_failure"),
+        ("completed", True, "partial_failure", "analysis_failed"),
+        ("completed", False, "completed", None),
+    ],
+)
+def test_comparative_batch_error_code_has_failure_precedence(
+    comparative_study, monkeypatch, simulation_status, analysis_failure, expected_status, expected_error_code,
+):
+    repo, study_id, design_ids = comparative_study
+    job_id = repo.create_job(study_id, "user-test", "comparative_simulation_batch", 1)
+    monkeypatch.setattr(
+        comparative_tasks, "run_simulation_job",
+        lambda **_kwargs: {"status": simulation_status},
+    )
+    if analysis_failure:
+        def fail_analysis(*_args, **_kwargs):
+            raise RuntimeError("analysis persistence failed")
+        monkeypatch.setattr(comparative_tasks, "run_experiment_analysis", fail_analysis)
+    else:
+        monkeypatch.setattr(
+            comparative_tasks, "run_experiment_analysis",
+            lambda *_args, **_kwargs: SimpleNamespace(id="analysis-1"),
+        )
+
+    result = comparative_tasks.run_comparative_batch(
+        job_id, study_id, "user-test", [{"simulation_id": "simulation-1", "design_id": design_ids[0]}],
+    )
+
+    job = repo.get_job(job_id)
+    assert result["status"] == expected_status
+    assert job.status == expected_status
+    assert job.error_code == expected_error_code
 
 
 def test_real_persisted_pyramid_runs_support_phase4_study_analysis(authorized_client, comparative_study):

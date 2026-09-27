@@ -65,7 +65,7 @@ def run_comparative_batch(job_id: str, study_id: str, user_id: str, specificatio
     repo.update_job(
         job_id, status=status, completed_count=completed, failed_count=failed + partial,
         progress_percent=100,
-        error_code="analysis_failed" if analysis_error else "partial_failure" if failed else None,
+        error_code="analysis_failed" if analysis_error else "partial_failure" if failed or partial else None,
         safe_error_message=(
             "Simulations were preserved, but automatic dataset analysis failed."
             if analysis_error else "Some simulations did not complete fully; preserved results remain available."
