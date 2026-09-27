@@ -1,3 +1,7 @@
+import time
+
+import httpx
+
 from app.module2_simulation.schemas import AnalysisType, SimulationRunRequest, SimulationRunResponse
 from app.module2_simulation.solver_registry import UnsupportedAnalysisError, is_supported
 from app.module2_simulation.solvers.base_solver import Mesh
@@ -77,6 +81,14 @@ class SimulationRateLimitError(Exception):
 
 class SimulationWorkerUnavailableError(Exception):
     pass
+
+
+class EvidenceStorageUnavailableError(Exception):
+    """Authoritative Evidence storage could not be reached after bounded retries."""
+
+
+_EVIDENCE_LIST_MAX_ATTEMPTS = 3
+_EVIDENCE_LIST_RETRY_DELAYS_SECONDS = (0.05, 0.1)
 
 
 def _now_iso() -> str:
@@ -251,10 +263,15 @@ def get_simulation_results_service(simulation_id: str, user_id: str) -> Simulati
 
 def list_simulation_evidence_service(simulation_id: str, user_id: str) -> list[dict]:
     repo = get_repository()
-    try:
-        return list_simulation_evidence(repo, simulation_id, user_id)
-    except LookupError as exc:
-        raise SimulationNotFoundError(simulation_id) from exc
+    for attempt in range(_EVIDENCE_LIST_MAX_ATTEMPTS):
+        try:
+            return list_simulation_evidence(repo, simulation_id, user_id)
+        except LookupError as exc:
+            raise SimulationNotFoundError(simulation_id) from exc
+        except httpx.TransportError as exc:
+            if attempt == _EVIDENCE_LIST_MAX_ATTEMPTS - 1:
+                raise EvidenceStorageUnavailableError() from exc
+            time.sleep(_EVIDENCE_LIST_RETRY_DELAYS_SECONDS[attempt])
 
 
 def _field_metadata(record) -> FieldResultMetadataResponse:

@@ -92,6 +92,7 @@ from app.module2_simulation.schemas import (  # noqa: E402
     ScientificEvidenceResponse,
 )
 from app.module2_simulation.service import (  # noqa: E402
+    EvidenceStorageUnavailableError,
     SimulationNotFoundError,
     SimulationRateLimitError,
     SimulationWorkerUnavailableError,
@@ -237,6 +238,11 @@ def list_simulation_evidence(
         return list_simulation_evidence_service(simulation_id, current_user["id"])
     except SimulationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="Simulation not found") from exc
+    except EvidenceStorageUnavailableError as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="Evidence storage is temporarily unavailable. Please retry.",
+        ) from exc
 
 
 @simulations_router.get(
