@@ -75,6 +75,18 @@ describe("durable research study workspace", () => {
     expect(screen.queryByText("report-1")).not.toBeInTheDocument();
   });
 
+  it("does not let a late response from the previous Study overwrite the newly selected Study", async () => {
+    let resolveFirstStudy: (value: unknown) => void;
+    vi.mocked(api).mockImplementationOnce(() => new Promise(resolve => { resolveFirstStudy = resolve; }));
+    const view = render(<ResearchStudy studyId="study-1" />);
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/studies/study-1"));
+    view.rerender(<ResearchStudy studyId="study-2" />);
+    expect(await screen.findByRole("heading", { name: "Second persisted pyramid study" })).toBeInTheDocument();
+    resolveFirstStudy!({ id: "study-1", title: "Late first study", description: "", research_question: "Late response must not replace the selected Study.", geometry_family: "pyramid", status: "active", designs: [], generation_jobs: [], simulations: [], analyses: [], decisions: [], reports: [], updated_at: "2026-09-27T00:00:00Z" });
+    await waitFor(() => expect(screen.queryByRole("heading", { name: "Late first study" })).not.toBeInTheDocument());
+    expect(screen.getByRole("heading", { name: "Second persisted pyramid study" })).toBeInTheDocument();
+  });
+
   it("changes the contextual inspector without inventing validation or trust", async () => {
     render(<ResearchStudy studyId="study-1" />);
     await screen.findByRole("heading", { name: "Persisted pyramid study" });

@@ -1,6 +1,7 @@
 """Sequential durable execution of a controlled comparative batch."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
@@ -10,6 +11,9 @@ from app.core.storage import get_storage
 from app.module2_simulation.tasks import run_simulation_job
 from app.module3_analysis.schemas import AnalysisCreateRequest
 from app.module3_analysis.service import run_experiment_analysis
+
+
+logger = logging.getLogger(__name__)
 
 
 def _now() -> str:
@@ -22,20 +26,22 @@ def run_comparative_batch(job_id: str, study_id: str, user_id: str, specificatio
     if job is None or job.user_id != user_id:
         raise ValueError("Unknown comparative batch")
     repo.update_job(job_id, status="running", started_at=_now())
-    completed = failed = 0
+    completed = failed = partial = 0
     storage = get_storage()
     for specification in specifications:
         current = repo.get_job(job_id)
         if current is not None and current.status == "cancelled":
             break
         outcome = run_simulation_job(**specification, repository=repo, storage=storage)
-        if outcome["status"] in {"completed", "partial_failure"}:
+        if outcome["status"] == "completed":
             completed += 1
+        elif outcome["status"] == "partial_failure":
+            partial += 1
         else:
             failed += 1
         repo.update_job(
-            job_id, completed_count=completed, failed_count=failed,
-            progress_percent=round(90 * (completed + failed) / len(specifications)),
+            job_id, completed_count=completed, failed_count=failed + partial,
+            progress_percent=round(90 * (completed + failed + partial) / len(specifications)),
         )
 
     current = repo.get_job(job_id)
@@ -53,16 +59,17 @@ def run_comparative_batch(job_id: str, study_id: str, user_id: str, specificatio
                 simulation_ids=[specification["simulation_id"] for specification in specifications],
             ).id
         except Exception:
+            logger.exception("Automatic comparative analysis failed for batch %s", job_id)
             analysis_error = True
-    status = "completed" if not failed and not analysis_error else "partial_failure" if completed else "failed"
+    status = "completed" if not failed and not partial and not analysis_error else "partial_failure" if completed or partial else "failed"
     repo.update_job(
-        job_id, status=status, completed_count=completed, failed_count=failed,
+        job_id, status=status, completed_count=completed, failed_count=failed + partial,
         progress_percent=100,
         error_code="analysis_failed" if analysis_error else "partial_failure" if failed else None,
         safe_error_message=(
             "Simulations were preserved, but automatic dataset analysis failed."
-            if analysis_error else "Some simulations failed; successful results were preserved."
-            if failed else None
+            if analysis_error else "Some simulations did not complete fully; preserved results remain available."
+            if failed or partial else None
         ),
         finished_at=_now(),
     )

@@ -60,6 +60,8 @@ export function ResearchStudy({ studyId }: { studyId?: string }) {
   const [reportDownloadFeedback, setReportDownloadFeedback] = useState<{ type: "success" | "error"; text: string } | null>(null);
   const [study, setStudy] = useState<Study | null>(null);
   const hasRestoredStage = useRef(false);
+  const activeStudyId = useRef<string | undefined>(studyId);
+  activeStudyId.current = studyId;
   const [setup, setSetup] = useState({ title: "Controlled pyramid thermal study", description: "", research_question: "How does pyramid height affect a bounded thermal result under controlled conditions?", hypothesis: "", geometry_family: "pyramid" });
   const [prompt, setPrompt] = useState("pyramid with a 2 m by 2 m base and 4 m height made of concrete");
   const [params, setParams] = useState<Params | null>(null);
@@ -84,10 +86,11 @@ export function ResearchStudy({ studyId }: { studyId?: string }) {
   const [derivingTrust, setDerivingTrust] = useState(false);
 
   async function act(name: string, operation: () => Promise<void>) { setBusy(name); setMessage(""); try { await operation(); } catch (error) { setMessage(error instanceof Error ? error.message : "The request failed."); } finally { setBusy(""); } }
+  useEffect(() => () => { activeStudyId.current = undefined; }, []);
   useEffect(() => { hasRestoredStage.current = false; setStudy(null); setSelected([]); setActiveJob(null); setActiveJobKind(null); setComparison(null); setDecision(null); setReport(null); setCanvasDesignId(""); setCanvasSimulationId(""); setEvidenceBySimulation({}); setReportDownloadFeedback(null); }, [studyId]);
-  const load = useCallback(async () => { if (!studyId) return; const value = await api<Study>(`/api/studies/${studyId}`); setStudy(value); setSelected(old => old.length ? old : value.designs.map(item => item.id)); setDecision(value.decisions.at(-1) || null); setReport(value.reports.at(-1) || null); if (!hasRestoredStage.current) { setStage(resumeStage(value)); hasRestoredStage.current = true; } }, [studyId]);
-  useEffect(() => { load().catch(error => setMessage(error.message)); }, [load]);
-  useEffect(() => { if (!activeJob || terminal.has(activeJob.status)) return; const timer = setInterval(() => { api<Job>(`/api/jobs/${activeJob.job_id || activeJob.id}`).then(value => { setActiveJob(value); if (terminal.has(value.status)) load(); }).catch(error => setMessage(error.message)); }, 1500); return () => clearInterval(timer); }, [activeJob, load]);
+  const load = useCallback(async () => { if (!studyId) return; const value = await api<Study>(`/api/studies/${studyId}`); if (activeStudyId.current !== studyId) return; setStudy(value); setSelected(old => old.length ? old : value.designs.map(item => item.id)); setDecision(value.decisions.at(-1) || null); setReport(value.reports.at(-1) || null); if (!hasRestoredStage.current) { setStage(resumeStage(value)); hasRestoredStage.current = true; } }, [studyId]);
+  useEffect(() => { load().catch(error => { if (activeStudyId.current === studyId) setMessage(error.message); }); }, [load, studyId]);
+  useEffect(() => { if (!activeJob || terminal.has(activeJob.status)) return; const timer = setInterval(() => { api<Job>(`/api/jobs/${activeJob.job_id || activeJob.id}`).then(value => { if (activeStudyId.current !== studyId) return; setActiveJob(value); if (terminal.has(value.status)) load(); }).catch(error => { if (activeStudyId.current === studyId) setMessage(error.message); }); }, 1500); return () => clearInterval(timer); }, [activeJob, load, studyId]);
   useEffect(() => { if (!study) return; if (!study.designs.some(design => design.id === canvasDesignId)) setCanvasDesignId(study.designs[0]?.id || ""); }, [study, canvasDesignId]);
   useEffect(() => { const matching = study?.simulations.filter(simulation => simulation.design_id === canvasDesignId) || []; if (!matching.some(simulation => simulation.id === canvasSimulationId)) setCanvasSimulationId(matching[0]?.id || ""); }, [study, canvasDesignId, canvasSimulationId]);
 

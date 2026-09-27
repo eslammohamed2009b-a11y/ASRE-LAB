@@ -52,9 +52,12 @@ export function ResourceDetail({ kind, id }: { kind: keyof typeof resourcePaths;
 
   async function fieldDownload(fieldId: string) {
     setBusy(fieldId);
+    setError("");
     try {
       const result = await download(`/api/simulations/${encodeURIComponent(id)}/fields/${encodeURIComponent(fieldId)}/download`);
-      startArtifactDownload(result, `${fieldId}.npz`);
+      startArtifactDownload(result, `${fieldId}.npz`, "Field artifact download failed. Please try again.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Field artifact download failed. Please try again.");
     } finally { setBusy(""); }
   }
 

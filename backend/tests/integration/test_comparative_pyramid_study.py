@@ -1,4 +1,5 @@
 import os
+from types import SimpleNamespace
 
 import pytest
 
@@ -208,6 +209,30 @@ def test_invalid_material_is_a_safe_422_without_partial_records(authorized_clien
     assert response.status_code == 422
     assert "not in the material library" in response.json()["detail"]
     assert repo.list_simulation_jobs_for_experiment(study_id) == []
+
+
+def test_partial_simulation_failure_keeps_the_comparative_batch_partial(comparative_study, monkeypatch):
+    """A persisted partial simulation must never be reported as a completed batch."""
+    repo, study_id, design_ids = comparative_study
+    job_id = repo.create_job(study_id, "user-test", "comparative_simulation_batch", 1)
+    monkeypatch.setattr(
+        comparative_tasks, "run_simulation_job",
+        lambda **_kwargs: {"status": "partial_failure"},
+    )
+    monkeypatch.setattr(
+        comparative_tasks, "run_experiment_analysis",
+        lambda *_args, **_kwargs: SimpleNamespace(id="analysis-1"),
+    )
+
+    result = comparative_tasks.run_comparative_batch(
+        job_id, study_id, "user-test", [{"simulation_id": "partial-simulation", "design_id": design_ids[0]}],
+    )
+
+    job = repo.get_job(job_id)
+    assert result["status"] == "partial_failure"
+    assert job.status == "partial_failure"
+    assert job.completed_count == 0
+    assert job.failed_count == 1
 
 
 def test_real_persisted_pyramid_runs_support_phase4_study_analysis(authorized_client, comparative_study):

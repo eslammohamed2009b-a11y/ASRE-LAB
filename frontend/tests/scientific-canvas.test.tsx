@@ -1,16 +1,16 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import { ScientificCanvas, type CanvasDesign, type CanvasSimulation } from "@/components/workspace/scientific-canvas";
-import { download } from "@/lib/api";
+import { download, startArtifactDownload } from "@/lib/api";
 
-vi.mock("@/lib/api", () => ({ download: vi.fn() }));
+vi.mock("@/lib/api", () => ({ download: vi.fn(), startArtifactDownload: vi.fn() }));
 
 const firstDesign: CanvasDesign = { id: "design-1", variation_index: 0, parameters: { base_length_m: 2, height_m: 4, slope_angle_deg: 45, material: "concrete" }, files: [] };
 const secondDesign: CanvasDesign = { id: "design-2", variation_index: 1, parameters: { base_length_m: 2, height_m: 5, slope_angle_deg: 50, material: "concrete" }, files: [] };
 const firstRun: CanvasSimulation = { id: "run-1", design_id: "design-1", solver_id: "pyramid_thermal_conduction_v1", status: "completed", fields: [], result: { solver_version: "1.0", summary_metrics: { max_temperature_c: 30.41 }, converged: true, warnings: [] } };
 const secondRun: CanvasSimulation = { id: "run-2", design_id: "design-2", solver_id: "pyramid_thermal_conduction_v1", status: "completed", fields: [{ id: "field-1", field_name: "temperature" }], result: { solver_version: "1.1", summary_metrics: { max_temperature_c: 31.25, raw_metric: 9 }, converged: false, warnings: ["Reported solver warning"] } };
 
-beforeEach(() => vi.mocked(download).mockReset());
+beforeEach(() => { vi.mocked(download).mockReset(); vi.mocked(startArtifactDownload).mockReset(); });
 
 it("shows an honest empty state when a persisted design has no STL", () => {
   render(<ScientificCanvas designs={[firstDesign]} simulations={[firstRun]} solverId="pyramid_thermal_conduction_v1" />);
@@ -61,4 +61,11 @@ it("labels the CAD view and pyramid solver model without calling CAD triangulati
   fireEvent.click(screen.getByRole("button", { name: "CAD triangulation" }));
   expect(screen.getByRole("button", { name: "Solid CAD" })).toBeInTheDocument();
   expect(screen.queryByText(/^solver mesh$/i)).not.toBeInTheDocument();
+});
+
+it("shows an accessible error when a private field artifact download fails", async () => {
+  vi.mocked(download).mockRejectedValueOnce(new Error("The artifact is unavailable."));
+  render(<ScientificCanvas designs={[secondDesign]} simulations={[secondRun]} solverId="pyramid_thermal_conduction_v1" />);
+  fireEvent.click(screen.getByRole("button", { name: "Download NPZ" }));
+  expect(await screen.findByRole("alert")).toHaveTextContent("The artifact is unavailable.");
 });

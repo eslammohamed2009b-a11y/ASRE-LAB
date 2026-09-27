@@ -47,6 +47,7 @@ export function ScientificCanvas({ designs, simulations, solverId, selectedDesig
   const [geometry, setGeometry] = useState<BufferGeometry | null>(null);
   const [loadState, setLoadState] = useState<"idle" | "loading" | "error">("idle");
   const [loadError, setLoadError] = useState("");
+  const [fieldDownloadError, setFieldDownloadError] = useState("");
   const [viewportKey, setViewportKey] = useState(0);
 
   const currentDesignId = selectedDesignId ?? designId;
@@ -88,8 +89,13 @@ export function ScientificCanvas({ designs, simulations, solverId, selectedDesig
   async function downloadField(field: Record<string, unknown>) {
     const fieldId = typeof field.id === "string" ? field.id : "";
     if (!fieldId) return;
-    const artifact = await download(`/api/simulations/${encodeURIComponent(selectedRun?.id || "")}/fields/${encodeURIComponent(fieldId)}/download`);
-    startArtifactDownload(artifact, `${fieldId}.npz`);
+    setFieldDownloadError("");
+    try {
+      const artifact = await download(`/api/simulations/${encodeURIComponent(selectedRun?.id || "")}/fields/${encodeURIComponent(fieldId)}/download`);
+      startArtifactDownload(artifact, `${fieldId}.npz`, "Field artifact download failed. Please try again.");
+    } catch (error) {
+      setFieldDownloadError(error instanceof Error ? error.message : "Field artifact download failed. Please try again.");
+    }
   }
 
   if (!selectedDesign) return <section className="scientific-canvas scientific-canvas-empty" aria-label="Scientific canvas"><p>No persisted design is available for the scientific canvas.</p></section>;
@@ -112,6 +118,6 @@ export function ScientificCanvas({ designs, simulations, solverId, selectedDesig
     <footer className="scientific-canvas-footer"><span><b>CAD artifact</b> {stlFile ? "Persisted STL geometry" : "No STL artifact"} · <span className="mono">{selectedDesign.id}</span></span><span><b>Solver model</b> {isPyramidThermal ? "Masked Cartesian finite-difference pyramid model" : activeSolver}</span></footer>
     {isPyramidThermal && <p className="scientific-canvas-disclosure">The solver reconstructs its numerical domain from the persisted dimensions; the displayed STL is a design artifact, not the solver mesh.</p>}
     <div className="scientific-canvas-trace"><label>Persisted simulation<select aria-label="Persisted simulation" value={selectedRun?.id || ""} disabled={!matchingRuns.length} onChange={event => selectRun(event.target.value)}>{!matchingRuns.length && <option value="">No persisted simulation for this design</option>}{matchingRuns.map(run => <option key={run.id} value={run.id}>{run.id} · {statusText(run.status)}</option>)}</select></label>{selectedRun && <span>Design <span className="mono">{selectedDesign.id}</span> → Simulation <span className="mono">{selectedRun.id}</span> → {selectedRun.solver_id} → {statusText(selectedRun.status)}</span>}</div>
-    {selectedRun?.fields.length ? <div className="scientific-canvas-fields"><p className="workspace-stage-kicker">FIELD ARTIFACT INVENTORY</p>{selectedRun.fields.map((field, index) => { const fieldId = typeof field.id === "string" ? field.id : `field-${index}`; const name = String(field.field_name || field.name || "field"); return <div key={fieldId}><span>{name}</span><span className="mono">{fieldId}</span>{typeof field.id === "string" && <button type="button" className="secondary" onClick={() => downloadField(field)}>Download NPZ</button>}</div>; })}</div> : null}
+    {selectedRun?.fields.length ? <div className="scientific-canvas-fields"><p className="workspace-stage-kicker">FIELD ARTIFACT INVENTORY</p>{fieldDownloadError && <p className="error" role="alert">{fieldDownloadError}</p>}{selectedRun.fields.map((field, index) => { const fieldId = typeof field.id === "string" ? field.id : `field-${index}`; const name = String(field.field_name || field.name || "field"); return <div key={fieldId}><span>{name}</span><span className="mono">{fieldId}</span>{typeof field.id === "string" && <button type="button" className="secondary" onClick={() => downloadField(field)}>Download NPZ</button>}</div>; })}</div> : null}
   </section>;
 }
