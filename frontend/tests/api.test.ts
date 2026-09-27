@@ -1,4 +1,4 @@
-import { api, ApiError, download, normalizeApiError } from "@/lib/api";
+import { api, ApiError, download, normalizeApiError, startArtifactDownload } from "@/lib/api";
 import { vi } from "vitest";
 
 vi.mock("@/lib/supabase", () => ({
@@ -26,6 +26,34 @@ describe("authenticated API transport", () => {
     expect(fetchMock).toHaveBeenCalledWith("/_asre-api/api/simulations/run-1/export/csv", expect.any(Object));
     expect(fetchMock.mock.calls[0][1].headers.Authorization).toBe("Bearer test-token");
     expect(artifact.disposition).toBe("attachment; filename=result.csv");
+  });
+  it("starts non-empty artifact downloads through an attached temporary anchor and revokes the URL after click", () => {
+    const createObjectURL = vi.fn(() => "blob:report");
+    const revokeObjectURL = vi.fn();
+    const appendChild = vi.spyOn(document.body, "appendChild");
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    vi.stubGlobal("URL", { createObjectURL, revokeObjectURL });
+    vi.useFakeTimers();
+    try {
+      expect(startArtifactDownload({ blob: new Blob(["report"]), disposition: "attachment; filename=backend-report.json" }, "fallback.json")).toBe("backend-report.json");
+      const anchor = appendChild.mock.calls[0][0] as HTMLAnchorElement;
+      expect(anchor.tagName).toBe("A");
+      expect(anchor.href).toBe("blob:report");
+      expect(anchor.download).toBe("backend-report.json");
+      expect(click).toHaveBeenCalled();
+      expect(anchor.isConnected).toBe(false);
+      expect(revokeObjectURL).not.toHaveBeenCalled();
+      vi.runAllTimers();
+      expect(revokeObjectURL).toHaveBeenCalledWith("blob:report");
+    } finally {
+      vi.useRealTimers();
+      vi.unstubAllGlobals();
+      appendChild.mockRestore();
+      click.mockRestore();
+    }
+  });
+  it("rejects an empty artifact before attempting a browser download", () => {
+    expect(() => startArtifactDownload({ blob: new Blob([]), disposition: null }, "fallback.json", "Report download failed. Please try again.")).toThrow("Report download failed. Please try again.");
   });
   it("preserves safe backend errors", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({ detail: "Invalid input", code: "INVALID_INPUT" }), { status: 422 })));

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, download } from "@/lib/api";
+import { api, download, startArtifactDownload } from "@/lib/api";
 import type { Capability, EvidenceRecord, SimulationJob, SimulationResults, Validity } from "@/types/api";
 
 const stages = ["Design", "Physics", "Validation", "Execution", "Evidence", "Decision", "Report"] as const;
@@ -359,8 +359,7 @@ export function StudyWorkflow() {
     if (!report) return;
     await action(`download-${format}`, async () => {
       const artifact = await download(`/api/v2/reports/${report.id}/exports/${format}`);
-      const url = URL.createObjectURL(artifact.blob); const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = `asre-report.${format}`; anchor.click(); URL.revokeObjectURL(url);
+      startArtifactDownload(artifact, `asre-report.${format}`, "Report download failed. Please try again.");
     });
   }
 
@@ -368,8 +367,7 @@ export function StudyWorkflow() {
     if (!design?.design_id) return;
     await action("download-stl", async () => {
       const artifact = await download(`/api/design/export/${encodeURIComponent(String(design.design_id))}`);
-      const url = URL.createObjectURL(artifact.blob); const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = "asre-design.stl"; anchor.click(); URL.revokeObjectURL(url);
+      startArtifactDownload(artifact, "asre-design.stl");
     });
   }
 

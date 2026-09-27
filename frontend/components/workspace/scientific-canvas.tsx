@@ -5,7 +5,7 @@ import { Canvas } from "@react-three/fiber";
 import { useEffect, useMemo, useState } from "react";
 import { BufferGeometry, MeshStandardMaterial } from "three";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
-import { download } from "@/lib/api";
+import { download, startArtifactDownload } from "@/lib/api";
 
 export type CanvasDesign = { id: string; variation_index: number; parameters: { base_length_m: number; height_m: number; slope_angle_deg: number; material: string }; files: Array<{ id: string; file_format: string }> };
 export type CanvasSimulation = { id: string; design_id: string; solver_id: string; status: string; fields: Array<Record<string, unknown>>; result: { solver_version: string; summary_metrics: Record<string, number>; converged: boolean; warnings: string[] } | null };
@@ -89,8 +89,7 @@ export function ScientificCanvas({ designs, simulations, solverId, selectedDesig
     const fieldId = typeof field.id === "string" ? field.id : "";
     if (!fieldId) return;
     const artifact = await download(`/api/simulations/${encodeURIComponent(selectedRun?.id || "")}/fields/${encodeURIComponent(fieldId)}/download`);
-    const url = URL.createObjectURL(artifact.blob); const link = document.createElement("a");
-    link.href = url; link.download = `${fieldId}.npz`; link.click(); URL.revokeObjectURL(url);
+    startArtifactDownload(artifact, `${fieldId}.npz`);
   }
 
   if (!selectedDesign) return <section className="scientific-canvas scientific-canvas-empty" aria-label="Scientific canvas"><p>No persisted design is available for the scientific canvas.</p></section>;

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, ApiError, download } from "@/lib/api";
+import { api, ApiError, download, startArtifactDownload } from "@/lib/api";
 
 const resourcePaths = {
   simulation: "/api/simulations/",
@@ -41,10 +41,12 @@ export function ResourceDetail({ kind, id }: { kind: keyof typeof resourcePaths;
 
   async function reportExport(format: "pdf" | "json" | "csv") {
     setBusy(format);
+    setError("");
     try {
       const result = await download(`/api/v2/reports/${id}/exports/${format}`);
-      const url = URL.createObjectURL(result.blob); const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = `asre-report.${format}`; anchor.click(); URL.revokeObjectURL(url);
+      startArtifactDownload(result, `asre-report.${format}`, "Report download failed. Please try again.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Report download failed. Please try again.");
     } finally { setBusy(""); }
   }
 
@@ -52,8 +54,7 @@ export function ResourceDetail({ kind, id }: { kind: keyof typeof resourcePaths;
     setBusy(fieldId);
     try {
       const result = await download(`/api/simulations/${encodeURIComponent(id)}/fields/${encodeURIComponent(fieldId)}/download`);
-      const url = URL.createObjectURL(result.blob); const anchor = document.createElement("a");
-      anchor.href = url; anchor.download = `${fieldId}.npz`; anchor.click(); URL.revokeObjectURL(url);
+      startArtifactDownload(result, `${fieldId}.npz`);
     } finally { setBusy(""); }
   }
 

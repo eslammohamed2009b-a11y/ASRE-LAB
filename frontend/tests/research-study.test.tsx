@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { vi } from "vitest";
 import { ResearchStudy } from "@/components/research-study";
 import { EvidenceScatter } from "@/components/evidence-scatter";
-import { api } from "@/lib/api";
+import { api, download, startArtifactDownload } from "@/lib/api";
 
 const push = vi.fn();
 let evidenceMode: "existing" | "derive" | "missing-validity" = "existing";
@@ -20,6 +20,7 @@ vi.mock("@/lib/api", () => ({
     if (path === "/api/studies/study-1/comparison-plan") return Promise.resolve({ evaluation_class: "comparative", model_disclosure: "controlled", variant_count: 1, varies: ["height_m"], held_constant: {} });
     if (path === "/api/studies/study-1/comparative-runs") return Promise.resolve({ job_id: "simulation-job", study_id: "study-1", status: "queued" });
     if (path.startsWith("/api/studies/")) {
+      if (path.endsWith("study-2")) return Promise.resolve({ id: "study-2", title: "Second persisted pyramid study", description: "", research_question: "How does the second study differ?", hypothesis: null, geometry_family: "pyramid", status: "active", designs: [{ id: "design-2", variation_index: 0, parameters: { geometry_type: "pyramid", base_length_m: 3, height_m: 6, slope_angle_deg: 45, material: "concrete" }, generation_status: "completed", files: [] }], generation_jobs: [], simulations: [], analyses: [], decisions: [], reports: [], updated_at: "2026-08-06T00:00:00Z" });
       const hasReport = path.endsWith("study-report");
       const hasAnalysis = path.endsWith("study-analysis") || path.endsWith("study-multiple-analysis");
       const multipleAnalyses = path.endsWith("study-multiple-analysis");
@@ -34,10 +35,11 @@ vi.mock("@/lib/api", () => ({
     return Promise.resolve({});
   }),
   download: vi.fn(),
+  startArtifactDownload: vi.fn(),
 }));
 
 describe("durable research study workspace", () => {
-  afterEach(() => { evidenceMode = "existing"; derived = false; cadJobStatus = "completed"; push.mockClear(); vi.mocked(api).mockClear(); });
+  afterEach(() => { evidenceMode = "existing"; derived = false; cadJobStatus = "completed"; push.mockClear(); vi.mocked(api).mockClear(); vi.mocked(download).mockReset(); vi.mocked(startArtifactDownload).mockReset(); });
   it("renders the human-facing study tree and tracks the active stage", async () => {
     render(<ResearchStudy studyId="study-1" />);
     expect(await screen.findByRole("heading", { name: "Persisted pyramid study" })).toBeInTheDocument();
@@ -59,6 +61,18 @@ describe("durable research study workspace", () => {
     expect(screen.getByRole("button", { name: "Build pre-run comparison" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "Evidence, persisted result available" }));
     expect(screen.getByRole("button", { name: "Run persisted analysis" })).toBeInTheDocument();
+  });
+
+  it("resets selected study state when switching to a different persisted Study", async () => {
+    const view = render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    view.rerender(<ResearchStudy studyId="study-2" />);
+    expect(await screen.findByRole("heading", { name: "Second persisted pyramid study" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Physics" }));
+    expect(screen.getByRole("checkbox", { name: /Design 01.*h=6 m.*b=3 m/i })).toBeChecked();
+    expect(screen.queryByText("run-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("trust-1")).not.toBeInTheDocument();
+    expect(screen.queryByText("report-1")).not.toBeInTheDocument();
   });
 
   it("changes the contextual inspector without inventing validation or trust", async () => {
@@ -160,8 +174,34 @@ describe("durable research study workspace", () => {
   it("creates a Study only after receiving an identifier and navigates to it", async () => {
     vi.mocked(api).mockResolvedValueOnce({ id: "new-study" });
     render(<ResearchStudy />);
+    fireEvent.change(screen.getByLabelText("Study title"), { target: { value: "  Valid persisted study  " } });
     fireEvent.click(screen.getByRole("button", { name: "Create persisted study" }));
     await waitFor(() => expect(push).toHaveBeenCalledWith("/app/studies/new-study"));
+    const call = vi.mocked(api).mock.calls.find(([path]) => path === "/api/studies");
+    expect(JSON.parse(String(call?.[1]?.body)).title).toBe("Valid persisted study");
+  });
+
+  it("shows an accessible inline error and makes no API request for an empty Study title", async () => {
+    render(<ResearchStudy />);
+    const title = screen.getByLabelText("Study title");
+    fireEvent.change(title, { target: { value: "" } });
+    fireEvent.click(screen.getByRole("button", { name: "Create persisted study" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Study title is required.");
+    expect(title).toHaveAttribute("aria-invalid", "true");
+    expect(title).toHaveAttribute("aria-describedby", "study-title-error");
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    expect(title).toHaveValue("");
+    expect(screen.getByRole("button", { name: "Create persisted study" })).toBeEnabled();
+  });
+
+  it("rejects a whitespace-only Study title without sending an API request", async () => {
+    render(<ResearchStudy />);
+    const title = screen.getByLabelText("Study title");
+    fireEvent.change(title, { target: { value: "   " } });
+    fireEvent.click(screen.getByRole("button", { name: "Create persisted study" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent("Study title is required.");
+    expect(vi.mocked(api)).not.toHaveBeenCalled();
+    expect(title).toHaveValue("   ");
   });
 
   it("keeps the create form available with a readable failure", async () => {
@@ -211,6 +251,37 @@ describe("durable research study workspace", () => {
     expect(screen.getByLabelText("Research report summary")).toHaveTextContent("Persisted pyramid study");
     expect(screen.getByLabelText("Research report summary")).toHaveTextContent("Design 01");
     expect(screen.getByLabelText("Research report summary")).toHaveTextContent("accepted");
+  });
+
+  it("downloads a JSON Report through the authenticated export endpoint and confirms the start", async () => {
+    vi.mocked(download).mockResolvedValueOnce({ blob: new Blob(["report"]), disposition: "attachment; filename=report.json" });
+    render(<ResearchStudy studyId="study-report" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Download JSON" }));
+    await waitFor(() => expect(vi.mocked(download)).toHaveBeenCalledWith("/api/v2/reports/report-1/exports/json"));
+    expect(vi.mocked(startArtifactDownload)).toHaveBeenCalledWith(expect.objectContaining({ blob: expect.any(Blob) }), "asre-study-study-report.json", "Report download failed. Please try again.");
+    expect(await screen.findByRole("status")).toHaveTextContent("JSON report download started.");
+  });
+
+  it.each(["pdf", "csv"] as const)("uses the same safe Report download path for %s", async (format) => {
+    vi.mocked(download).mockResolvedValueOnce({ blob: new Blob([format]), disposition: null });
+    render(<ResearchStudy studyId="study-report" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: `Download ${format.toUpperCase()}` }));
+    await waitFor(() => expect(vi.mocked(download)).toHaveBeenCalledWith(`/api/v2/reports/report-1/exports/${format}`));
+    expect(vi.mocked(startArtifactDownload)).toHaveBeenCalledWith(expect.anything(), `asre-study-study-report.${format}`, "Report download failed. Please try again.");
+  });
+
+  it.each([new Error("The artifact is unavailable."), null])("shows readable Report download failure feedback", async (failure) => {
+    if (failure) vi.mocked(download).mockRejectedValueOnce(failure);
+    else {
+      vi.mocked(download).mockResolvedValueOnce({ blob: new Blob([]), disposition: null });
+      vi.mocked(startArtifactDownload).mockImplementationOnce(() => { throw new Error("Report download failed. Please try again."); });
+    }
+    render(<ResearchStudy studyId="study-report" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Download JSON" }));
+    expect(await screen.findByRole("alert")).toHaveTextContent(failure ? failure.message : "Report download failed. Please try again.");
   });
 
   it("labels rerunning analysis as a new persisted analysis", async () => {
