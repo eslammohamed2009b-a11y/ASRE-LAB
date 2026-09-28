@@ -1,146 +1,250 @@
 # ASRE-Lab
 
-**Autonomous Smart Reverse Engineering Laboratory** — an engineering research platform that connects parametric design, bounded physics-based simulation, evidence capture, and reviewable engineering decisions.
+**Autonomous Smart Reverse Engineering Laboratory**
 
-[Live Platform](https://asre-lab.vercel.app) · [Production API](https://api.23-88-125-110.sslip.io) · [Technical Documentation](docs/) · [License](LICENSE)
+ASRE-Lab is an engineering research platform for controlled design comparison. It creates parametric alternatives, runs supported physical models, stores the results and scientific evidence, compares designs, and keeps the final human decision connected to the data that produced it.
 
-ASRE-Lab is built for the point where an engineering question becomes a reproducible study. Instead of leaving design inputs, solver settings, results, evidence, and recommendations scattered across disconnected tools, it keeps them in one traceable workflow with explicit assumptions and boundaries.
+Built by **Eslam Mohamed** in 2026.
 
-## The Problem
+[Live platform](https://asre-lab.vercel.app) · [Research quickstart](REAL_RESEARCH_QUICKSTART.md) · [Documentation](docs/README.md) · [Scientific scope](docs/SCIENTIFIC_SCOPE.md) · [License](LICENSE)
 
-Individual engineering researchers often move between parametric geometry, numerical tools, notebooks, spreadsheets, and ad-hoc reports. That makes it difficult to preserve what was simulated, why a model was considered valid, which evidence supports a conclusion, and how a later design iteration relates to earlier work.
+## Why I built it
 
-ASRE-Lab brings those steps together without pretending that automation replaces engineering judgment.
+The project started while I was working on a research idea about the engineering characteristics of the Giza pyramids.
 
-## What I Built
+I did not want to choose a theory about the pyramids and then try to prove it. I wanted to study the geometry itself. The question was simple: if a structure was intended to perform well for a physical purpose, what geometry would work best and how close would the real structure be to that geometry?
 
-The platform provides an authenticated workspace for creating supported parametric designs, choosing a bounded solver, checking inputs against declared validity rules, dispatching durable computation, and collecting the resulting evidence into decisions and reports.
+Testing many accurate physical models was not practical. That led to the main idea behind ASRE-Lab: create controlled digital alternatives, run the same physical model on each one, and compare the results.
 
-```text
-Research question
-  → Parametric design
-  → Physics-based evaluation
-  → Evidence capture
-  → Analysis and decision support
-  → Reviewable iteration and report
-```
+The important part is the comparison. One design gives one result. A controlled design space can show which parameters matter, which changes improve or worsen a result, and where trade-offs appear.
 
-Every stage is intentionally scoped to the models and data the implementation can actually support.
+## Core idea
 
-## What Happens During an Experiment?
+I call the approach **reverse engineering by contrast**.
 
-1. A researcher describes a supported parametric design and stores the generated design record and private CAD artifacts.
-2. They select a runnable solver, material, geometry, and boundary conditions from the registry-backed capability set.
-3. The application evaluates declared validity rules before execution and blocks invalid configurations.
-4. A sealed execution record dispatches the simulation to a separate worker. Progress, status, results, and field artifacts are retained as owner-scoped records.
-5. The researcher reviews solver results, validity findings, benchmark and convergence inputs, then creates Scientific Trust evidence.
-6. Evidence can inform deterministic analysis and a reviewable decision. A human records the decision before a research report is generated.
+The original geometry is treated as a reference. The system creates controlled alternatives around it. The alternatives are tested under the same declared physical and numerical conditions. The results are then compared.
 
-The workflow is designed to preserve context, not to turn a numerical result into an unreviewed engineering conclusion.
-
-## Engineering Capabilities
-
-ASRE-Lab ships bounded numerical models rather than a general-purpose industrial simulation suite.
-
-| Family | Current implemented scope |
-| --- | --- |
-| Thermal conduction | Steady-state finite-difference conduction in bounded 1D and uniform cubic-grid scenarios, plus a separate masked-grid solid square-pyramid model. |
-| Linear structural mechanics | 1D axial-bar and Euler–Bernoulli cantilever-beam analysis. |
-| Modal analysis | SDOF mass-spring frequency and bounded 1D cantilever eigenvalue analysis. |
-| Acoustics | Straight, lossless 1D plane-wave duct analysis. |
-| Electrostatics | 2D rectangular-grid electrostatic potential and electric-field calculation. |
-| Laminar flow | Bounded plane-Poiseuille channel flow plus real steady 3D incompressible Newtonian laminar internal flow on certified CAD-derived hex-dominant/polyhedral FV meshes using OpenFOAM Foundation 14 (`20260724`). |
-| Thermal–structural workflow | Explicit one-way, sequential coupling for compatible bounded 1D cases. |
-
-The solver registry is the authoritative capability source. These models do **not** claim general or unbounded 3D FEA/CFD, turbulence, nonlinear plasticity, industrial certification, or bidirectional general multiphysics. The [scientific trust documentation](docs/SCIENTIFIC_TRUST.md) describes the supported domains and exclusions in more detail.
-
-## Design Generation and Execution
-
-Supported design requests become typed parametric records and can produce private STEP/STL artifacts through CadQuery/OCP. FastAPI owns the API boundary, validation, authorization, and persistence contracts. Redis/Valkey carries asynchronous work to a separate Celery worker, where engineering computation runs independently of the web request.
-
-This separation makes execution status, retries, cancellation, and results observable without exposing private files or server paths to the browser.
-
-## Engineering Intelligence, Evidence, and Scientific Trust
-
-ASRE-Lab persists the context needed to inspect a result later: normalized inputs, solver identity and version, validity findings, convergence information, evidence records, artifacts, and provenance metadata. Where applicable, generated artifacts and field data are checksummed and linked to owner-scoped records.
-
-The analysis layer provides deterministic descriptive statistics, associations, first-order sensitivity estimates, Pareto/trade-off views, transparent ranking, and evidence-linked recommendations. **Correlation indicates association; it does not establish physical causation.** Proposed design changes are hypotheses for review, not guaranteed improvements.
-
-AI may assist with supported natural-language design interpretation and evidence-grounded explanation. It is not treated as physics validation, hidden evidence, autonomous approval, or a substitute for an engineer's review. Human action is required for engineering decisions.
-
-For the underlying contracts, see [reproducible and reliable execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md), [authentication and founding-user behavior](docs/AUTH_AND_FOUNDING_USERS.md), and the [frontend integration guide](docs/FRONTEND_INTEGRATION.md).
-
-## Production Architecture
+This does not prove why an original designer made a certain choice. It shows measurable relationships between design changes and physical behavior.
 
 ```mermaid
-flowchart TD
-    B[Browser] --> F[Next.js frontend\nVercel]
-    F --> A[FastAPI API\nHetzner VPS]
-    A --> Q[Redis / Valkey queue]
-    Q --> W[Celery worker]
-    Q --> CFW[Dedicated CFD worker - OpenFOAM Foundation 14]
-    W --> S[Engineering solvers]
-    CFW --> CFD[Certified CAD-derived FV solver]
-    A --> DB[Supabase\nAuth · PostgreSQL · private Storage]
-    W --> DB
-    CFW --> DB
-    C[Caddy\nTLS / reverse proxy] --> A
+flowchart LR
+    Q[Research question] --> D[Controlled design space]
+    D --> C[CAD variants]
+    C --> P[Physics setup]
+    P --> R[Comparative runs]
+    R --> A[Analysis and evidence]
+    A --> T[Scientific Trust]
+    T --> H[Human decision]
+    H --> O[Research report]
 ```
 
-- **Frontend:** Next.js on Vercel.
-- **Backend compute:** FastAPI, a normal Celery worker, a dedicated `cfd`-queue OpenFOAM worker, persistent Redis/Valkey, and Caddy on a Hetzner VPS.
-- **Data and identity:** Supabase Auth, PostgreSQL, and private Storage.
-- **Transport security:** Caddy terminates TLS for the production API.
-- **Source control and CI:** GitHub.
+## What the product does
 
-The current production services are available at [asre-lab.vercel.app](https://asre-lab.vercel.app) and [api.23-88-125-110.sslip.io](https://api.23-88-125-110.sslip.io). Browser-visible configuration contains only the API and Supabase public coordinates; backend service credentials remain server-side.
+The current product has a public landing page, authentication, a persisted research dashboard, and a guided study workspace.
 
-## Reliability and Validation
+A study moves through eight visible stages:
 
-The repository includes unit, integration, benchmark, API-contract, migration, browser, and real-service validation. The production path has been exercised with Supabase authentication, owner isolation, private artifact access, a separate Redis/Celery worker, HTTPS, report export, and browser-based workflow checks.
+1. **Question**
+   Define the research question, hypothesis, and study context.
 
-Validation evidence is deliberately kept closer to the code and operational documentation rather than reproduced as a large status table here. Useful starting points:
+2. **Design**
+   Resolve structured parameters, create a design space, generate controlled variants, and persist CAD artifacts.
 
-- [Production configuration](docs/PRODUCTION_CONFIGURATION.md)
-- [Frontend testing](docs/FRONTEND_TESTING.md)
-- [Scientific trust](docs/SCIENTIFIC_TRUST.md)
-- [Reproducible and reliable execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md)
+3. **Physics**
+   Choose a supported model and define material, boundary conditions, and numerical settings.
 
-Tracked Supabase migrations are maintained through **014** in `backend/supabase/migrations/`.
+4. **Validation**
+   Review what varies, what stays constant, model assumptions, settings, and scientific limits before execution.
 
-## Current Scope and Limitations
+5. **Run**
+   Start durable simulations, monitor progress, inspect partial failures, and keep completed results.
 
-ASRE-Lab is intentionally precise about its boundaries:
+6. **Evidence**
+   Review results, analysis, numerical evidence, field evidence, validity information, and convergence information.
 
-- Solvers run only within their declared geometry, material, boundary-condition, and validity envelopes.
-- It is not arbitrary industrial 3D multiphysics, arbitrary-mesh FEA/CFD, or a certification tool.
-- Some models are steady, linear, one-dimensional, or regular-grid by design; their outputs must be interpreted in that context.
-- `pyramid_thermal_conduction_v1` uses a resolution-dependent Cartesian staircase mask of a parametric square pyramid. It is geometry-sensitive, but it does not consume CAD meshes and is not general 3D FEA.
-- Recommendations, rankings, and proposals remain reviewable decision support. They do not establish causality or replace engineering responsibility.
-- Reproducibility depends on retaining compatible inputs, solver versions, and physical-model assumptions; incompatible cases are reported rather than silently compared.
+7. **Decision**
+   Build an evidence-grounded decision basis and require an explicit human action.
 
-## Repository Structure
+8. **Report**
+   Generate a persisted research summary and export PDF, JSON, or CSV.
+
+The workspace can be reopened after refresh or sign-in. Study state is stored on the server rather than being treated as temporary browser state.
+
+See [Product workflow](docs/PRODUCT_WORKFLOW.md) for the frontend and user journey.
+
+## Frontend
+
+The frontend is a Next.js application deployed on Vercel.
+
+The main goal of the interface is to make the research state readable without hiding the technical details. Human labels such as `Design 01` are used for navigation while UUIDs remain available for traceability. The pre-run view separates variables from controlled conditions. Results keep the design, simulation, solver, units, convergence state, evidence, decision, and report connected.
+
+The UI also handles persisted study recovery, async job polling, authenticated downloads, validation errors, safe backend errors, and cross-study state isolation.
+
+The main guided v1 workflow currently focuses on the controlled square-pyramid thermal study. The backend has a broader solver registry for other bounded research models.
+
+## Engineering and scientific scope
+
+ASRE-Lab does not treat every simulation request as valid. Each solver has a declared capability entry with supported geometry, equations, numerical method, required inputs, outputs, known limits, and validation status.
+
+The current codebase includes bounded capabilities across:
+
+- steady thermal conduction
+- geometry-aware square-pyramid thermal conduction
+- 1D linear structural mechanics
+- 1D modal analysis
+- 1D duct acoustics
+- 2D electrostatics
+- 2D laminar channel flow
+- CAD-derived 3D thermal FEM
+- CAD-derived 3D linear elasticity FEM
+- CAD-derived 3D modal FEM
+- CAD-derived 3D acoustic Helmholtz FEM
+- CAD-derived 3D laminar internal-flow CFD with OpenFOAM
+- one-way thermal to structural coupling
+
+The 3D CAD-mesh and OpenFOAM capabilities are intentionally bounded and partially validated. They are not presented as general industrial FEA or CFD.
+
+The solver registry in `backend/app/module2_simulation/solver_registry.py` is the technical source of truth.
+
+See [Scientific scope](docs/SCIENTIFIC_SCOPE.md) and [Scientific Trust](docs/SCIENTIFIC_TRUST.md).
+
+## Evidence and Scientific Trust
+
+A numerical result is not treated as a scientific conclusion by itself.
+
+ASRE-Lab keeps traceable records around the result, including:
+
+- normalized inputs
+- design and simulation identity
+- solver and version
+- validity findings
+- scalar numerical results
+- field artifacts where supported
+- run convergence
+- benchmark evidence where applicable
+- refinement evidence where applicable
+- analysis provenance
+- warnings and limitations
+
+Scientific Trust is a classification based on persisted evidence. It is not an AI confidence score.
+
+Iterative solver convergence is not the same as spatial refinement. A benchmark that was not run remains `NOT_RUN`. Missing evidence is not invented to make a result look stronger.
+
+AI can help interpret supported inputs or explain existing evidence. It is not used as a physics solver and it is not allowed to create physical evidence.
+
+A human action is required before a decision is treated as accepted, rejected, or sent back for modification.
+
+## Example study
+
+The main production study used a square pyramid with a fixed 2 m by 2 m base and concrete material. Height was varied across five controlled designs while the solver, material, boundary conditions, and numerical settings were held constant.
+
+The workflow produced:
+
+- five persisted design variants
+- CAD artifacts
+- five persisted thermal simulations
+- numerical and field evidence
+- iterative convergence records
+- a persisted comparative analysis
+- a human-reviewed decision
+- a generated report
+
+The point of the example is not the pyramid itself. It shows the full chain from a controlled design question to a traceable decision.
+
+## Architecture
+
+```mermaid
+flowchart LR
+    B[Browser] --> F[Next.js on Vercel]
+    F --> A[FastAPI API on Hetzner]
+    A --> Q[Redis / Valkey]
+    Q --> W[Celery workers]
+    Q --> C[Dedicated OpenFOAM worker]
+    W --> S[Bounded engineering solvers]
+    C --> OF[OpenFOAM Foundation 14]
+    A --> DB[Supabase Auth + PostgreSQL + private Storage]
+    W --> DB
+    C --> DB
+    X[Caddy TLS proxy] --> A
+```
+
+Main runtime parts:
+
+- **Frontend**: Next.js and React on Vercel
+- **API**: FastAPI
+- **Async execution**: Redis or Valkey and Celery
+- **Engineering compute**: Python numerical solvers and a dedicated OpenFOAM worker for the bounded 3D CFD path
+- **Data**: Supabase Auth, PostgreSQL, and private object storage
+- **TLS and reverse proxy**: Caddy
+- **Infrastructure**: Hetzner VPS and Docker Compose
+- **Source and CI**: GitHub
+
+See [Architecture](docs/ARCHITECTURE.md).
+
+## Testing and release state
+
+The project uses unit tests, integration tests, scientific benchmark tests, API tests, frontend behavior tests, type checking, production builds, and browser-based QA.
+
+The latest code-level release audit found and fixed issues in Evidence transport handling, comparative job status accounting, stale frontend responses, download error handling, and failure logging. After the final code patch there were no known P0, P1, or material P2 engineering defects.
+
+The final live human browser acceptance pass completed successfully against the production workflow with **no release blockers**. The tested v1 code baseline is:
+
+`f5558ede291810f32040c856ff78eab0efd77c1d`
+
+The application code is frozen at that baseline for v1. New product work belongs in a later version rather than changing the accepted v1 implementation.
+
+See [Validation and release](docs/VALIDATION_AND_RELEASE.md) for the exact status and verification gaps.
+
+## What ASRE-Lab does not claim
+
+ASRE-Lab is not:
+
+- a general industrial FEA suite
+- a general CFD package
+- an unrestricted multiphysics platform
+- a certification or safety approval tool
+- a replacement for engineering judgment
+- a system that turns correlation into causation
+- a system that lets AI create scientific evidence
+
+Every result must be read inside the limits of the model that produced it.
+
+## Repository structure
 
 | Path | Purpose |
 | --- | --- |
-| `frontend/` | Next.js product interface, Supabase browser session handling, and Playwright coverage. |
-| `backend/` | FastAPI services, solver registry, Celery tasks, persistence adapters, tests, and Supabase migration mirror. |
-| `database/` | SQL schema and migration assets used by the project. |
-| `docs/` | Scientific scope, architecture, reliability, product integration, and operational references. |
-| `deploy/` | Caddy and VPS deployment assets; no credentials are committed. |
-| `docker-compose.vps.yml` | Single-VPS production-style topology for API, worker, Redis, frontend, and Caddy. |
+| `frontend/` | Next.js product interface, authentication flow, research workspace, downloads, and frontend tests |
+| `backend/` | FastAPI services, solver registry, numerical solvers, evidence, analysis, workers, and backend tests |
+| `database/` | SQL schema and database migration assets |
+| `docs/` | Product, scientific, architecture, testing, integration, and operations documentation |
+| `deploy/` | Caddy and VPS deployment configuration |
+| `docker-compose*.yml` | Local, staging, and VPS service topology |
 
-## Running Locally
+## Documentation
 
-ASRE-Lab can run locally with the repository's Docker Compose configuration or with the frontend, API, worker, Redis, and a Supabase-compatible environment configured separately. Start with [production configuration](docs/PRODUCTION_CONFIGURATION.md) for required environment-variable names and service boundaries, then use the relevant frontend and backend test documentation for development workflows.
+Start with [docs/README.md](docs/README.md).
 
-Never commit credentials. The public frontend uses only `NEXT_PUBLIC_*` browser-safe settings; service-role and worker configuration belong on the backend only.
+Main project documents:
 
-## Live Project
+- [Project overview](docs/PROJECT_OVERVIEW.md)
+- [Product workflow and frontend](docs/PRODUCT_WORKFLOW.md)
+- [Scientific scope](docs/SCIENTIFIC_SCOPE.md)
+- [Architecture](docs/ARCHITECTURE.md)
+- [Validation and release](docs/VALIDATION_AND_RELEASE.md)
+- [Real research quickstart](REAL_RESEARCH_QUICKSTART.md)
+- [Scientific Trust](docs/SCIENTIFIC_TRUST.md)
+- [Reproducible execution](docs/REPRODUCIBLE_RELIABLE_EXECUTION.md)
 
-**Platform:** [https://asre-lab.vercel.app](https://asre-lab.vercel.app)
-**API:** [https://api.23-88-125-110.sslip.io](https://api.23-88-125-110.sslip.io)
+## Live project
+
+**Platform**
+https://asre-lab.vercel.app
+
+**Production API**
+https://api.23-88-125-110.sslip.io
 
 ## License
 
-ASRE-Lab is **proprietary, source-available software**. Public visibility permits technical inspection only; it does not grant permission to use, copy, modify, redistribute, deploy, train AI systems on, or create derivative works from the project. See [LICENSE](LICENSE) for the full terms.
+ASRE-Lab is proprietary source-available software. Public access allows technical inspection but does not grant permission to copy, modify, redistribute, deploy, train AI systems on, or create derivative works from the project.
+
+See [LICENSE](LICENSE).

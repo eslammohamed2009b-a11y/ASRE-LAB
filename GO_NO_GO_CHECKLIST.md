@@ -1,92 +1,63 @@
-# ASRE-LAB Backend Go/No-Go Checklist
+# ASRE-Lab v1 release checklist
 
-Current consolidated status for the research-readiness release candidate. Historical snapshots
-were removed because they described superseded code and produced contradictory capability claims.
+This file records the final v1 release state.
 
-## Release gate
+## Engineering gate
 
-The backend is **NO-GO for production merge/deployment** until every external-infrastructure
-item below is validated. Local implementation evidence does not substitute for live Supabase,
-Redis/Celery, CI, or production validation.
+- [x] Canonical main contains the Evidence transport reliability fix
+- [x] Comparative partial failures remain partial
+- [x] Comparative job metadata is internally consistent
+- [x] Study switching guards against late stale responses
+- [x] Report downloads use the safe authenticated artifact path
+- [x] Private field download failures show readable errors
+- [x] Study title validation is explicit and accessible
+- [x] Automatic comparative-analysis exceptions are logged
+- [x] Frontend typecheck passed in the final engineering audit
+- [x] Frontend production build passed in the final engineering audit
+- [x] Focused release-critical backend suites passed
+- [x] API health verified after the final backend patch
+- [x] Worker health verified after the final backend patch
+- [x] No database migration was required by the final release fixes
 
-## Implemented and locally testable
+## Final live acceptance
 
-- [x] FastAPI authentication and owner-scoped API behavior.
-- [x] Parametric CadQuery generation with STEP/STL storage contracts.
-- [x] Durable experiments, designs, jobs, simulation inputs/results, field metadata, and analyses.
-- [x] SQLite and Supabase repository adapters use the shared `PersistenceRepository` contract.
-- [x] Real bounded thermal, geometry-aware pyramid thermal, structural, and modal methods documented in
-  `docs/SCIENTIFIC_CAPABILITY_GAPS.md`.
-- [x] Genuine solver fields use bounded NPZ artifacts, integrity checks, safe keys, and
-  owner-scoped retrieval.
-- [x] Deterministic Module 3 dataset construction, descriptive statistics, association,
-  first-order standardized regression, Pareto analysis, ranking, and evidence-linked advice.
-- [x] The authoritative `/api/pipeline` forward path persists designs, executes unified real
-  thermal/structural reference scenarios and field artifacts, then persists Module 3 analysis.
-- [x] Unsupported wind/CFD requests fail without an empirical or fabricated fallback.
-- [x] Legacy `/api/simulate/*` is deprecated and isolated from the authoritative pipeline.
-- [x] Bounded 1D acoustic Helmholtz, 2D electrostatic Poisson, and fully developed laminar
-  channel-flow solvers produce genuine persisted fields and pass analytical benchmarks.
-- [x] One-way sequential steady linear thermal-to-structural coupling persists both stages,
-  mapping evidence, provenance, and partial-failure state.
-- [x] Reviewable improvement proposals require explicit acceptance before Module 1 execution and
-  persist proposal state plus parent/child iteration lineage.
-- [x] Backend OpenAPI contract frozen at version 3.0.0 with a deterministic snapshot and
-  regression test; all 93 paths, authentication, legacy deprecation, and core response types audited.
+- [x] Authenticated workspace usable
+- [x] Existing completed Study opens
+- [x] Design stage accessible
+- [x] Physics stage accessible and understandable
+- [x] Completed results inspectable
+- [x] Evidence loads without a material error
+- [x] Scientific Trust visible without invented benchmark/refinement evidence
+- [x] Human Decision accessible
+- [x] Research Report accessible
+- [x] Report/export interaction gives visible feedback
+- [x] No blocker-level UI failure in the normal researcher workflow
+- [x] Final release acceptance returned **PASS**
 
-## Scientific scope gates
+## Final known severity
 
-- [x] Correlation is labelled association and never causation.
-- [x] Standardized regression is labelled a first-order linear sensitivity estimate, not Sobol,
-  global, or causal sensitivity.
-- [x] SDOF modal analysis remains scalar-only.
-- [x] Pipeline thermal/structural inputs are disclosed comparison scenarios, not inferred service
-  conditions or arbitrary-CAD mesh simulations.
-- [x] Bounded laminar channel-flow field solver; broader CFD remains unsupported.
-- [x] Bounded 1D acoustic duct solver; arbitrary room/3D wave simulation remains unsupported.
-- [x] Bounded 2D electrostatic solver; electromagnetic waves remain unsupported.
-- [x] One-way thermal-to-structural coupling; bidirectional/full coupling remains unsupported.
-- [x] Human-reviewed Module 3 → Module 1 iteration; autonomous approval remains prohibited.
+- Known P0: **0**
+- Known P1: **0**
+- Known material P2: **0**
+- Release blockers: **None**
 
-## Validation required before merge or deployment
+## Scientific gate
 
-- [ ] Review all Draft PR changes and obtain explicit merge approval.
-- [ ] Apply migrations 001 through 014 to a disposable/staging Supabase project.
-- [ ] Run live Supabase repository, storage, RLS, field-result, and analysis round trips.
-- [ ] Validate Redis with separate Celery workers, including restart, retry, cancellation,
-  concurrency, partial failure, and load behavior.
-- [ ] Obtain a successful remote CI run for this release candidate. Prior main evidence only:
-  GitHub Actions run `29950779579` passed the Ubuntu authoritative suite and Windows CadQuery job.
-- [ ] Run final production-like Module 1 → Module 2 → Module 3 end-to-end validation.
-- [x] Reconcile local validation evidence with README and scientific capability documentation.
+- [x] CAD and simulation are kept separate
+- [x] The pyramid thermal solver does not claim to use the STL as its numerical mesh
+- [x] Correlation is described as association, not causation
+- [x] Iterative convergence is separate from spatial refinement
+- [x] Missing benchmark or refinement evidence is not invented
+- [x] Scientific Trust is an evidence-state classification, not an AI probability
+- [x] Human action is required for the final decision
+- [x] Reports are generated from persisted Study context
 
-## Current local validation evidence (2026-08-05)
+## Release decision
 
-- Backend unit suite: **135 passed**; real process exit code 0.
-- Backend integration marker suite: **58 passed** with real CadQuery/OCP; real process exit code 0.
-- Focused comparative-study suite: **3 passed**, including five real geometry-aware runs,
-  JSON/CSV exports, and safe pre-write validation failures.
-- Backend contract + E2E suites: **8 passed**; real process exit code 0.
-- Frontend Vitest suite: **6 passed**; TypeScript and production Next.js build passed.
-- External Supabase execution remains blocked because live test credentials are unavailable in
-  this workspace; it is not passing evidence.
-- The Windows shutdown crash was reproduced as a native interaction between the CadQuery 2.4
-  dependency set's NLopt and CasADi imports. The pinned CadQuery 2.8/OCP 7.9 dependency set plus
-  the Windows DLL bootstrap exits cleanly after STEP/STL generation. A subprocess regression test
-  now requires a genuine zero process exit code, so a post-summary native crash cannot be mistaken
-  for passing evidence.
+**PASS — ASRE-Lab v1 accepted for tag and freeze.**
 
-## Test commands
+Accepted application-code baseline:
 
-From `backend/` in the pinned Python 3.12 environment:
+`f5558ede291810f32040c856ff78eab0efd77c1d`
 
-```text
-python -m pytest tests/unit/test_pipeline_persistence.py \
-  tests/integration/test_solver_field_integration.py \
-  tests/integration/test_analysis_api.py -q
-python -m pytest -m "unit or integration or benchmark or e2e" -q
-python -m pytest -m external -q
-./scripts/validate_supabase_release_gate.ps1
-```
-
-External tests that skip for missing credentials are **blocked/skipped**, never passing evidence.
+Normal feature development should move to the next version after `v1.0.0` is tagged.

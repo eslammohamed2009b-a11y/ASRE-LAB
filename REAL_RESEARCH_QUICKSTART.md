@@ -1,17 +1,193 @@
-# ASRE-Lab real research quickstart
+# ASRE-Lab research quickstart
 
-This walkthrough uses the implemented square-pyramid geometry-aware thermal model. It does not claim CAD-mesh FEA or physical causation.
+This walkthrough uses the main guided v1 workflow with the geometry-aware square-pyramid thermal model.
 
-1. Sign in and choose **New Research Study**. Record a bounded research question, optional hypothesis, independent variable, controlled conditions, and outputs. The created study is persisted server-side and appears on the Research Studies dashboard.
-2. In **Design**, enter a convenience description such as `pyramid with a 2 m by 2 m base and 4 m height made of concrete`. Inspect the structured base length, height, slope, material, and the selected authoritative dimension pair. The server rejects inconsistent base/height/slope triples.
-3. In **Design Space**, choose height, a linear sweep from 1 m to 5 m, and five variants. Resolve the preview before generation. Confirm that the final table contains five distinct height values and full resolved parameter sets, then generate the persisted STL and STEP artifacts.
-4. In **Physics**, select all five designs and choose `pyramid_thermal_conduction_v1`. Declare material, base temperature, exposed-surface temperature, volumetric heat source, odd grid resolution, iteration limit, and tolerance.
-5. Build the pre-run comparison. Confirm that height appears under **VARIES** and material, boundary conditions, solver, and numerical settings appear under **HELD CONSTANT**. The model disclosure must say that this is a structured pyramid mask, not CAD-mesh FEA.
-6. Execute the durable batch. Partial failures remain visible and successful simulations are preserved. For each completed run inspect solver/version, equation, assumptions, warnings, benchmark evidence, convergence, numerical configuration, reproducibility hash, scalar metrics, and persisted field metadata.
-7. Open **Analysis**. Inspect dataset row/exclusion counts, missing values, constants, incompatible units, warnings, and dataset hash. Run descriptive statistics. Use correlation only when sample requirements are satisfied; association does not establish causation. Optionally configure first-order standardized regression sensitivity with explicit feature and target columns; it is linear association, not causal or global sensitivity. Add declared objectives before Pareto/ranking/recommendations.
-8. Review the parameter-versus-metric plot and select points to reveal their design and simulation evidence IDs. Export simulation CSV/JSON and the analysis dataset CSV/analysis JSON.
-9. Create the evidence-grounded decision and explicitly accept, reject, or request modification. Rankings depend on the selected objective direction and weight.
-10. Generate the research report and download PDF, JSON, or CSV. Missing evidence is reported as unavailable rather than invented.
-11. Sign out, sign back in, open **Research Studies**, and reopen the study by its server ID. Verify the persisted designs, simulations, analysis, decision, report, and counts.
+It is a bounded study. It is not CAD-mesh FEA and it does not prove physical causation.
 
-For spatial-convergence evidence, reproduce the identical physical scenario at three odd grid resolutions (for example 9, 17, and 25) without changing material or boundary conditions. Do not call a single-resolution result spatially converged.
+## 1. Create a Study
+
+Sign in and choose **New Research Study**.
+
+Use a clear title and research question.
+
+Example question:
+
+```text
+How does pyramid height affect the maximum steady-state temperature when the base, material, boundary conditions, and numerical settings are held constant?
+```
+
+The Study is persisted before the main workflow begins.
+
+## 2. Resolve the base design
+
+Open **Design**.
+
+A supported convenience input is:
+
+```text
+pyramid with a 2 m by 2 m base and 4 m height made of concrete
+```
+
+Inspect the resolved:
+
+- base length
+- height
+- slope
+- material
+- authoritative dimension pair
+
+The dependent dimension is re-derived by the server.
+
+## 3. Define the design space
+
+Choose a height sweep.
+
+For example:
+
+```text
+minimum: 1 m
+maximum: 5 m
+variants: 5
+```
+
+Resolve the final variants before generation.
+
+Confirm that the table contains five distinct heights and the expected controlled values.
+
+Generate the CAD variants.
+
+The Study should now contain persisted STEP and STL artifacts.
+
+## 4. Configure Physics
+
+Open **Physics**.
+
+For the main guided workflow choose:
+
+`pyramid_thermal_conduction_v1`
+
+Declare:
+
+- material
+- ambient temperature
+- base temperature
+- volumetric heat source
+- odd grid resolution
+- tolerance
+- maximum iterations
+
+## 5. Review before running
+
+Open **Validation** and build the pre-run comparison.
+
+Check that the intended variable appears under **varies**.
+
+Check that the following remain controlled:
+
+- material
+- boundary conditions
+- solver
+- numerical settings
+
+Read the model disclosure.
+
+The pyramid thermal solver uses a structured Cartesian mask built from the persisted dimensions. The displayed STL is a design artifact, not the solver mesh.
+
+## 6. Run the comparative batch
+
+Open **Run** and start the batch.
+
+Monitor:
+
+- status
+- progress
+- completed count
+- failed or partial count
+
+A partial simulation must remain visible as a partial result. It must not make the whole batch appear cleanly completed.
+
+Completed simulations are preserved.
+
+## 7. Inspect results
+
+For each completed simulation inspect:
+
+- design identity
+- simulation identity
+- solver and version
+- summary metrics
+- units
+- iterative convergence
+- governing equations
+- assumptions
+- warnings
+- field metadata where available
+- reproducibility information
+
+## 8. Review Evidence and analysis
+
+Open **Evidence**.
+
+Inspect the parameter-versus-metric view and the persisted analysis.
+
+The analysis may include:
+
+- descriptive statistics
+- correlations
+- first-order standardized regression sensitivity
+- ranking and Pareto results when objectives are configured
+
+Correlation is association. It is not proof of causation.
+
+Automatic comparative analysis and a later researcher-requested analysis remain separate persisted records.
+
+## 9. Review Scientific Trust
+
+For a selected simulation inspect:
+
+- validity
+- benchmark state
+- run convergence
+- refinement state
+- limitations
+- linked evidence
+
+Do not treat iterative convergence as spatial refinement.
+
+If a benchmark or refinement study was not run, its state should remain `NOT_RUN`.
+
+## 10. Record the human decision
+
+Create the decision basis.
+
+Review the designs, objective, results, analysis, evidence, Trust, and limitations.
+
+Then explicitly choose:
+
+- Accept
+- Reject
+- Request modification
+
+The system does not make this action automatically.
+
+## 11. Generate the report
+
+Open **Report**.
+
+Review the in-app summary.
+
+Download the report as:
+
+- PDF
+- JSON
+- CSV
+
+The file should be generated from the persisted Study and decision state.
+
+## 12. Reopen the Study
+
+Refresh the page or return to the dashboard.
+
+Reopen the Study and verify that the designs, simulations, analysis, decision, and report are still present.
+
+For an actual spatial-refinement study, repeat the same physical scenario at at least three suitable grid resolutions without changing the controlled physics. A single converged run is not spatial-convergence evidence.
