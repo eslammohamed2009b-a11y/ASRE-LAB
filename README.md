@@ -4,7 +4,7 @@
 
 ASRE-Lab is an engineering research platform for controlled design comparison. It creates parametric alternatives, runs supported physical models, stores the results and scientific evidence, compares designs, and keeps the final human decision connected to the data that produced it.
 
-Built by **Eslam Mohamed** in 2026.
+Built by **Eslam M Badawi** in 2026.
 
 [Live platform](https://asre-lab.vercel.app) · [Research quickstart](REAL_RESEARCH_QUICKSTART.md) · [Documentation](docs/README.md) · [Scientific scope](docs/SCIENTIFIC_SCOPE.md) · [License](LICENSE)
 
@@ -12,7 +12,7 @@ Built by **Eslam Mohamed** in 2026.
 
 The project started while I was working on a research idea about the engineering characteristics of the Giza pyramids.
 
-I did not want to choose a theory about the pyramids and then try to prove it. I wanted to study the geometry itself. The question was simple: if a structure was intended to perform well for a physical purpose, what geometry would work best and how close would the real structure be to that geometry?
+My focus was the geometry itself. The question was simple: if a structure was intended to perform well for a physical purpose, what geometry would work best and how close would the real structure be to that geometry?
 
 Testing many accurate physical models was not practical. That led to the main idea behind ASRE-Lab: create controlled digital alternatives, run the same physical model on each one, and compare the results.
 
