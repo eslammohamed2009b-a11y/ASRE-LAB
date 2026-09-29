@@ -46,16 +46,18 @@ def _resolve_variant(base: DesignParameters, changes: dict[str, float]) -> Desig
 
 def build_design_space(request: DesignSpaceRequest) -> list[dict]:
     axes = [_values(rule) for rule in request.parameters]
-    variant_count = 1
-    for axis in axes:
-        variant_count *= len(axis)
+    variant_count = len(axes[0]) if request.pair_explicit_values else 1
+    if not request.pair_explicit_values:
+        for axis in axes:
+            variant_count *= len(axis)
     if variant_count > MAX_DESIGN_SPACE_VARIANTS:
         raise ValueError(
             f"Design space contains {variant_count} variants; maximum is {MAX_DESIGN_SPACE_VARIANTS}"
         )
 
     variants: list[dict] = []
-    for index, coordinates in enumerate(product(*axes)):
+    coordinates_iter = zip(*axes) if request.pair_explicit_values else product(*axes)
+    for index, coordinates in enumerate(coordinates_iter):
         changes = {
             rule.field: value for rule, value in zip(request.parameters, coordinates)
         }

@@ -145,6 +145,7 @@ class SweepParameter(BaseModel):
 class DesignSpaceRequest(BaseModel):
     base_params: DesignParameters
     parameters: list[SweepParameter] = Field(min_length=1, max_length=2)
+    pair_explicit_values: bool = False
     seed: int = Field(default=0, ge=0, le=2_147_483_647)
 
     @model_validator(mode="after")
@@ -152,6 +153,13 @@ class DesignSpaceRequest(BaseModel):
         names = [parameter.field for parameter in self.parameters]
         if len(names) != len(set(names)):
             raise ValueError("Design-space parameter fields must be unique")
+        if self.pair_explicit_values:
+            if len(self.parameters) != 2:
+                raise ValueError("Paired explicit values require exactly two parameters")
+            if any(parameter.method != "explicit" for parameter in self.parameters):
+                raise ValueError("Paired explicit values require both parameters to use explicit values")
+            if len(self.parameters[0].values) != len(self.parameters[1].values):
+                raise ValueError("Paired explicit values require equal-length value lists")
         return self
 
 
@@ -206,6 +214,7 @@ class BatchGenerateRequest(BaseModel):
     variation_range_pct: float = Field(0.2, gt=0, le=1.0)
     experiment_id: str | None = None
     sweep_parameters: list[SweepParameter] = Field(default_factory=list, max_length=2)
+    pair_explicit_values: bool = False
     seed: int = Field(default=0, ge=0, le=2_147_483_647)
 
     @field_validator("vary_fields")
@@ -222,6 +231,13 @@ class BatchGenerateRequest(BaseModel):
         names = [parameter.field for parameter in self.sweep_parameters]
         if len(names) != len(set(names)):
             raise ValueError("Sweep parameter fields must be unique")
+        if self.pair_explicit_values:
+            if len(self.sweep_parameters) != 2:
+                raise ValueError("Paired explicit values require exactly two parameters")
+            if any(parameter.method != "explicit" for parameter in self.sweep_parameters):
+                raise ValueError("Paired explicit values require both parameters to use explicit values")
+            if len(self.sweep_parameters[0].values) != len(self.sweep_parameters[1].values):
+                raise ValueError("Paired explicit values require equal-length value lists")
         return self
 
 

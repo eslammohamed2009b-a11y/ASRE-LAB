@@ -247,6 +247,42 @@ describe("durable research study workspace", () => {
     expect(review).not.toHaveTextContent("[object Object]");
   });
 
+  it("exposes an editable maximum-iterations field and sends it in the comparison payload", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Physics" }));
+    const maximumIterations = screen.getByLabelText("Maximum iterations");
+    expect(maximumIterations).toHaveValue(2000);
+    expect(screen.getByRole("complementary", { name: "Study inspector" })).toHaveTextContent("Maximum iterations");
+    fireEvent.change(maximumIterations, { target: { value: "2500" } });
+    fireEvent.click(screen.getByRole("button", { name: "Build pre-run comparison" }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/studies/study-1/comparison-plan", expect.anything()));
+    const call = vi.mocked(api).mock.calls.find(([path]) => path === "/api/studies/study-1/comparison-plan");
+    expect(JSON.parse(String(call?.[1]?.body)).numerical_settings.max_iterations).toBe(2500);
+  });
+
+  it("previews and generates the same ordered paired-explicit definition", async () => {
+    render(<ResearchStudy studyId="study-1" />);
+    await screen.findByRole("heading", { name: "Persisted pyramid study" });
+    fireEvent.click(screen.getByRole("button", { name: "Design, complete" }));
+    fireEvent.click(screen.getByRole("button", { name: "Parse into editable parameters" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Define design space" }));
+    fireEvent.change(screen.getByLabelText("Method"), { target: { value: "explicit" } });
+    fireEvent.change(screen.getByLabelText("Comma-separated values"), { target: { value: "10, 20" } });
+    fireEvent.click(screen.getByRole("checkbox", { name: /Add a second parameter/i }));
+    fireEvent.change(screen.getByLabelText("Second method"), { target: { value: "explicit" } });
+    fireEvent.change(screen.getByLabelText("Second comma-separated values"), { target: { value: "30, 40" } });
+    fireEvent.change(screen.getByLabelText("Combination mode"), { target: { value: "paired_explicit" } });
+    expect(screen.getByLabelText("Two-parameter sampling")).toHaveTextContent("2 first values + 2 second values = 2 ordered paired variants");
+    fireEvent.click(screen.getByRole("button", { name: "Resolve selected sampling mode" }));
+    await waitFor(() => expect(vi.mocked(api)).toHaveBeenCalledWith("/api/design/design-space/preview", expect.anything()));
+    const previewCall = vi.mocked(api).mock.calls.find(([path]) => path === "/api/design/design-space/preview");
+    expect(JSON.parse(String(previewCall?.[1]?.body))).toMatchObject({ pair_explicit_values: true, parameters: [{ values: [10, 20] }, { values: [30, 40] }] });
+    fireEvent.click(await screen.findByRole("button", { name: "Generate 2 CAD variants" }));
+    const generationCall = vi.mocked(api).mock.calls.find(([path]) => path === "/api/design/generate-batch");
+    expect(JSON.parse(String(generationCall?.[1]?.body))).toMatchObject({ pair_explicit_values: true, sweep_parameters: [{ values: [10, 20] }, { values: [30, 40] }] });
+  });
+
   it("keeps human-readable design and result identities primary while retaining traceability IDs", async () => {
     render(<ResearchStudy studyId="study-1" />);
     await screen.findByRole("heading", { name: "Persisted pyramid study" });

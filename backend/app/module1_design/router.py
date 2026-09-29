@@ -295,7 +295,7 @@ def preview_design_space(payload: DesignSpaceRequest) -> DesignSpacePreviewRespo
         variants = build_design_space(payload)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    method = "grid" if len(payload.parameters) == 2 else payload.parameters[0].method
+    method = "paired_explicit" if payload.pair_explicit_values else ("grid" if len(payload.parameters) == 2 else payload.parameters[0].method)
     return DesignSpacePreviewResponse(
         method=method,
         seed=payload.seed,
@@ -448,6 +448,7 @@ def generate_batch(
             resolved_variants = build_design_space(DesignSpaceRequest(
                 base_params=payload.base_params,
                 parameters=payload.sweep_parameters,
+                pair_explicit_values=payload.pair_explicit_values,
                 seed=payload.seed,
             ))
         except ValueError as exc:
@@ -459,6 +460,7 @@ def generate_batch(
         study_metadata["design_space"] = {
             "seed": payload.seed,
             "sweep_parameters": [item.model_dump(mode="json") for item in payload.sweep_parameters],
+            "pair_explicit_values": payload.pair_explicit_values,
             "variant_count": requested_count,
             "base_params": payload.base_params.model_dump(mode="json"),
         }
