@@ -60,7 +60,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <p className="workspace-nav-label">Workspace</p>
       <nav className="workspace-nav" aria-label="Application navigation">{workspaceNavigation.map((item, index) => <Link key={item.href} href={item.href} data-active={isWorkspaceNavigationActive(pathname, item.href)}><span className="workspace-nav-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span><span>{item.label}</span></Link>)}</nav>
       <div className="workspace-account">
-        <div className="workspace-account-identity"><span className="workspace-account-avatar" aria-hidden="true">{(account?.email || session.user.email || "A").slice(0, 1).toUpperCase()}</span><span><strong>{account?.email || session.user.email}</strong><small>Authenticated researcher</small></span></div>
+        <div className="workspace-account-identity"><span className="workspace-account-avatar" aria-hidden="true">{(account?.email || session.user.email || "A").slice(0, 1).toUpperCase()}</span><span><strong>{account?.email || session.user.email || "Guest researcher"}</strong><small>Authenticated researcher</small></span></div>
         {account?.founding_user && <p className="workspace-account-note">Founding User · First 1,000 #{account.founding_user_number}</p>}
         {account?.usage_access_period === "early_access" && <p className="workspace-account-note">Early access · Unlimited usage</p>}
         <button type="button" className="workspace-logout" disabled={signingOut} onClick={async () => { setSigningOut(true); await getSupabase().auth.signOut(); router.replace("/"); }}>{signingOut ? "Signing out…" : "Log out"}</button>

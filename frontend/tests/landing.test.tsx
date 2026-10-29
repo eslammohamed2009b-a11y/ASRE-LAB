@@ -6,8 +6,8 @@ describe("public landing page", () => {
     render(<HomePage />);
     expect(screen.getByRole("heading", { name: "Design it. Simulate it. Compare it. Understand it." })).toBeInTheDocument();
     expect(screen.getByText("Turn one engineering design into a complete, evidence-backed comparative study.")).toBeInTheDocument();
-    expect(screen.getAllByRole("link", { name: "Start an Engineering Study" })).toHaveLength(3);
-    expect(screen.getAllByRole("link", { name: "Start an Engineering Study" })[0]).toHaveAttribute("href", "/auth/sign-up");
+    expect(screen.getAllByRole("link", { name: "Start ASRE-Lab" })).toHaveLength(3);
+    expect(screen.getAllByRole("link", { name: "Start ASRE-Lab" })[0]).toHaveAttribute("href", "/auth/log-in");
     expect(screen.getByRole("link", { name: "See How It Works" })).toHaveAttribute("href", "#workflow");
     expect(screen.getByRole("heading", { name: "What can you actually do with ASRE-Lab?" })).toBeInTheDocument();
     expect(screen.getByRole("heading", { name: "From one idea to a complete engineering study" })).toBeInTheDocument();

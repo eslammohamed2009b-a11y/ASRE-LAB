@@ -1,7 +1,7 @@
 import { test, expect } from "@playwright/test";
 import AxeBuilder from "@axe-core/playwright";
 
-const ready = Boolean(process.env.E2E_USER_EMAIL && process.env.E2E_USER_PASSWORD && process.env.NEXT_PUBLIC_FASTAPI_API_URL && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
+const ready = Boolean(process.env.NEXT_PUBLIC_FASTAPI_API_URL && process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY);
 
 test("public navigation and accessibility", async ({ page }) => {
   await page.goto("/");
@@ -12,15 +12,15 @@ test("public navigation and accessibility", async ({ page }) => {
   expect(results.violations).toEqual([]);
 });
 
-test("real Supabase session, protected dashboard, and logout", async ({ page }) => {
-  test.skip(!ready, "Real-service E2E credentials are not configured.");
+test("anonymous Supabase session reaches the protected backend", async ({ page }) => {
+  test.skip(!ready, "Real-service E2E configuration is not available.");
   await page.goto("/auth/log-in");
-  await page.getByLabel("Email address").fill(process.env.E2E_USER_EMAIL!);
-  await page.getByLabel("Password").fill(process.env.E2E_USER_PASSWORD!);
-  await page.getByRole("button", { name: "Log in" }).click();
+  await page.getByRole("button", { name: "Start ASRE-Lab" }).click();
   await expect(page).toHaveURL(/\/app\/dashboard/);
-  await expect(page.getByText("SESSION ACTIVE")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Persisted studies" })).toBeVisible();
+  await expect(page.getByText("Guest researcher")).toBeVisible();
+  await expect(page.getByText("Unable to load your studies.")).toHaveCount(0);
   expect((await new AxeBuilder({ page }).analyze()).violations).toEqual([]);
-  await page.getByRole("button", { name: "Log Out" }).click();
+  await page.getByRole("button", { name: "Log out" }).click();
   await expect(page).toHaveURL("/");
 });
