@@ -54,10 +54,6 @@ This file records the final v1 release state.
 
 ## Release decision
 
-**PASS — ASRE-Lab v1 accepted for tag and freeze.**
+**PASS — ASRE-Lab v1 release acceptance recorded.**
 
-Accepted application-code baseline:
-
-`f5558ede291810f32040c856ff78eab0efd77c1d`
-
-Normal feature development should move to the next version after `v1.0.0` is tagged.
+The accompanying validation record captures the accepted checks and limitations. Subsequent repository changes require their own validation before release.

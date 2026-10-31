@@ -35,7 +35,7 @@ The solver registry in `backend/app/module2_simulation/solver_registry.py` is th
 
 ## Authentication and production
 
-- [Authentication and founding users](AUTH_AND_FOUNDING_USERS.md)
+- [Authentication](AUTHENTICATION.md)
 - [Production configuration](PRODUCTION_CONFIGURATION.md)
 - [VPS staging runbook](VPS_STAGING_RUNBOOK.md)
 

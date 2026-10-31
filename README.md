@@ -187,11 +187,7 @@ The project uses unit tests, integration tests, scientific benchmark tests, API 
 
 The latest code-level release audit found and fixed issues in Evidence transport handling, comparative job status accounting, stale frontend responses, download error handling, and failure logging. After the final code patch there were no known P0, P1, or material P2 engineering defects.
 
-The final live human browser acceptance pass completed successfully against the production workflow with **no release blockers**. The tested v1 code baseline is:
-
-`f5558ede291810f32040c856ff78eab0efd77c1d`
-
-The application code is frozen at that baseline for v1. New product work belongs in a later version rather than changing the accepted v1 implementation.
+The final live human browser acceptance pass completed successfully against the production workflow with **no release blockers**. The repository continues to evolve; the validation and release record documents the current validation state, release evidence, and known verification gaps without binding application code to one permanent baseline.
 
 See [Validation and release](docs/VALIDATION_AND_RELEASE.md) for the exact status and verification gaps.
 

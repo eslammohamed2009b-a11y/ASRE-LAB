@@ -47,14 +47,16 @@ replaced with a deprecation notice pointing here.
 12. `012_api_role_and_private_storage.sql` — grants Supabase API roles access
     to the RLS-protected application schema and provisions the private
     `design-files` artifact bucket.
-13. `013_accounts_and_founders.sql` — owner-readable account entitlements and
-    atomic, non-recycled Founding User ordinals for the first 1,000 accounts.
+13. `013_accounts_and_founders.sql` — historical account provisioning schema;
+    its legacy allocation fields are retired by 017.
 14. `014_simulation_geometry_inputs.sql` - immutable solver-geometry snapshots
     for reconstructing every persisted simulation input. Depends on 005.
 15. `015_scientific_evidence_record_types.sql` - permits the existing immutable
     Evidence envelope to persist validated scientific and lifecycle records.
 16. `016_study_evidence_record_types.sql` - permits immutable Study definition,
     linkage, DOE, and next-experiment evidence records. Depends on 015.
+17. `017_retire_founding_user_program.sql` - retires the legacy allocation
+    programme while preserving compatible account storage and RPC signature.
 
 Each file is idempotent (`create table if not exists`, `create index if
 not exists`, `drop policy/constraint if exists` before recreating) and
@@ -82,6 +84,7 @@ psql "$DATABASE_URL" -f database/migrations/013_accounts_and_founders.sql
 psql "$DATABASE_URL" -f database/migrations/014_simulation_geometry_inputs.sql
 psql "$DATABASE_URL" -f database/migrations/015_scientific_evidence_record_types.sql
 psql "$DATABASE_URL" -f database/migrations/016_study_evidence_record_types.sql
+psql "$DATABASE_URL" -f database/migrations/017_retire_founding_user_program.sql
 ```
 
 **These migrations have NOT been applied to any live Supabase project in

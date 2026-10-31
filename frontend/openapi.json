@@ -4899,39 +4899,6 @@
             ],
             "title": "Email"
           },
-          "founding_user": {
-            "type": "boolean",
-            "title": "Founding User"
-          },
-          "founding_user_number": {
-            "anyOf": [
-              {
-                "type": "integer",
-                "maximum": 1000.0,
-                "minimum": 1.0
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Founding User Number"
-          },
-          "usage_access": {
-            "type": "string",
-            "enum": [
-              "unlimited",
-              "standard"
-            ],
-            "title": "Usage Access"
-          },
-          "usage_access_period": {
-            "type": "string",
-            "enum": [
-              "early_access",
-              "standard"
-            ],
-            "title": "Usage Access Period"
-          },
           "created_at": {
             "type": "string",
             "title": "Created At"
@@ -4944,9 +4911,6 @@
         "type": "object",
         "required": [
           "user_id",
-          "founding_user",
-          "usage_access",
-          "usage_access_period",
           "created_at",
           "updated_at"
         ],

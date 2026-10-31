@@ -20,13 +20,11 @@ login/session/logout path when disposable E2E credentials are configured.
 ## Backend checks
 
 From the repository root with `backend/` on `PYTHONPATH`, run the existing unit,
-integration, E2E, external Supabase, migration, and contract suites. New account
+integration, E2E, external Supabase, migration, and contract suites. Account
 tests cover:
 
-- concurrent unique ordered allocation;
 - idempotent duplicate provisioning;
-- deletion without ordinal reuse;
-- no ordinal above 1,000;
+- inert legacy account fields after the retirement migration;
 - exact migration mirror bytes;
 - owner-scoped empty collections and pagination;
 - deterministic sorting and two-user isolation.
