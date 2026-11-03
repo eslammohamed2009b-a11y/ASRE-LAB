@@ -1667,20 +1667,6 @@ export interface components {
             user_id: string;
             /** Email */
             email?: string | null;
-            /** Founding User */
-            founding_user: boolean;
-            /** Founding User Number */
-            founding_user_number?: number | null;
-            /**
-             * Usage Access
-             * @enum {string}
-             */
-            usage_access: "unlimited" | "standard";
-            /**
-             * Usage Access Period
-             * @enum {string}
-             */
-            usage_access_period: "early_access" | "standard";
             /** Created At */
             created_at: string;
             /** Updated At */

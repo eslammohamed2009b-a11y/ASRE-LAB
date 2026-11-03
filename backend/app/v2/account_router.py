@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import Any, Literal
 
 from fastapi import APIRouter, Depends, Query
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 from app.core.auth import get_current_user
 from app.core.persistence import persistence_service
@@ -19,10 +19,6 @@ router = APIRouter(prefix="/api/v2", tags=["Backend V2 - Account and Collections
 class AccountResponse(BaseModel):
     user_id: str
     email: str | None = None
-    founding_user: bool
-    founding_user_number: int | None = Field(default=None, ge=1, le=1000)
-    usage_access: Literal["unlimited", "standard"]
-    usage_access_period: Literal["early_access", "standard"]
     created_at: str
     updated_at: str
 
@@ -44,7 +40,7 @@ _COLLECTION_TYPES = {
 
 
 def _provision_account(user_id: str, email: str | None) -> dict[str, Any]:
-    """Provision once. PostgreSQL uses one locked DB function; SQLite uses BEGIN IMMEDIATE."""
+    """Provision an owner-scoped account once without allocating entitlements."""
     now = datetime.now(timezone.utc).isoformat()
     if persistence_service.enabled:
         rows = persistence_service.client.rpc(
@@ -57,18 +53,10 @@ def _provision_account(user_id: str, email: str | None) -> dict[str, Any]:
         db.row_factory = sqlite3.Row
         db.execute("BEGIN IMMEDIATE")
         db.execute(
-            """create table if not exists asre_account_allocation_state(
-            singleton integer primary key check(singleton=1),
-            last_allocated_ordinal integer not null check(last_allocated_ordinal>=0))"""
-        )
-        db.execute(
-            """insert or ignore into asre_account_allocation_state(
-            singleton,last_allocated_ordinal) values(1,0)"""
-        )
-        db.execute(
             """create table if not exists asre_accounts(
             user_id text primary key,email text,founding_user_number integer unique,
-            usage_access text not null,usage_access_period text not null,
+            usage_access text not null default 'standard',
+            usage_access_period text not null default 'standard',
             created_at text not null,updated_at text not null)"""
         )
         existing = db.execute("select * from asre_accounts where user_id=?", (user_id,)).fetchone()
@@ -80,23 +68,14 @@ def _provision_account(user_id: str, email: str | None) -> dict[str, Any]:
                 )
             row = db.execute("select * from asre_accounts where user_id=?", (user_id,)).fetchone()
         else:
-            last_number = db.execute(
-                "select last_allocated_ordinal from asre_account_allocation_state where singleton=1"
-            ).fetchone()[0]
-            next_number = last_number + 1
-            db.execute(
-                "update asre_account_allocation_state set last_allocated_ordinal=? where singleton=1",
-                (next_number,),
-            )
-            ordinal = next_number if next_number <= 1000 else None
             db.execute(
                 "insert into asre_accounts values(?,?,?,?,?,?,?)",
                 (
                     user_id,
                     email,
-                    ordinal,
-                    "unlimited" if ordinal else "standard",
-                    "early_access" if ordinal else "standard",
+                    None,
+                    "standard",
+                    "standard",
                     now,
                     now,
                 ),
@@ -108,14 +87,9 @@ def _provision_account(user_id: str, email: str | None) -> dict[str, Any]:
 
 def _account_response(user: dict[str, Any]) -> AccountResponse:
     row = _provision_account(user["id"], user.get("email"))
-    number = row.get("founding_user_number")
     return AccountResponse(
         user_id=str(row.get("user_id") or row.get("id")),
         email=row.get("email"),
-        founding_user=number is not None,
-        founding_user_number=number,
-        usage_access=row["usage_access"],
-        usage_access_period=row["usage_access_period"],
         created_at=str(row["created_at"]),
         updated_at=str(row["updated_at"]),
     )

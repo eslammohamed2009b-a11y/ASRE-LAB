@@ -5,7 +5,7 @@ import {api} from "@/lib/api";
 
 vi.mock("@/lib/api",()=>({api:vi.fn()}));
 
-const dashboard={attempts:[],decisions:[],reports:[],account:{founding_user:false,founding_user_number:null,usage_access_period:"standard"}};
+const dashboard={attempts:[],decisions:[],reports:[]};
 const studies={items:[{id:"study-1",title:"Persisted study",status:"draft",updated_at:"2026-09-25T00:00:00Z",design_count:0,simulation_count:0,completed_run_count:0,failed_run_count:0,analysis_count:0,report_count:0}]};
 
 describe("research dashboard loading",()=>{

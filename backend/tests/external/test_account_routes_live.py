@@ -1,4 +1,4 @@
-"""Live Supabase proof for account entitlements and every owner-scoped collection."""
+"""Live Supabase proof for account provisioning and owner-scoped collections."""
 
 from __future__ import annotations
 
@@ -100,10 +100,11 @@ def test_account_entitlements_and_all_collection_routes_are_owner_scoped() -> No
             assert dashboard.status_code == 200
             assert dashboard.json()["account"]["user_id"] == owner
             assert other not in dashboard.text
+            assert {"founding_user", "founding_user_number", "usage_access", "usage_access_period"}.isdisjoint(account.json())
 
         original = (
             service.table("asre_accounts")
-            .select("founding_user_number,usage_access,usage_access_period")
+            .select("email")
             .eq("user_id", owner_a)
             .single()
             .execute()
@@ -112,19 +113,13 @@ def test_account_entitlements_and_all_collection_routes_are_owner_scoped() -> No
         with pytest.raises(Exception):
             (
                 user_a.table("asre_accounts")
-                .update(
-                    {
-                        "founding_user_number": 1,
-                        "usage_access": "unlimited",
-                        "usage_access_period": "early_access",
-                    }
-                )
+                .update({"email": "forged@asre.test"})
                 .eq("user_id", owner_a)
                 .execute()
             )
         unchanged = (
             service.table("asre_accounts")
-            .select("founding_user_number,usage_access,usage_access_period")
+            .select("email")
             .eq("user_id", owner_a)
             .single()
             .execute()

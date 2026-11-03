@@ -2,13 +2,9 @@
 
 ## Current state
 
-ASRE-Lab v1 has completed its engineering audit and final live release acceptance.
+ASRE-Lab v1 completed its engineering audit and final live release acceptance.
 
-The accepted application-code baseline is:
-
-`f5558ede291810f32040c856ff78eab0efd77c1d`
-
-That patch fixed the final known comparative-job metadata inconsistency found during the code audit.
+The final audit fixed the known comparative-job metadata inconsistency identified during the code review. This document records the validation evidence and known gaps for the repository as it evolves.
 
 At release acceptance:
 
@@ -18,7 +14,7 @@ At release acceptance:
 - final authenticated browser acceptance: **PASS**
 - release blockers: **None**
 
-The v1 application code is frozen at this baseline. Documentation-only presentation updates may follow without changing the accepted application behavior. New product features belong in a later version.
+The release evidence below is a recorded validation state. Follow-up changes require their own proportionate validation.
 
 ## Testing approach
 
@@ -157,7 +153,7 @@ Result:
 
 **Release blockers: None**
 
-The tested ASRE-Lab v1 workflow was accepted at commit `f5558ede291810f32040c856ff78eab0efd77c1d`.
+The tested ASRE-Lab v1 workflow was accepted with the validation evidence recorded here.
 
 ## Recorded verification limits
 
@@ -187,13 +183,6 @@ The v1 release would not have been accepted with:
 
 No such blocker remained at final release acceptance.
 
-## Freeze rule
+## Follow-up changes
 
-The accepted application-code baseline is frozen for v1.
-
-After the v1 tag:
-
-- do not add new v1 features
-- do not redesign the accepted workflow as part of v1
-- only consider an emergency v1 patch for a newly discovered material defect
-- put normal improvements, new solver work, competition-specific additions, and broader UX changes into the next version
+Preserve the accepted scientific workflow and release gates when making follow-up changes. Each change should be reviewed and validated against the repository state it is intended to ship.

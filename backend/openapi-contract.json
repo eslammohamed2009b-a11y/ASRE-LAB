@@ -1,6 +1,6 @@
 {
   "contract_version": "4.0.0-research-study-engine",
-  "openapi_sha256": "48f3a9a01f7a6ab3b0189b133dfa352fd146aa39b7a556e016e410315568f77c",
+  "openapi_sha256": "664ae69dcf5129b59273a4e685d6e45c5fb2efb8f7ae5e1037bea76932b05d70",
   "path_count": 126,
   "authentication": "OAuth2PasswordBearer on every /api route",
   "public_paths": ["/health", "/version"],

@@ -255,6 +255,6 @@ Core failures remain visible to the researcher.
 
 The final code-level engineering audit reported no known P0, P1, or material P2 defect after the latest fixes.
 
-The final authenticated browser acceptance pass completed with **PASS** and no release blockers. The accepted v1 application-code baseline is `f5558ede291810f32040c856ff78eab0efd77c1d`.
+The final authenticated browser acceptance pass completed with **PASS** and no release blockers. Current validation state and known gaps are recorded in [Validation and release](VALIDATION_AND_RELEASE.md).
 
 See [Validation and release](VALIDATION_AND_RELEASE.md).
